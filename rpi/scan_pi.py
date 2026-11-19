@@ -7622,6 +7622,589 @@ def main():
             'acc': gap(taken_at, parsed),
             'tell': gap(parsed, ended)}, overlapped=overlapped, whole=whole)
 
+    def watch_camera():
+        """What the camera can see this pass, settled (UpDown.watch): 'stalled',
+        'dark', 'seeing' when that has just changed, else None — said in the
+        log when it changes. Spends `looked`, the read handed over since the
+        last time this was asked."""
+        nonlocal looked, stall_held_said, stall_asked
+        # The phone, the GPS and what the camera can see, every pass, on the
+        # monotonic clock: the wall clock jumps by decades when NTP arrives,
+        # and a hold timed across that would write a minute's absence about
+        # a phone that was never gone. Every read here is a lock, a dict or
+        # a flag the frame below already set.
+        #
+        # The box's light is AutoGain's answer, and only where nothing
+        # tracks the corners — see the note under STALL_SAY.
+        sight = updown.watch(
+            time.monotonic(),
+            tracker.lost if tracker is not None else None,
+            gps_now(phone, gps_refused),
+            sight_now(frozen,
+                      auto_gain.lit if (tracker is None and auto_gain is not None)
+                      else None,
+                      looked),
+            auto_gain.bright if auto_gain is not None else None)
+        looked = False
+        if sight == 'stalled':
+            # Both are this stall's. A camera that came back by itself and
+            # stalls again in the same run is asked about afresh: kept from
+            # the last one, a stall this run had gone quiet over asked for
+            # a second restart seconds after the first, its own note unread.
+            stall_held_said = stall_asked = False
+            log('camera stalled: it has handed over the same picture, byte '
+                'for byte, for %ds. Nothing new can be read off it; the '
+                'panel says so, and once it has, this '
+                'goes quiet so the supervisor restarts the camera — unless '
+                'it did that less than %ds ago'
+                % (int(time.monotonic() - updown.camera_since), STALL_AGAIN))
+        elif sight == 'dark':
+            log('too dark to be sure of seeing a card arrive: the box has '
+                'held nothing the gain counts as a lit screen for %ds '
+                '(screen brightness %s/%d), where a light-mode card '
+                'arriving does not move the motion gate far enough to send '
+                'a read — is the phone in the mount, its screen on and '
+                'turned up?'
+                % (int(time.monotonic() - updown.camera_since),
+                   '?' if auto_gain.bright is None else '%d' % round(auto_gain.bright),
+                   round(EX.TARGET_BRIGHT)))
+        elif sight == 'seeing':
+            log('the camera can see again')
+        return sight
+
+    def beat(sight):
+        """The --json heartbeat, ALIVE_EVERY apart or at once when what the
+        camera can see has changed (`sight`), carrying the panel's flags, the
+        GPS, the Pi and the heat guard — or no beat at all, said once, over a
+        stuck reader or a stalled camera, which is the silence the supervisor
+        restarts on."""
+        nonlocal quiet_said, stall_held_said, stall_asked, last_alive, last_beat
+        nonlocal stall_told
+        # Two clocks, for two questions. `now_alive` is a stamp: the
+        # stall note's age is a file's mtime against it, and 📷 Snap's
+        # reader.json gives the last beat's age off it. `beat_now` times
+        # the intervals — the beat and a read in flight — which the wall
+        # clock cannot: NTP stepping it back an hour stopped the beat
+        # for that hour, and forward an hour wrote a restart row for a
+        # reader that was working (rpi/test_loop.py, "a wall clock
+        # stepped an hour").
+        now_alive = time.time()
+        beat_now = time.monotonic()
+        quiet = None
+        # Whether it is a stall going quiet, which leaves a note.
+        over_stall = False
+        if reader.busy and reader.since is not None \
+                and beat_now - reader.since > READ_STUCK_S:
+            quiet = ('a read has been in flight for %ds — the reader is '
+                     'stuck' % int(beat_now - reader.since))
+        elif updown.blind() == 'stalled' and stall_told:
+            # The same way out, for the same reason. A camera that hands
+            # over one picture for ever is not cured by waiting — the
+            # owner's ran 9.4 days that way and a restart cured it at
+            # once — and the supervisor's restart is the cure this rig
+            # already has, counted where a wedge is counted (`wedged`
+            # on /api/status). Only once a beat has carried the stall,
+            # so the panel is holding the reason when the beats stop.
+            #
+            # ...and not again within STALL_AGAIN of the last time, so
+            # a stall a restart does not cure is not restarted all
+            # night. Until then this stays up and goes on beating it.
+            again = None if stall_asked else HO.age(HO.STALLED, now_alive)
+            if again is not None and 0 <= again < STALL_AGAIN:
+                if not stall_held_said:
+                    stall_held_said = True
+                    log('the camera has stalled again %ds after a run '
+                        'here went quiet to be restarted over one; a '
+                        'restart has not kept it working, so this stays '
+                        'up and says so, and asks again once that is '
+                        '%ds old — if it keeps on, reseat the camera\'s '
+                        'cable' % (int(again), STALL_AGAIN))
+            else:
+                over_stall = stall_asked = True
+                quiet = ('the camera has handed over the same picture '
+                         'for %ds — it has stalled'
+                         % int(time.monotonic() - updown.camera_since))
+        if quiet:
+            # No heartbeat for a rig whose reader or camera has gone:
+            # the silence is the message, and the supervisor restarts
+            # on it. Said once, in the log and in the journal — where
+            # it is the only account the run gets, since the SIGKILL
+            # that answers it leaves no stop row.
+            if not quiet_said:
+                quiet_said = True
+                log('%s; going quiet so the supervisor restarts this'
+                    % quiet)
+                updown.restart(quiet)
+                # ...and, over a stall, the note that holds the next
+                # one back — see STALL_AGAIN. One that cannot be
+                # written leaves the next stall restarted as before,
+                # which is said here rather than found out then.
+                if over_stall:
+                    try:
+                        with open(HO.path(HO.STALLED), 'w'):
+                            pass
+                    except (IOError, OSError) as e:
+                        log('could not leave the note that holds back '
+                            'the next restart over a stall (%s)' % e)
+        elif beat_now - last_alive > ALIVE_EVERY or sight:
+            # ...and at once, not on the beat, when what the camera can
+            # see has changed. The panel puts a blind rig's word where
+            # the verdict goes, and a card arriving as the phone goes
+            # back in the mount must not wait four seconds behind the
+            # word that it cannot see.
+            quiet_said = False
+            last_alive = beat_now
+            flags = {'too_bright': health.too_bright,
+                     'too_dim': health.too_dim,
+                     'not_saving': not_saving_notice(offer_log),
+                     'blind': updown.blind()}
+            # ...and what the rig says about itself: whether the GPS
+            # fix is fresh, the Pi's temperature and throttling. Kept
+            # with the flags so 📷 Snap's reader.json says everything
+            # the panel was told, not five of its seven things. The
+            # newest position rides inside `gps`, on the beat that
+            # already travels to the panel and /api/status.
+            #
+            # ...and the heat guard, after the sample, which is the
+            # one that may have just moved it: the beat says the state
+            # its own `cpuC` and `throttled` put the guard in.
+            pi_now = pi.sample(time.monotonic())
+            # ...and the rescue's reads started ahead on the spare
+            # cores (PL._SPARE_WORKERS) stop while the guard is on:
+            # work that may be thrown away is heat for nothing on a
+            # Pi the firmware is slowing. The offer's own reads are
+            # untouched — the chain reads in place, as it did.
+            if spares and PL.spare_cores(not pi.guard.on):
+                log('rescue reads %s' % ('one after another while the Pi is hot'
+                                         if pi.guard.on else
+                                         'started ahead on the spare cores again'))
+            extra = {'gps': updown.beat(beat_fix(phone)),
+                     'pi': pi_now, 'heat_guard': pi.guard.on}
+            emit_alive(**dict(flags, **extra))
+            last_beat = (now_alive, flags, extra)
+            stall_told = flags['blind'] == 'stalled'
+
+    def take_requests(now):
+        """The three requests a screen leaves for the loop, taken on this frame:
+        ⌖'s window, a cost per mile, a box drawn on the live view. Each wants
+        the frame read at once, which the loop cannot see in the picture;
+        returns whether any did. `do_read = True` below is that answer; the
+        loop sets `moved` with it, as each block here did inline."""
+        nonlocal dropoff_until, dropoff_asked, manual, tracker
+        do_read = False
+        # "The screen in front of you is the destination."
+        #
+        # An offer card does not say where a delivery ends - 106 of this
+        # driver's 604 cards print "Customer dropoff" and no address, so
+        # 18% of everything the rig sees can never name a destination
+        # before it is accepted. The address is on the screen that comes
+        # after, and this is the driver saying so.
+        #
+        # It opens a window rather than taking one reading, because the
+        # press and the address are not simultaneous: the driver still
+        # has to get the destination up, and the phone then sits
+        # perfectly still showing it - which is precisely what the
+        # motion gate scores as nothing happening.
+        # The window runs from the PRESS, not from this pass: what
+        # dropoff_requested hands back is what is left of it.
+        dropoff_left = dropoff_requested()
+        if dropoff_left is not None:
+            dropoff_until = now + dropoff_left
+            dropoff_asked = True
+            # `do_read` here looks redundant against the beat further
+            # down, and on the FIRST press it is: last_dropoff_read
+            # starts at 0.0, so the beat fires on this same pass. It is
+            # not redundant on a second press within half a second of
+            # the last read of the first window, which is the only case
+            # that separates them - worth half a second, not worth a
+            # timing-sensitive test, and written down so it does not get
+            # deleted as dead on the strength of the first press alone.
+            do_read = True
+            log('reading the destination for the next %.1f seconds: '
+                'put the address on the phone' % dropoff_left)
+
+        # A cost per mile typed on the keypad. Taken in the loop, never
+        # by a restart: a restart costs an aim-and-calibrate cycle, which
+        # is a minute of no readings mid-shift for a change of one
+        # number. Written into the same dict digest() reads per card —
+        # in place, so there is only ever the one — and saved, so the
+        # next start begins from it.
+        #
+        # And read again now, for the reason the drawn box below is: a
+        # card sitting still on the phone produces no motion, and the
+        # panel would go on saying "after $0.30/mi costs" under it until
+        # the next verify beat. That string is how the driver sees the
+        # change take effect, so it should take effect on the card in
+        # front of them. The journal does not grow for it: consider()
+        # decides novelty on the reading's content, which the cost is
+        # not part of.
+        cost = settings_requested()
+        if cost is not None:
+            live = cfg.setdefault('settings', {})
+            was = OP.setting(live.get('costPerMile'),
+                             OP.DEFAULT_SETTINGS['costPerMile'])
+            live['costPerMile'] = cost
+            save_config(args.config, cfg)
+            if args.json:
+                emit_settings(live)
+            do_read = True
+            log('cost per mile set to $%.2f from a screen (was $%.2f): '
+                'the next reading is costed at it' % (cost, was))
+
+        # A box drawn on the live view. It arrives as fractions of the
+        # frame, which is the only form that survives the trip: what the
+        # driver drew on was a 480px JPEG of a 2328px sensor frame.
+        taken = CX.take_request()
+        if taken is not None:
+            drawn, card = taken
+            manual = True
+            use_manual_box(scanner, CX.in_pixels(drawn, capture_size), card)
+            CX.apply_to_config(cfg, drawn, capture_size, card)
+            save_config(args.config, cfg)
+            tracker = None
+            # Read it now. The whole crop just changed, and the motion
+            # gate cannot tell — it watches the frame, and the frame is
+            # a card sitting still, which is exactly what it looks like
+            # while somebody draws a box round it. Without this, pressing
+            # "read this box" does nothing visible until the picture next
+            # moves, which reads as the button not having worked.
+            do_read = True
+            log('crop box set by hand to [%s] of the frame: %s, with corner '
+                'tracking off — ▣ Set box again to change it'
+                % (CX.describe(drawn),
+                   'offers read in the card box [%.2f %.2f %.2f %.2f] of it and '
+                   '⌖ reading all of it' % tuple(card) if card
+                   else 'reading exactly that'))
+            log(card_finder_says(scanner, card_finder_off(cfg, args), args.config))
+        return do_read
+
+    def follow_phone(luma, now):
+        """The corners followed on the preview frame (QuadTracker), and what a
+        move of them means: saved, logged, and — on a re-lock — the frame
+        read at once and the remembered crop forgotten. Returns whether this
+        frame is to be read for it (`do_read = True` below; the loop sets
+        `moved` with it, as this did inline)."""
+        do_read = False
+        # Follow the phone on this same small frame. A mount is not a
+        # clamp, and corners a centimetre out slide the crop off the
+        # payout — which looks exactly like no offer being on screen.
+        #
+        # Done here, on the stream the motion gate already has, it costs
+        # about a millisecond and needs no full-resolution capture at
+        # all; finding the corners on a sensor frame costs seven times
+        # as much, almost entirely in shrinking the frame down to this
+        # size. Blurred frames are skipped: a smeared edge is a worse
+        # guess than the corners already held.
+        if tracker is not None and scanner.settled:
+            jumps_before, lost_before = tracker.jumps, tracker.lost
+            stalled_before = tracker.stalled
+            rebased_before = tracker.rebaselines
+            if tracker.update(luma, now):
+                scanner.quad = tracker.quad
+                # Where tracking has got to, kept apart from `quad`,
+                # which is the calibration and is written only by
+                # calibrate.py / autopilot.py.
+                cfg['trackedQuad'] = [[float(x), float(y)] for x, y in tracker.quad]
+            # A re-lock is a different rectangle, so it is a different
+            # picture to read as surely as a different picture would be
+            # — and the motion gate cannot see it, because it watches
+            # the frame and the frame did not change. Without this the
+            # read that finally uses the corrected box waits for the
+            # resample tick, or for the driver to move something.
+            #
+            # Only a re-lock. The ordinary path eases 35% of the way to
+            # the candidate on each check and reports every one of those
+            # steps as a move, so treating "moved" as "read again" put
+            # fourteen reads through one stationary card where two had
+            # done. A few pixels of drift does not invalidate the read
+            # that just happened; being on a different phone does.
+            if tracker.jumps > jumps_before or tracker.rebaselines > rebased_before:
+                do_read = True
+                # ...and a different rectangle is not the one the
+                # remembered crop (pipeline's CARD_BOX_FOR) was found
+                # on. An ease is a few pixels and leaves it; this is
+                # the corners moved to somewhere else.
+                scanner.forget_card_box('the corners re-locked')
+            if tracker.rebaselines > rebased_before:
+                health.rebaselines += 1
+                log('corners un-stuck: the screen in front of the camera '
+                    'is not the size the stored calibration describes, and '
+                    'has been steadily so for %ds, so the corners were '
+                    'moved onto it and the SIZE the tracker judges against '
+                    'taken as out of date. The calibration itself is kept. '
+                    'Reading carries on — but draw the boxes with ▣ Set '
+                    'box, or re-run calibration, when you can, or the '
+                    'next start will be stuck again.' % TR.RECOVER_AFTER)
+            elif tracker.jumps > jumps_before:
+                health.relocks += 1
+                log('corners re-locked: the phone is somewhere the stored '
+                    'calibration did not expect, and has been for several '
+                    'checks running. Mount moved?')
+            lost_now = tracker.lost
+            if lost_now != lost_before:
+                log('screen %s' % ('not visible — is the phone lit and in frame?'
+                                   if lost_now else 'visible again'))
+            # Being stuck used to be one word in a health line every two
+            # minutes, which is not where anybody was looking. The
+            # automatic recovery handles a phone that has been re-seated;
+            # what it deliberately will not do is adopt a candidate of
+            # the wrong shape, and the commonest wrong shape is the white
+            # offer card on its own — the crop is a fraction of the
+            # corners, so corners drawn round the card read the journey
+            # and lose the payout. That case cannot be fixed by moving
+            # the box, only by the person who can see the screen.
+            stalled_now = tracker.stalled
+            if stalled_now != stalled_before:
+                log(('outline stuck: the corners have been off the screen '
+                     'the camera can see for %ds. If the box is drawn '
+                     'round part of the offer card rather than the whole '
+                     'phone, the screen is probably washed out — shade it '
+                     'or dim it. Otherwise draw the boxes with ▣ Set box '
+                     'on the live page, or re-run calibration.'
+                     % TR.STALL_VISIBLE)
+                    if stalled_now else 'outline unstuck: the corners are '
+                    'back on the screen')
+            if tracker.needs_save(now):
+                save_config(args.config, cfg)
+                tracker.mark_saved(now)
+        return do_read
+
+    def adjust_gain(luma, now):
+        """Gain, and when gain is spent the exposure, steered off the screen in
+        the preview frame (AutoGain), and the brightness, gain and exposure
+        the health line and the panel say."""
+        # A phone dims itself. A screen set up in daylight is a much
+        # darker subject at two in the morning, and a fixed exposure that
+        # suited one leaves the other too dark to read. Exposure stays
+        # where it was measured — moving it would undo the flicker
+        # arithmetic — and gain does the adapting, slowly, off the same
+        # small frame the gate just used.
+        #
+        # Measured on the screen, not the frame. The dark car around
+        # the phone is most of the picture and none of the subject: it
+        # drags the brightness reading down and divides the blown-out
+        # fraction by however much of the frame it fills, so a card
+        # sitting at 237 with a fifth of it clipped still asked for
+        # more gain. Rig logs showed the gain hunting between 6.8 and
+        # its 8.0 ceiling while the card was over-exposed the whole
+        # time, which is also what turns a screen's flicker into the
+        # ripple that fails reads.
+        #
+        # And only while there is a screen there to expose for. The
+        # window is wherever the phone was last seen, so once the phone
+        # is out of the mount it is dark upholstery, and the gain used
+        # to wind up chasing a card that had gone — railing at 8x in
+        # about 78 seconds and then needing a further minute of
+        # six-second steps to come back down once the phone returned.
+        # That minute lands exactly when the driver has picked the phone
+        # up to look at an offer.
+        #
+        # Deliberately NOT gated on the picture having settled, which
+        # is what it used to be, and which made the two halves of this
+        # into a trap that closed. Shortening the exposure is what a
+        # blown-out card provokes; on a 60Hz panel the rung below the
+        # calibrated one made the screen ripple; a rippling screen never
+        # settles — the motion gate reads 75 against a settle threshold
+        # of 2 — so this branch never ran again, the exposure could
+        # never be given back, and `should_read` never fired either. One
+        # nudge of the phone's brightness slider ended the shift, with
+        # the loop still saying "still here" every four seconds.
+        #
+        # Nothing here needed a still picture in the first place: a
+        # percentile and a count of full-well pixels do not care whether
+        # the frame is moving. The tracker's own settled gate is above,
+        # where it earns its keep.
+        #
+        # With no corners there is no screen to expose for, and the
+        # fallback used to be the whole frame — which exposure.py spends
+        # eleven lines explaining is the one thing not to hand it, since
+        # the dark car around the phone is most of the picture and none
+        # of the subject. Skipping the beat is the honest answer.
+        if auto_gain is not None and scanner.quad is not None:
+            lit = PL.quad_window(luma, scanner.quad, track_scale)
+            # None, not True, when nothing is tracking: --no-track
+            # leaves this caller with no answer to give, and saying
+            # "yes, there is a phone" when it cannot know is what the
+            # LIT_ENOUGH backstop is there to cover. Saying it out loud
+            # is what let the backstop be applied only where it belongs.
+            have_screen = (None if tracker is None
+                           else not tracker.lost)
+            was_exposure = auto_gain.exposure
+            ctrls = auto_gain.update(lit, now, has_screen=have_screen)
+            # The photometric picture, before any preprocessing — the
+            # same window and the same measure the controller steers
+            # by, so the health line's number is the controller's
+            # number.
+            #
+            # Taken FROM the controller now rather than measured again
+            # beside it. `brightness` is a percentile: a full
+            # order-statistic pass in float32 over the card window,
+            # which update() performs anyway on the very same array —
+            # so this line was a second identical pass on every frame
+            # the camera produced, all shift, for a figure the log
+            # prints once every two minutes.
+            #
+            # It also makes the sentence above true rather than merely
+            # likely. Two derivations of one measurement agree until
+            # one of them changes, and this is the pair the comment was
+            # already claiming were the same.
+            #
+            # Left alone when the beat did not run: update() returns
+            # early between beats without measuring, and `bright` is
+            # then about an older frame. The health line keeps the last
+            # figure it had, which is what it did before.
+            if auto_gain.bright is not None:
+                health.bright = auto_gain.bright
+            if ctrls:
+                cam.set_controls(ctrls)
+            if 'AnalogueGain' in ctrls:
+                cfg['analogueGain'] = round(auto_gain.gain, 3)
+                health.gain = auto_gain.gain
+            # Daylight through a windscreen can blow the card out with
+            # the gain already on its floor, and then the exposure is
+            # the only thing left. It is given back the moment there is
+            # gain to trade for it, and never goes above what
+            # calibration measured.
+            if auto_gain.exposure != was_exposure:
+                log('exposure %s to %dus: %s'
+                    % ('shortened' if auto_gain.exposure < was_exposure
+                       else 'given back', auto_gain.exposure,
+                       'the card was blown out with the gain already at '
+                       'its floor'
+                       if auto_gain.exposure < was_exposure
+                       else 'traded back against gain, which is the noisy '
+                            'half of the same brightness'))
+            # Deliberately not written to cfg: the borrowed value is a
+            # response to the light right now, and persisting it would
+            # start a night shift on a noon exposure with nothing to
+            # tell it that is wrong. cfg keeps what calibration measured.
+            health.exposure = auto_gain.exposure
+            health.measured_exposure = auto_gain.measured
+            # Out of room: the phone is brighter than this camera can
+            # take at any setting that does not make the screen ripple.
+            # The only remedy left belongs to the driver, so it goes on
+            # the screen they are looking at rather than into a log.
+            if auto_gain.too_bright != health.too_bright:
+                health.too_bright = auto_gain.too_bright
+                log('the phone is brighter than the camera can take — '
+                    'turn the screen brightness down a notch'
+                    if auto_gain.too_bright
+                    else 'the picture is back inside what the camera '
+                         'can take')
+            # ...and the other end of the same complaint, which nothing
+            # used to report at all: everything spent, and the screen
+            # still under target. The picture is dark, the reads get
+            # worse, and the remedy — the phone's own brightness, or a
+            # mount sitting in shadow — is the driver's.
+            if auto_gain.too_dim != health.too_dim:
+                health.too_dim = auto_gain.too_dim
+                log('the phone is dimmer than the camera can make up '
+                    'for — turn the screen brightness up a notch'
+                    if auto_gain.too_dim
+                    else 'there is enough light again')
+
+    def hand_over(frame, now, backstop):
+        """A read due on this frame handed to the reader: the partner frame
+        captured, the read's clocks, which box it reads (the whole screen
+        under ⌖ or for `screen_auto`, else the card box), and the panel told a
+        read has begun."""
+        nonlocal frames, screen_auto, last_card_read, looked
+        # A verdict needs two reads that agree, so when one is due, take
+        # the frame after it as well and read both at once. The sensor is
+        # already producing them 33ms apart, and two reads together cost
+        # 56% of two in a row — so the confirmation stops costing a second
+        # of wall clock while an offer is timing out. It is the same
+        # evidence, gathered at the same time instead of one after the
+        # other. --no-parallel falls back to one at a time.
+        partner = None
+        pair_from = time.monotonic()
+        # ...but not for a backstop read: it only has to see whether a card
+        # is up, and one that is arms the resample burst, whose reads are
+        # paired as before. One engine, not two, every IDLE_READ_S.
+        if pair_reads and not backstop:
+            partner_request = cam.capture_request()
+            try:
+                partner = partner_request.make_array('main')
+            finally:
+                partner_request.release()
+        # What the read cost before the reader saw it (ReadTimes): the
+        # partner frame's capture, the trigger held back, the gate's
+        # wait, and when this frame arrived (`now`, the frame's clock).
+        read_meta = {'frameAt': now, 'gate': read_clock['gate'],
+                     'pair': ((time.monotonic() - pair_from) * 1000.0
+                              if partner is not None else None),
+                     'held': (None if read_clock['wantedAt'] is None
+                              else (now - read_clock['wantedAt']) * 1000.0),
+                     'labels': getattr(map_labels, 'reads', 0),
+                     'labelling': bool(getattr(map_labels, 'reading', False)),
+                     # ...and whether the backstop sent it (IDLE_READ_S),
+                     # for collect() to count what it found.
+                     'backstop': backstop}
+        read_clock['gate'] = read_clock['wantedAt'] = None
+
+        frames += 1
+        # Handed over rather than done here. The geometry goes with the
+        # frames — see PL.Geometry — because by the time the read finishes
+        # the tracker may well have moved the corners, and a frame warped
+        # against corners measured after it was captured lands the crop
+        # somewhere the card is not.
+        #
+        # While a ⌖ press is open, all of the screen box rather than the
+        # card crop: the press asks "what is on this screen", and a trip
+        # planner's addresses are outside where the offer cards land. A
+        # card box drawn by hand made that a blind spot — see
+        # cropbox.parse_card. Only while asked: an unprompted read is
+        # hunting offers and keeps the card crop.
+        # ...and for the whole-screen read digest() asked for without a
+        # press (`screen_auto`), once: the request is spent by this
+        # hand-over.
+        pressed_read = dropoff_asked and time.monotonic() < dropoff_until
+        # ...but the card box, once, when a whole-screen read saw an offer
+        # the card box has not judged (digest, `card_turn`): the window's
+        # whole-screen reads go on after it, and an unpressed one asked
+        # for is kept for the read after.
+        card_now = card_turn['wanted']
+        card_turn['wanted'] = False
+        whole_read = (pressed_read or screen_auto) and not card_now
+        if not card_now:
+            screen_auto = False
+        # The backstop's clock: when the card box was last handed over.
+        if not whole_read:
+            last_card_read = now
+        if backstop:
+            health.backstop += 1
+        # ...and a ⌖ press's read is read however dark the crop: the driver
+        # asked, so the reader is asked. Every other read — the card box,
+        # the verify beat, the whole-screen read nobody pressed for — skips
+        # a crop with nothing bright enough in it to be text. See
+        # PL.DARK_SKIP_BELOW and DARK_SAY_EVERY.
+        reader.submit([frame] if partner is None else [frame, partner],
+                      time.time(),
+                      scanner.geometry(whole=whole_read,
+                                       skip_dark=not (pressed_read and whole_read)),
+                      meta=read_meta)
+        # Not a backstop read: the camera's word is the rig asking itself
+        # whether it can see, and a read sent every IDLE_READ_S whatever
+        # the picture does would keep 'dark' from ever settling.
+        if not backstop:
+            looked = True
+        # Before the read, not after it. The dashboard has nothing else to
+        # go on for the second and a half this takes — see emit_reading.
+        #
+        # Not for a ⌖ read. It is a read of the whole screen for an
+        # address, digest() returns before emit() for it, so nothing
+        # carrying `ready` ever followed — and the panel said READING THE
+        # CARD, "working out the pay, the time and the distance", for its
+        # whole 8s READING_MS after every one, through the twelve-second
+        # window, over a navigation screen. The ⌖ button says "⌖ reading…"
+        # for that read itself.
+        # Nor a backstop read: on a phone with no card on it one goes out
+        # every IDLE_READ_S, and the panel would flash READING THE CARD
+        # over an idle screen every three seconds. One that finds a card
+        # says so with the verdict it brings.
+        if args.json and not whole_read and not backstop:
+            emit_reading()
+
     # What the server answers GET /api/settings with, from the moment the loop
     # runs. See emit_settings.
     if args.json:
@@ -7647,48 +8230,8 @@ def main():
             if collect():
                 break
 
-            # The phone, the GPS and what the camera can see, every pass, on the
-            # monotonic clock: the wall clock jumps by decades when NTP arrives,
-            # and a hold timed across that would write a minute's absence about
-            # a phone that was never gone. Every read here is a lock, a dict or
-            # a flag the frame below already set.
-            #
-            # The box's light is AutoGain's answer, and only where nothing
-            # tracks the corners — see the note under STALL_SAY.
-            sight = updown.watch(
-                time.monotonic(),
-                tracker.lost if tracker is not None else None,
-                gps_now(phone, gps_refused),
-                sight_now(frozen,
-                          auto_gain.lit if (tracker is None and auto_gain is not None)
-                          else None,
-                          looked),
-                auto_gain.bright if auto_gain is not None else None)
-            looked = False
-            if sight == 'stalled':
-                # Both are this stall's. A camera that came back by itself and
-                # stalls again in the same run is asked about afresh: kept from
-                # the last one, a stall this run had gone quiet over asked for
-                # a second restart seconds after the first, its own note unread.
-                stall_held_said = stall_asked = False
-                log('camera stalled: it has handed over the same picture, byte '
-                    'for byte, for %ds. Nothing new can be read off it; the '
-                    'panel says so, and once it has, this '
-                    'goes quiet so the supervisor restarts the camera — unless '
-                    'it did that less than %ds ago'
-                    % (int(time.monotonic() - updown.camera_since), STALL_AGAIN))
-            elif sight == 'dark':
-                log('too dark to be sure of seeing a card arrive: the box has '
-                    'held nothing the gain counts as a lit screen for %ds '
-                    '(screen brightness %s/%d), where a light-mode card '
-                    'arriving does not move the motion gate far enough to send '
-                    'a read — is the phone in the mount, its screen on and '
-                    'turned up?'
-                    % (int(time.monotonic() - updown.camera_since),
-                       '?' if auto_gain.bright is None else '%d' % round(auto_gain.bright),
-                       round(EX.TARGET_BRIGHT)))
-            elif sight == 'seeing':
-                log('the camera can see again')
+            # What the camera can see, said when it changes (watch_camera).
+            sight = watch_camera()
 
             # ...and a word to say the loop is turning, on a beat the driving
             # page's staleness test comfortably clears. See ALIVE_EVERY: a
@@ -7698,109 +8241,7 @@ def main():
             # stopped delivering frames stops this too — which is exactly the
             # fault worth showing.
             if args.json:
-                # Two clocks, for two questions. `now_alive` is a stamp: the
-                # stall note's age is a file's mtime against it, and 📷 Snap's
-                # reader.json gives the last beat's age off it. `beat_now` times
-                # the intervals — the beat and a read in flight — which the wall
-                # clock cannot: NTP stepping it back an hour stopped the beat
-                # for that hour, and forward an hour wrote a restart row for a
-                # reader that was working (rpi/test_loop.py, "a wall clock
-                # stepped an hour").
-                now_alive = time.time()
-                beat_now = time.monotonic()
-                quiet = None
-                # Whether it is a stall going quiet, which leaves a note.
-                over_stall = False
-                if reader.busy and reader.since is not None \
-                        and beat_now - reader.since > READ_STUCK_S:
-                    quiet = ('a read has been in flight for %ds — the reader is '
-                             'stuck' % int(beat_now - reader.since))
-                elif updown.blind() == 'stalled' and stall_told:
-                    # The same way out, for the same reason. A camera that hands
-                    # over one picture for ever is not cured by waiting — the
-                    # owner's ran 9.4 days that way and a restart cured it at
-                    # once — and the supervisor's restart is the cure this rig
-                    # already has, counted where a wedge is counted (`wedged`
-                    # on /api/status). Only once a beat has carried the stall,
-                    # so the panel is holding the reason when the beats stop.
-                    #
-                    # ...and not again within STALL_AGAIN of the last time, so
-                    # a stall a restart does not cure is not restarted all
-                    # night. Until then this stays up and goes on beating it.
-                    again = None if stall_asked else HO.age(HO.STALLED, now_alive)
-                    if again is not None and 0 <= again < STALL_AGAIN:
-                        if not stall_held_said:
-                            stall_held_said = True
-                            log('the camera has stalled again %ds after a run '
-                                'here went quiet to be restarted over one; a '
-                                'restart has not kept it working, so this stays '
-                                'up and says so, and asks again once that is '
-                                '%ds old — if it keeps on, reseat the camera\'s '
-                                'cable' % (int(again), STALL_AGAIN))
-                    else:
-                        over_stall = stall_asked = True
-                        quiet = ('the camera has handed over the same picture '
-                                 'for %ds — it has stalled'
-                                 % int(time.monotonic() - updown.camera_since))
-                if quiet:
-                    # No heartbeat for a rig whose reader or camera has gone:
-                    # the silence is the message, and the supervisor restarts
-                    # on it. Said once, in the log and in the journal — where
-                    # it is the only account the run gets, since the SIGKILL
-                    # that answers it leaves no stop row.
-                    if not quiet_said:
-                        quiet_said = True
-                        log('%s; going quiet so the supervisor restarts this'
-                            % quiet)
-                        updown.restart(quiet)
-                        # ...and, over a stall, the note that holds the next
-                        # one back — see STALL_AGAIN. One that cannot be
-                        # written leaves the next stall restarted as before,
-                        # which is said here rather than found out then.
-                        if over_stall:
-                            try:
-                                with open(HO.path(HO.STALLED), 'w'):
-                                    pass
-                            except (IOError, OSError) as e:
-                                log('could not leave the note that holds back '
-                                    'the next restart over a stall (%s)' % e)
-                elif beat_now - last_alive > ALIVE_EVERY or sight:
-                    # ...and at once, not on the beat, when what the camera can
-                    # see has changed. The panel puts a blind rig's word where
-                    # the verdict goes, and a card arriving as the phone goes
-                    # back in the mount must not wait four seconds behind the
-                    # word that it cannot see.
-                    quiet_said = False
-                    last_alive = beat_now
-                    flags = {'too_bright': health.too_bright,
-                             'too_dim': health.too_dim,
-                             'not_saving': not_saving_notice(offer_log),
-                             'blind': updown.blind()}
-                    # ...and what the rig says about itself: whether the GPS
-                    # fix is fresh, the Pi's temperature and throttling. Kept
-                    # with the flags so 📷 Snap's reader.json says everything
-                    # the panel was told, not five of its seven things. The
-                    # newest position rides inside `gps`, on the beat that
-                    # already travels to the panel and /api/status.
-                    #
-                    # ...and the heat guard, after the sample, which is the
-                    # one that may have just moved it: the beat says the state
-                    # its own `cpuC` and `throttled` put the guard in.
-                    pi_now = pi.sample(time.monotonic())
-                    # ...and the rescue's reads started ahead on the spare
-                    # cores (PL._SPARE_WORKERS) stop while the guard is on:
-                    # work that may be thrown away is heat for nothing on a
-                    # Pi the firmware is slowing. The offer's own reads are
-                    # untouched — the chain reads in place, as it did.
-                    if spares and PL.spare_cores(not pi.guard.on):
-                        log('rescue reads %s' % ('one after another while the Pi is hot'
-                                                 if pi.guard.on else
-                                                 'started ahead on the spare cores again'))
-                    extra = {'gps': updown.beat(beat_fix(phone)),
-                             'pi': pi_now, 'heat_guard': pi.guard.on}
-                    emit_alive(**dict(flags, **extra))
-                    last_beat = (now_alive, flags, extra)
-                    stall_told = flags['blind'] == 'stalled'
+                beat(sight)
 
             # 📷 Snap, asking for what only this process has. Here, after the
             # read that finished and before the capture, so the answer is the
@@ -7865,303 +8306,15 @@ def main():
                     read_clock['gate'] = scanner.gate_ms
                 moved = False           # did the corners shift on this frame?
 
-                # "The screen in front of you is the destination."
-                #
-                # An offer card does not say where a delivery ends - 106 of this
-                # driver's 604 cards print "Customer dropoff" and no address, so
-                # 18% of everything the rig sees can never name a destination
-                # before it is accepted. The address is on the screen that comes
-                # after, and this is the driver saying so.
-                #
-                # It opens a window rather than taking one reading, because the
-                # press and the address are not simultaneous: the driver still
-                # has to get the destination up, and the phone then sits
-                # perfectly still showing it - which is precisely what the
-                # motion gate scores as nothing happening.
-                # The window runs from the PRESS, not from this pass: what
-                # dropoff_requested hands back is what is left of it.
-                dropoff_left = dropoff_requested()
-                if dropoff_left is not None:
-                    dropoff_until = now + dropoff_left
-                    dropoff_asked = True
-                    # `do_read` here looks redundant against the beat further
-                    # down, and on the FIRST press it is: last_dropoff_read
-                    # starts at 0.0, so the beat fires on this same pass. It is
-                    # not redundant on a second press within half a second of
-                    # the last read of the first window, which is the only case
-                    # that separates them - worth half a second, not worth a
-                    # timing-sensitive test, and written down so it does not get
-                    # deleted as dead on the strength of the first press alone.
+                # A screen's request, the corners and the gain, on this frame:
+                # each is a closure above that says what it does.
+                if take_requests(now):
                     moved = do_read = True
-                    log('reading the destination for the next %.1f seconds: '
-                        'put the address on the phone' % dropoff_left)
 
-                # A cost per mile typed on the keypad. Taken in the loop, never
-                # by a restart: a restart costs an aim-and-calibrate cycle, which
-                # is a minute of no readings mid-shift for a change of one
-                # number. Written into the same dict digest() reads per card —
-                # in place, so there is only ever the one — and saved, so the
-                # next start begins from it.
-                #
-                # And read again now, for the reason the drawn box below is: a
-                # card sitting still on the phone produces no motion, and the
-                # panel would go on saying "after $0.30/mi costs" under it until
-                # the next verify beat. That string is how the driver sees the
-                # change take effect, so it should take effect on the card in
-                # front of them. The journal does not grow for it: consider()
-                # decides novelty on the reading's content, which the cost is
-                # not part of.
-                cost = settings_requested()
-                if cost is not None:
-                    live = cfg.setdefault('settings', {})
-                    was = OP.setting(live.get('costPerMile'),
-                                     OP.DEFAULT_SETTINGS['costPerMile'])
-                    live['costPerMile'] = cost
-                    save_config(args.config, cfg)
-                    if args.json:
-                        emit_settings(live)
+                if follow_phone(luma, now):
                     moved = do_read = True
-                    log('cost per mile set to $%.2f from a screen (was $%.2f): '
-                        'the next reading is costed at it' % (cost, was))
 
-                # A box drawn on the live view. It arrives as fractions of the
-                # frame, which is the only form that survives the trip: what the
-                # driver drew on was a 480px JPEG of a 2328px sensor frame.
-                taken = CX.take_request()
-                if taken is not None:
-                    drawn, card = taken
-                    manual = True
-                    use_manual_box(scanner, CX.in_pixels(drawn, capture_size), card)
-                    CX.apply_to_config(cfg, drawn, capture_size, card)
-                    save_config(args.config, cfg)
-                    tracker = None
-                    # Read it now. The whole crop just changed, and the motion
-                    # gate cannot tell — it watches the frame, and the frame is
-                    # a card sitting still, which is exactly what it looks like
-                    # while somebody draws a box round it. Without this, pressing
-                    # "read this box" does nothing visible until the picture next
-                    # moves, which reads as the button not having worked.
-                    moved = do_read = True
-                    log('crop box set by hand to [%s] of the frame: %s, with corner '
-                        'tracking off — ▣ Set box again to change it'
-                        % (CX.describe(drawn),
-                           'offers read in the card box [%.2f %.2f %.2f %.2f] of it and '
-                           '⌖ reading all of it' % tuple(card) if card
-                           else 'reading exactly that'))
-                    log(card_finder_says(scanner, card_finder_off(cfg, args), args.config))
-
-                # Follow the phone on this same small frame. A mount is not a
-                # clamp, and corners a centimetre out slide the crop off the
-                # payout — which looks exactly like no offer being on screen.
-                #
-                # Done here, on the stream the motion gate already has, it costs
-                # about a millisecond and needs no full-resolution capture at
-                # all; finding the corners on a sensor frame costs seven times
-                # as much, almost entirely in shrinking the frame down to this
-                # size. Blurred frames are skipped: a smeared edge is a worse
-                # guess than the corners already held.
-                if tracker is not None and scanner.settled:
-                    jumps_before, lost_before = tracker.jumps, tracker.lost
-                    stalled_before = tracker.stalled
-                    rebased_before = tracker.rebaselines
-                    if tracker.update(luma, now):
-                        scanner.quad = tracker.quad
-                        # Where tracking has got to, kept apart from `quad`,
-                        # which is the calibration and is written only by
-                        # calibrate.py / autopilot.py.
-                        cfg['trackedQuad'] = [[float(x), float(y)] for x, y in tracker.quad]
-                    # A re-lock is a different rectangle, so it is a different
-                    # picture to read as surely as a different picture would be
-                    # — and the motion gate cannot see it, because it watches
-                    # the frame and the frame did not change. Without this the
-                    # read that finally uses the corrected box waits for the
-                    # resample tick, or for the driver to move something.
-                    #
-                    # Only a re-lock. The ordinary path eases 35% of the way to
-                    # the candidate on each check and reports every one of those
-                    # steps as a move, so treating "moved" as "read again" put
-                    # fourteen reads through one stationary card where two had
-                    # done. A few pixels of drift does not invalidate the read
-                    # that just happened; being on a different phone does.
-                    if tracker.jumps > jumps_before or tracker.rebaselines > rebased_before:
-                        moved = do_read = True
-                        # ...and a different rectangle is not the one the
-                        # remembered crop (pipeline's CARD_BOX_FOR) was found
-                        # on. An ease is a few pixels and leaves it; this is
-                        # the corners moved to somewhere else.
-                        scanner.forget_card_box('the corners re-locked')
-                    if tracker.rebaselines > rebased_before:
-                        health.rebaselines += 1
-                        log('corners un-stuck: the screen in front of the camera '
-                            'is not the size the stored calibration describes, and '
-                            'has been steadily so for %ds, so the corners were '
-                            'moved onto it and the SIZE the tracker judges against '
-                            'taken as out of date. The calibration itself is kept. '
-                            'Reading carries on — but draw the boxes with ▣ Set '
-                            'box, or re-run calibration, when you can, or the '
-                            'next start will be stuck again.' % TR.RECOVER_AFTER)
-                    elif tracker.jumps > jumps_before:
-                        health.relocks += 1
-                        log('corners re-locked: the phone is somewhere the stored '
-                            'calibration did not expect, and has been for several '
-                            'checks running. Mount moved?')
-                    lost_now = tracker.lost
-                    if lost_now != lost_before:
-                        log('screen %s' % ('not visible — is the phone lit and in frame?'
-                                           if lost_now else 'visible again'))
-                    # Being stuck used to be one word in a health line every two
-                    # minutes, which is not where anybody was looking. The
-                    # automatic recovery handles a phone that has been re-seated;
-                    # what it deliberately will not do is adopt a candidate of
-                    # the wrong shape, and the commonest wrong shape is the white
-                    # offer card on its own — the crop is a fraction of the
-                    # corners, so corners drawn round the card read the journey
-                    # and lose the payout. That case cannot be fixed by moving
-                    # the box, only by the person who can see the screen.
-                    stalled_now = tracker.stalled
-                    if stalled_now != stalled_before:
-                        log(('outline stuck: the corners have been off the screen '
-                             'the camera can see for %ds. If the box is drawn '
-                             'round part of the offer card rather than the whole '
-                             'phone, the screen is probably washed out — shade it '
-                             'or dim it. Otherwise draw the boxes with ▣ Set box '
-                             'on the live page, or re-run calibration.'
-                             % TR.STALL_VISIBLE)
-                            if stalled_now else 'outline unstuck: the corners are '
-                            'back on the screen')
-                    if tracker.needs_save(now):
-                        save_config(args.config, cfg)
-                        tracker.mark_saved(now)
-
-                # A phone dims itself. A screen set up in daylight is a much
-                # darker subject at two in the morning, and a fixed exposure that
-                # suited one leaves the other too dark to read. Exposure stays
-                # where it was measured — moving it would undo the flicker
-                # arithmetic — and gain does the adapting, slowly, off the same
-                # small frame the gate just used.
-                #
-                # Measured on the screen, not the frame. The dark car around
-                # the phone is most of the picture and none of the subject: it
-                # drags the brightness reading down and divides the blown-out
-                # fraction by however much of the frame it fills, so a card
-                # sitting at 237 with a fifth of it clipped still asked for
-                # more gain. Rig logs showed the gain hunting between 6.8 and
-                # its 8.0 ceiling while the card was over-exposed the whole
-                # time, which is also what turns a screen's flicker into the
-                # ripple that fails reads.
-                #
-                # And only while there is a screen there to expose for. The
-                # window is wherever the phone was last seen, so once the phone
-                # is out of the mount it is dark upholstery, and the gain used
-                # to wind up chasing a card that had gone — railing at 8x in
-                # about 78 seconds and then needing a further minute of
-                # six-second steps to come back down once the phone returned.
-                # That minute lands exactly when the driver has picked the phone
-                # up to look at an offer.
-                #
-                # Deliberately NOT gated on the picture having settled, which
-                # is what it used to be, and which made the two halves of this
-                # into a trap that closed. Shortening the exposure is what a
-                # blown-out card provokes; on a 60Hz panel the rung below the
-                # calibrated one made the screen ripple; a rippling screen never
-                # settles — the motion gate reads 75 against a settle threshold
-                # of 2 — so this branch never ran again, the exposure could
-                # never be given back, and `should_read` never fired either. One
-                # nudge of the phone's brightness slider ended the shift, with
-                # the loop still saying "still here" every four seconds.
-                #
-                # Nothing here needed a still picture in the first place: a
-                # percentile and a count of full-well pixels do not care whether
-                # the frame is moving. The tracker's own settled gate is above,
-                # where it earns its keep.
-                #
-                # With no corners there is no screen to expose for, and the
-                # fallback used to be the whole frame — which exposure.py spends
-                # eleven lines explaining is the one thing not to hand it, since
-                # the dark car around the phone is most of the picture and none
-                # of the subject. Skipping the beat is the honest answer.
-                if auto_gain is not None and scanner.quad is not None:
-                    lit = PL.quad_window(luma, scanner.quad, track_scale)
-                    # None, not True, when nothing is tracking: --no-track
-                    # leaves this caller with no answer to give, and saying
-                    # "yes, there is a phone" when it cannot know is what the
-                    # LIT_ENOUGH backstop is there to cover. Saying it out loud
-                    # is what let the backstop be applied only where it belongs.
-                    have_screen = (None if tracker is None
-                                   else not tracker.lost)
-                    was_exposure = auto_gain.exposure
-                    ctrls = auto_gain.update(lit, now, has_screen=have_screen)
-                    # The photometric picture, before any preprocessing — the
-                    # same window and the same measure the controller steers
-                    # by, so the health line's number is the controller's
-                    # number.
-                    #
-                    # Taken FROM the controller now rather than measured again
-                    # beside it. `brightness` is a percentile: a full
-                    # order-statistic pass in float32 over the card window,
-                    # which update() performs anyway on the very same array —
-                    # so this line was a second identical pass on every frame
-                    # the camera produced, all shift, for a figure the log
-                    # prints once every two minutes.
-                    #
-                    # It also makes the sentence above true rather than merely
-                    # likely. Two derivations of one measurement agree until
-                    # one of them changes, and this is the pair the comment was
-                    # already claiming were the same.
-                    #
-                    # Left alone when the beat did not run: update() returns
-                    # early between beats without measuring, and `bright` is
-                    # then about an older frame. The health line keeps the last
-                    # figure it had, which is what it did before.
-                    if auto_gain.bright is not None:
-                        health.bright = auto_gain.bright
-                    if ctrls:
-                        cam.set_controls(ctrls)
-                    if 'AnalogueGain' in ctrls:
-                        cfg['analogueGain'] = round(auto_gain.gain, 3)
-                        health.gain = auto_gain.gain
-                    # Daylight through a windscreen can blow the card out with
-                    # the gain already on its floor, and then the exposure is
-                    # the only thing left. It is given back the moment there is
-                    # gain to trade for it, and never goes above what
-                    # calibration measured.
-                    if auto_gain.exposure != was_exposure:
-                        log('exposure %s to %dus: %s'
-                            % ('shortened' if auto_gain.exposure < was_exposure
-                               else 'given back', auto_gain.exposure,
-                               'the card was blown out with the gain already at '
-                               'its floor'
-                               if auto_gain.exposure < was_exposure
-                               else 'traded back against gain, which is the noisy '
-                                    'half of the same brightness'))
-                    # Deliberately not written to cfg: the borrowed value is a
-                    # response to the light right now, and persisting it would
-                    # start a night shift on a noon exposure with nothing to
-                    # tell it that is wrong. cfg keeps what calibration measured.
-                    health.exposure = auto_gain.exposure
-                    health.measured_exposure = auto_gain.measured
-                    # Out of room: the phone is brighter than this camera can
-                    # take at any setting that does not make the screen ripple.
-                    # The only remedy left belongs to the driver, so it goes on
-                    # the screen they are looking at rather than into a log.
-                    if auto_gain.too_bright != health.too_bright:
-                        health.too_bright = auto_gain.too_bright
-                        log('the phone is brighter than the camera can take — '
-                            'turn the screen brightness down a notch'
-                            if auto_gain.too_bright
-                            else 'the picture is back inside what the camera '
-                                 'can take')
-                    # ...and the other end of the same complaint, which nothing
-                    # used to report at all: everything spent, and the screen
-                    # still under target. The picture is dark, the reads get
-                    # worse, and the remedy — the phone's own brightness, or a
-                    # mount sitting in shadow — is the driver's.
-                    if auto_gain.too_dim != health.too_dim:
-                        health.too_dim = auto_gain.too_dim
-                        log('the phone is dimmer than the camera can make up '
-                            'for — turn the screen brightness up a notch'
-                            if auto_gain.too_dim
-                            else 'there is enough light again')
+                adjust_gain(luma, now)
 
                 # Keep sampling for a short while after a card appears, so a leg
                 # missed by one frame can still be picked up by the next.
@@ -8416,101 +8569,7 @@ def main():
             if not do_read:
                 continue
 
-            # A verdict needs two reads that agree, so when one is due, take
-            # the frame after it as well and read both at once. The sensor is
-            # already producing them 33ms apart, and two reads together cost
-            # 56% of two in a row — so the confirmation stops costing a second
-            # of wall clock while an offer is timing out. It is the same
-            # evidence, gathered at the same time instead of one after the
-            # other. --no-parallel falls back to one at a time.
-            partner = None
-            pair_from = time.monotonic()
-            # ...but not for a backstop read: it only has to see whether a card
-            # is up, and one that is arms the resample burst, whose reads are
-            # paired as before. One engine, not two, every IDLE_READ_S.
-            if pair_reads and not backstop:
-                partner_request = cam.capture_request()
-                try:
-                    partner = partner_request.make_array('main')
-                finally:
-                    partner_request.release()
-            # What the read cost before the reader saw it (ReadTimes): the
-            # partner frame's capture, the trigger held back, the gate's
-            # wait, and when this frame arrived (`now`, the frame's clock).
-            read_meta = {'frameAt': now, 'gate': read_clock['gate'],
-                         'pair': ((time.monotonic() - pair_from) * 1000.0
-                                  if partner is not None else None),
-                         'held': (None if read_clock['wantedAt'] is None
-                                  else (now - read_clock['wantedAt']) * 1000.0),
-                         'labels': getattr(map_labels, 'reads', 0),
-                         'labelling': bool(getattr(map_labels, 'reading', False)),
-                         # ...and whether the backstop sent it (IDLE_READ_S),
-                         # for collect() to count what it found.
-                         'backstop': backstop}
-            read_clock['gate'] = read_clock['wantedAt'] = None
-
-            frames += 1
-            # Handed over rather than done here. The geometry goes with the
-            # frames — see PL.Geometry — because by the time the read finishes
-            # the tracker may well have moved the corners, and a frame warped
-            # against corners measured after it was captured lands the crop
-            # somewhere the card is not.
-            #
-            # While a ⌖ press is open, all of the screen box rather than the
-            # card crop: the press asks "what is on this screen", and a trip
-            # planner's addresses are outside where the offer cards land. A
-            # card box drawn by hand made that a blind spot — see
-            # cropbox.parse_card. Only while asked: an unprompted read is
-            # hunting offers and keeps the card crop.
-            # ...and for the whole-screen read digest() asked for without a
-            # press (`screen_auto`), once: the request is spent by this
-            # hand-over.
-            pressed_read = dropoff_asked and time.monotonic() < dropoff_until
-            # ...but the card box, once, when a whole-screen read saw an offer
-            # the card box has not judged (digest, `card_turn`): the window's
-            # whole-screen reads go on after it, and an unpressed one asked
-            # for is kept for the read after.
-            card_now = card_turn['wanted']
-            card_turn['wanted'] = False
-            whole_read = (pressed_read or screen_auto) and not card_now
-            if not card_now:
-                screen_auto = False
-            # The backstop's clock: when the card box was last handed over.
-            if not whole_read:
-                last_card_read = now
-            if backstop:
-                health.backstop += 1
-            # ...and a ⌖ press's read is read however dark the crop: the driver
-            # asked, so the reader is asked. Every other read — the card box,
-            # the verify beat, the whole-screen read nobody pressed for — skips
-            # a crop with nothing bright enough in it to be text. See
-            # PL.DARK_SKIP_BELOW and DARK_SAY_EVERY.
-            reader.submit([frame] if partner is None else [frame, partner],
-                          time.time(),
-                          scanner.geometry(whole=whole_read,
-                                           skip_dark=not (pressed_read and whole_read)),
-                          meta=read_meta)
-            # Not a backstop read: the camera's word is the rig asking itself
-            # whether it can see, and a read sent every IDLE_READ_S whatever
-            # the picture does would keep 'dark' from ever settling.
-            if not backstop:
-                looked = True
-            # Before the read, not after it. The dashboard has nothing else to
-            # go on for the second and a half this takes — see emit_reading.
-            #
-            # Not for a ⌖ read. It is a read of the whole screen for an
-            # address, digest() returns before emit() for it, so nothing
-            # carrying `ready` ever followed — and the panel said READING THE
-            # CARD, "working out the pay, the time and the distance", for its
-            # whole 8s READING_MS after every one, through the twelve-second
-            # window, over a navigation screen. The ⌖ button says "⌖ reading…"
-            # for that read itself.
-            # Nor a backstop read: on a phone with no card on it one goes out
-            # every IDLE_READ_S, and the panel would flash READING THE CARD
-            # over an idle screen every three seconds. One that finds a card
-            # says so with the verdict it brings.
-            if args.json and not whole_read and not backstop:
-                emit_reading()
+            hand_over(frame, now, backstop)
             if not reader.threaded and collect():
                 break
         # Out of the loop by its own `break`: the display window was closed,
