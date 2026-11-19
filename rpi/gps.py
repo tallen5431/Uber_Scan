@@ -267,7 +267,11 @@ STOPPED_FOR = 5.0
 DRIVING_HOLD = 10.0
 
 # Long enough that a phone which accepted the connection and then stopped
-# talking is noticed, short enough that stop() is honoured promptly.
+# talking is noticed. Not what makes stop() prompt: a thread asleep in recv()
+# only looks at the stop flag when this runs out, so stop() waited its whole
+# two-second join on every call with a session open — on every SIGTERM the
+# rig takes, and 44 of the GPS suite's 50 seconds. stop() shuts the session's
+# socket instead, which wakes the recv() at once.
 READ_TIMEOUT = 5.0
 
 # A car is out of range most of the time and the phone's server app stops on
@@ -683,6 +687,8 @@ class Phone(object):
         self._good_at = None
         self._stop = threading.Event()
         self._thread = None
+        # The open session's socket, so stop() can shut it under a recv().
+        self._sock = None
 
     # --- what the rig asks -------------------------------------------------
 
@@ -890,6 +896,16 @@ class Phone(object):
     def stop(self, timeout=2.0):
         self._stop.set()
         thread, self._thread = self._thread, None
+        # shutdown, not close: close() under another thread's recv() leaves it
+        # asleep on Linux until the timeout, where shutdown wakes it with an
+        # end of stream. The session's own `finally` still closes it.
+        with self._lock:
+            sock = self._sock
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except (OSError, AttributeError):
+                pass               # already gone, or a stand-in with no shutdown
         if thread is not None:
             thread.join(timeout=timeout)
         with self._lock:
@@ -914,7 +930,13 @@ class Phone(object):
 
     def _session(self):
         sock = self._connect(self.host, self.port)
+        with self._lock:
+            self._sock = sock
         try:
+            # A stop() that came while connect() was still out found no socket
+            # to shut; it is seen here, before the first recv() can sleep.
+            if self._stop.is_set():
+                return
             sock.settimeout(READ_TIMEOUT)
             rest = b''
             asked = False
@@ -926,6 +948,8 @@ class Phone(object):
                     # what it must not do is hide a stop().
                     continue
                 if not chunk:
+                    if self._stop.is_set():
+                        return         # our own shutdown, not the phone's
                     raise IOError('the phone closed the connection')
                 rest += chunk
                 # Split on the wire's own line ending, and keep the tail: a
@@ -956,6 +980,8 @@ class Phone(object):
                         continue
                     self.take(got)
         finally:
+            with self._lock:
+                self._sock = None
             try:
                 sock.close()
             except Exception:          # noqa: BLE001

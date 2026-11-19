@@ -651,6 +651,36 @@ class QuadTracker:
         """How far the corners have walked from the last saved calibration."""
         return distance(self.quad, self.saved)
 
+    # The two answers the scan loop asks on every frame, without the rest of
+    # status(): it built a dict and two numpy corner distances up to five times
+    # a frame (scan_pi.py's updown watch, the tracker check's before and after,
+    # AutoGain's has_screen) to read one boolean of it. status() reads these,
+    # so the two can never answer differently.
+    @property
+    def lost(self):
+        """No candidate for LOST_AFTER checks running."""
+        return self.misses >= LOST_AFTER
+
+    @property
+    def stalled(self):
+        """Corners off the screen the camera sees for STALL_VISIBLE or more.
+
+        Being stuck is not being lost, and it used to look identical from out
+        here: a candidate was found on every check, so `misses` stayed at zero
+        and nothing distinguished corners tracking a screen from corners
+        frozen beside one.
+
+        Read off `_off_since` rather than the recovery anchor. The anchor only
+        advances on candidates that match the calibrated shape, which is right
+        for deciding whether to adopt one and useless for saying whether
+        anything is wrong: the worst case is precisely the one where nothing
+        the detector offers matches, and reporting from the anchor there
+        reported nothing at all.
+        """
+        return (self._off_since is not None
+                and self._last_check is not None
+                and self._last_check - self._off_since >= STALL_VISIBLE)
+
     def status(self):
         """What the corners are doing, in terms a log line can use.
 
@@ -677,21 +707,8 @@ class QuadTracker:
                 'wander': round(distance(self.quad, self.calibrated), 1),
                 'rebaselines': self.rebaselines,
                 'centred': self.centred,
-                'lost': self.misses >= LOST_AFTER,
-                # Being stuck is not being lost, and it used to look identical
-                # from out here: a candidate was found on every check, so
-                # `misses` stayed at zero and nothing distinguished corners
-                # tracking a screen from corners frozen beside one.
-                #
-                # Read off `_off_since` rather than the recovery anchor. The
-                # anchor only advances on candidates that match the calibrated
-                # shape, which is right for deciding whether to adopt one and
-                # useless for saying whether anything is wrong: the worst case
-                # is precisely the one where nothing the detector offers matches,
-                # and reporting from the anchor there reported nothing at all.
-                'stalled': (self._off_since is not None
-                            and self._last_check is not None
-                            and self._last_check - self._off_since >= STALL_VISIBLE)}
+                'lost': self.lost,
+                'stalled': self.stalled}
 
 
 # --- geometry ---------------------------------------------------------------

@@ -5160,17 +5160,25 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None, map_label=None):
     the panel — the scanner sees the navigation screen and the verdict clears —
     so a button saying only "took it" would be marking something the driver can
     no longer see.
+
+    The figures it shares with the row and the panel's reading come from one
+    place, JR.figures, so the three cannot name two distances for one card.
+    Two differences from the row are deliberate and kept here: `minutes` is
+    the card's own (below), and `billedMinutes` falls back to the card's
+    printed minutes on a line with no verdict, so a deadline card still
+    publishes something the button can name.
     """
+    fig = JR.figures(parsed, rate, whole, verdict_only=True)
     print(json.dumps({'offer': {
         'id': offer_id,
-        'pay': parsed.get('pay'),
+        'pay': fig['pay'],
         # The card's own minutes, not the billed ones: a figure with the
         # driver's pickup pad added would not match the card they are trying to
         # remember. `or`, not a two-argument `get` — `rate` always carries the
         # key and it is `None` on a card that stated no duration, so the default
         # would never have been reached.
         'minutes': rate.get('cardMinutes') or parsed.get('minutes'),
-        'perHour': round(rate['perHour'], 2) if rate.get('ready') else None,
+        'perHour': fig['perHour'],
         # Everything server.js builds the order in the car out of when the driver
         # marks this offer as taken. It read six fields off this object and was
         # sent four, so the order in the car had no distance, no running cost
@@ -5186,9 +5194,10 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None, map_label=None):
         # under. There is no `billedMinutes` key in what rate() gives back — in
         # either port — so this line read a name nothing produces and took the
         # fallback every single time, publishing the CARD's minutes as the
-        # billed ones. Twenty-eight lines below, emit() gets it right
-        # (`round(rate['minutes'], 1)`), and so does journal.py; only this path
-        # — the one that feeds the pair arithmetic — was reading the wrong key.
+        # billed ones. emit() got it right (`round(rate['minutes'], 1)`), and
+        # so did journal.py; only this path — the one that feeds the pair
+        # arithmetic — was reading the wrong key. All three now take it from
+        # JR.figures, so there is one spelling of it left to get wrong.
         #
         # server.js stores it as `holding.minutes`, which is `totalA` in
         # Advice.stack: the number a held job's pay is prorated over. A Shop &
@@ -5213,10 +5222,10 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None, map_label=None):
         # are zero on all 3,065 rows, so billed and card minutes are equal
         # throughout. 131 of those rows carry an item count, which is the shape
         # it fires on the moment a shopping allowance is set.
-        'billedMinutes': rate.get('minutes', parsed.get('minutes')),
-        'miles': rate.get('miles', parsed.get('miles')),
-        'cost': (round(rate['cost'], 2)
-                 if rate.get('ready') and rate.get('cost') is not None else None),
+        'billedMinutes': (fig['billedMinutes'] if fig['billedMinutes'] is not None
+                          else parsed.get('minutes')),
+        'miles': fig['miles'],
+        'cost': fig['cost'],
         'dropoff': parsed.get('dropoff'),
         'pickup': parsed.get('pickup'),
         # ...and the store's door DoorDash's stops card printed under that
@@ -5294,7 +5303,7 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None, map_label=None):
         #
         # Not a verdict to be mistaken for one: the message still carries no
         # `ready`, so it can neither replace a verdict nor stand in for one.
-        'state': rate.get('state'),
+        'state': fig['state'],
         # What the card says about its own size, for whatever measures a pin
         # against the card's distance: a straight line from where the car was
         # cannot be longer than the road, but only on a figure that counts the
@@ -5302,19 +5311,23 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None, map_label=None):
         # the row was written from, not worked out again: `whole` is
         # OP.is_whole's answer the loop already holds, `hasTotal`, `legs` and
         # `toPickupMiles` are the window's merge, and the two `miles*` flags
-        # are the parser's own word for a distance it repaired or doubted.
+        # are the reader's own word for a distance it repaired or doubted —
+        # rate()'s word, through JR.figures, as the row's are: on a deadline
+        # card rate() is where a lost decimal is put back, and taking them from
+        # parse() said "24 mi read as 2.4" was not corrected while `miles`
+        # beside them was the corrected 2.4.
         # Read by map-view.js MapView.cardYardstick, which decides whether
         # Map view may hold this card against a pin, and copied onto the
         # order in the car by server.js cardOf. `toPickupMiles` is carried and
         # deliberately NOT read there: the approach leg alone leaves only the
         # half mile of slack for the car moving between the platform's
         # measurement and this fix, and that motion has not been measured.
-        'whole': bool(whole),
+        'whole': fig['whole'],
         'hasTotal': bool(parsed.get('hasTotal')),
         'legs': parsed.get('legs'),
         'toPickupMiles': parsed.get('toPickupMiles'),
-        'milesUncertain': bool(parsed.get('milesUncertain')),
-        'milesCorrected': bool(parsed.get('milesCorrected')),
+        'milesUncertain': fig['milesUncertain'],
+        'milesCorrected': fig['milesCorrected'],
         'earlyLook': says_early_look(parsed),
         'multiOrder': says_multi_order(parsed),
         'manyDropoffs': says_many_dropoffs(parsed),
@@ -5354,12 +5367,20 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None, map_label=None):
 
 def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
          clipped=False, crop_from='drawn'):
-    """One JSON object per line, flushed, so a parent process sees reads live."""
+    """One JSON object per line, flushed, so a parent process sees reads live.
+
+    The figures it shares with the row and the offer line come from
+    JR.figures. Two differences are deliberate and kept here: `minutes` is the
+    card's printed figure (`cardMinutes` beside it is what the verdict was
+    made over), and `whole` is None when the caller did not say, which the
+    panel reads as "not asked" rather than as a fragment.
+    """
+    fig = JR.figures(parsed, rate, whole, verdict_only=True)
     payload = {
         'track': tracker.status() if tracker is not None else None,
         'ready': rate['ready'],
         'locked': locked,
-        'state': rate['state'],
+        'state': fig['state'],
         # Which figure is impossible, so the page can name it rather than just
         # refusing to say anything. The numbers below are still sent: the driver
         # is looking at the same card and is the one who can tell which of them
@@ -5390,21 +5411,21 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
         #
         # It is also what Advice.stack needs to apply the same cap to a pair.
         'uncosted': bool(rate.get('uncosted')),
-        'perHour': round(rate['perHour'], 2) if rate['ready'] else None,
+        'perHour': fig['perHour'],
         # Both rates, and the time they were both divided by. The card's own
         # minutes are below as `minutes`, for checking against the phone; these
         # are what the arithmetic actually used, which differ once `pad` or
         # `secondsPerItem` is set. Sending both is what lets the page show a
         # sum that adds up instead of one it has to guess at.
         'grossPerHour': round(rate['grossPerHour'], 2) if rate['ready'] else None,
-        'billedMinutes': round(rate['minutes'], 1) if rate['ready'] else None,
+        'billedMinutes': fig['billedMinutes'],
         # `is not None`, not truthiness: this is a number that can legitimately
         # be zero, and now that it is net of running costs it can be negative
         # too. Testing it for truth turned "you break exactly even per mile"
         # into "--".
         'perMile': (round(rate['perMile'], 2)
                     if rate.get('perMile') is not None else None),
-        'pay': parsed['pay'],
+        'pay': fig['pay'],
         # ...and how much of it the card says was Boost+ or Peak Pay, for the
         # panel's "incl. $2.93 Boost" (offer_parser boost_of). A label: no
         # verdict, rate or rule reads it.
@@ -5451,17 +5472,17 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
         # had no time to check it against and rate() recovers a lost decimal
         # there, so taking it from parsed would put 24 miles on the panel
         # beside a rate worked out over 2.4.
-        'miles': rate.get('miles', parsed['miles']),
+        'miles': fig['miles'],
         'items': parsed['items'],
         # DoorDash's printed stop count. See OP.parse's `stops`.
         'stops': parsed.get('stops'),
-        'milesCorrected': rate.get('milesCorrected', parsed['milesCorrected']),
-        'milesUncertain': rate.get('milesUncertain', parsed['milesUncertain']),
+        'milesCorrected': fig['milesCorrected'],
+        'milesUncertain': fig['milesUncertain'],
         # What was taken off the top, and at what rate. Without these the page
         # cannot explain its own headline: a driver who works out 7.09 over 34
         # minutes gets $12.51/hr and the screen says $10.61, with nothing on it
         # saying that 3.6 miles of running costs came out first.
-        'cost': round(rate['cost'], 2) if rate.get('ready') else None,
+        'cost': fig['cost'],
         'costPerMile': rate.get('costPerMile'),
         'ms': round(ms['total']),
         'text': (parsed.get('text') or '')[:200],
@@ -5477,7 +5498,7 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
         # page was left to infer a finished reading from `locked` and drew a
         # plain ACCEPT on a card missing half its journey, which reads as a much
         # better offer than it is.
-        'whole': None if whole is None else bool(whole),
+        'whole': None if whole is None else fig['whole'],
         # Whether this read found a payout flush against the top of the box
         # and threw the whole parse away for it (pipeline.money_is_clipped).
         # The one case where the rig KNOWS the box cut a card, and the reading
@@ -5767,7 +5788,17 @@ def main():
     # ...and one read at a time means no rescue read started ahead on a
     # spare core either (PL._SPARE_WORKERS): what --no-parallel is for is a
     # rig reading one thing at once.
-    PL.spare_cores(pair_reads)
+    #
+    # Nor on the lite edition. The two spare threads hold an engine each,
+    # ~25 MB between them (PL.MAX_ENGINES), for links that may be thrown
+    # away, on the board with the least memory and the fewest spare cycles.
+    # Nothing a reading says changes: a link started ahead is the same read
+    # on the same crop as the one the chain makes in place (PL._SPARE_WORKERS,
+    # "THE ANSWER IS THE ONE THE CHAIN GAVE"), so lite reads the same card to
+    # the same figures, one link after another. Off before the first read,
+    # so the pool, which starts on its first offer, is never started.
+    spares = pair_reads and not lite
+    PL.spare_cores(spares)
 
     # Everything that decides what gets read, in one place, once. A log without
     # this is a log where every question starts with "what was it set to?".
@@ -5963,6 +5994,9 @@ def main():
     # ...and, for the richer snap (EXPERIMENTAL), the last reads and the newest
     # full-resolution frame: a reference to the sensor array a read or the
     # phone view already made, never a copy. See ReadLog and answer_snap.
+    # Never kept on the lite edition: a reference is still the whole ~12 MB
+    # array held alive between reads, for an experimental snap lite does not
+    # offer, where otherwise it is freed when the read is done.
     read_log = ReadLog()
     full_frame = {'frame': None, 'at': None, 'source': None}
     # The accumulator episode whose payout a card found above the drawn card
@@ -7530,6 +7564,9 @@ def main():
         # stretch the rig was scanning.
         updown.start(bool(args.gps), uptime())
         while True:
+            # Where the request files are, asked once for this pass rather than
+            # by every request polled below (handoff.begin_pass).
+            HO.begin_pass()
             # A read that finished while the camera kept running. Taken here,
             # at the top, because everything below can `continue` past it.
             if collect():
@@ -7545,7 +7582,7 @@ def main():
             # tracks the corners — see the note under STALL_SAY.
             sight = updown.watch(
                 time.monotonic(),
-                tracker.status()['lost'] if tracker is not None else None,
+                tracker.lost if tracker is not None else None,
                 gps_now(phone, gps_refused),
                 sight_now(frozen,
                           auto_gain.lit if (tracker is None and auto_gain is not None)
@@ -7680,7 +7717,7 @@ def main():
                     # work that may be thrown away is heat for nothing on a
                     # Pi the firmware is slowing. The offer's own reads are
                     # untouched — the chain reads in place, as it did.
-                    if pair_reads and PL.spare_cores(not pi.guard.on):
+                    if spares and PL.spare_cores(not pi.guard.on):
                         log('rescue reads %s' % ('one after another while the Pi is hot'
                                                  if pi.guard.on else
                                                  'started ahead on the spare cores again'))
@@ -7849,9 +7886,8 @@ def main():
                 # size. Blurred frames are skipped: a smeared edge is a worse
                 # guess than the corners already held.
                 if tracker is not None and scanner.settled:
-                    was = tracker.status()
-                    jumps_before, lost_before = tracker.jumps, was['lost']
-                    stalled_before = was['stalled']
+                    jumps_before, lost_before = tracker.jumps, tracker.lost
+                    stalled_before = tracker.stalled
                     rebased_before = tracker.rebaselines
                     if tracker.update(luma, now):
                         scanner.quad = tracker.quad
@@ -7894,7 +7930,7 @@ def main():
                         log('corners re-locked: the phone is somewhere the stored '
                             'calibration did not expect, and has been for several '
                             'checks running. Mount moved?')
-                    lost_now = tracker.status()['lost']
+                    lost_now = tracker.lost
                     if lost_now != lost_before:
                         log('screen %s' % ('not visible — is the phone lit and in frame?'
                                            if lost_now else 'visible again'))
@@ -7907,7 +7943,7 @@ def main():
                     # corners, so corners drawn round the card read the journey
                     # and lose the payout. That case cannot be fixed by moving
                     # the box, only by the person who can see the screen.
-                    stalled_now = tracker.status()['stalled']
+                    stalled_now = tracker.stalled
                     if stalled_now != stalled_before:
                         log(('outline stuck: the corners have been off the screen '
                              'the camera can see for %ds. If the box is drawn '
@@ -7977,7 +8013,7 @@ def main():
                     # LIT_ENOUGH backstop is there to cover. Saying it out loud
                     # is what let the backstop be applied only where it belongs.
                     have_screen = (None if tracker is None
-                                   else not tracker.status()['lost'])
+                                   else not tracker.lost)
                     was_exposure = auto_gain.exposure
                     ctrls = auto_gain.update(lit, now, has_screen=have_screen)
                     # The photometric picture, before any preprocessing — the
@@ -8268,7 +8304,8 @@ def main():
                     # which is exactly what OpenCV expects. The name is the odd
                     # one out.
                     frame, preview_scale = request.make_array('main'), None
-                    full_frame = {'frame': frame, 'at': time.time(), 'source': 'sensor'}
+                    if not lite:
+                        full_frame = {'frame': frame, 'at': time.time(), 'source': 'sensor'}
                 else:
                     # Copied, because `luma` is a view onto the request's own
                     # buffer and the request is released a few lines below —
@@ -8415,6 +8452,7 @@ def main():
         # different fault from one that never stopped.
         if clean:
             updown.stop()
+        HO.end_pass()
         reader.close()
         map_labels.close()
         if map_bands is not None:

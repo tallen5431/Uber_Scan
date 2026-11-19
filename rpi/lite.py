@@ -23,6 +23,13 @@ verdict needs:
     no map.
   - the map bands (MapBands): collection for a geometry study, on another
     thread, written to disk. Nothing the driver sees comes from it.
+  - the rescue's reads started ahead on the spare cores (pipeline's
+    _SPARE_WORKERS): two threads holding an engine each, ~25 MB, for links
+    that may be thrown away. A link started ahead is the same read the chain
+    makes in place, so a lite rig reads every card to the same figures, one
+    link after another.
+  - the newest full-resolution frame kept between reads for the richer snap
+    (EXPERIMENTAL): ~12 MB held alive for a snap lite does not offer.
 
 What it never turns off: the reader, the parser, every money-safety rule, the
 verdict, speech and the journal (the small local offers log). Those are not
@@ -83,6 +90,7 @@ def on_file(path, environ=None):
 
 
 # Said once at the scanner's start, so a lite rig's log explains why the map
-# label and the bands are never mentioned again.
+# label, the bands and the spare cores' rescue reads are never mentioned again.
 SAYS = ('lite edition: the card, its verdict and the offers log only - no map '
-        'label reads, no map bands (rpi/lite.py)')
+        'label reads, no map bands, no rescue reads ahead on spare cores '
+        '(rpi/lite.py)')

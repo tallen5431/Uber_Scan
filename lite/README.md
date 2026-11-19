@@ -76,11 +76,12 @@ Cheaper, and not yet tried. Expect to tune.
   together, and a full browser on top is too much: run it with `KIOSK=none`
   and use a phone or tablet as the display (below), or no display and spoken
   verdicts. Its camera connector is the narrow 22-pin one — buy the Zero
-  camera cable. The reader lets up to four tesseracts run at once
-  (`OCR_SLOTS` in rpi/pipeline.py; lite never uses the map label's share).
-  Four engines may be more than 512 MB holds: on a Zero, try
-  `UBERSCAN_OCR_SLOTS=2` in the service's environment and time it with
-  `tools/pi_bench.py --busy`. Not yet measured, so not yet the default.
+  camera cable. Lite starts no map label read and none of the rescue's
+  reads ahead on the spare cores (rpi/scan_pi.py, `spares`), so at most the
+  paired read's two tesseracts are loaded and reading — the same answers,
+  one rescue read after another — and `UBERSCAN_OCR_SLOTS` (rpi/pipeline.py's
+  gate for four) has nothing to hold back on lite. Not yet measured on a
+  Zero; time it with `tools/pi_bench.py`.
 - **A used Raspberry Pi 3B+** (1 GB). Slower than a Pi 4, more room than a
   Zero.
 - **A 5 MP OV5647 camera clone.** Fixed focus is fine on a fixed mount: set

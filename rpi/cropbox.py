@@ -43,13 +43,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import handoff as HO                                          # noqa: E402
 
-# Where the web side leaves a box for the camera side to pick up. A file, for
-# the same reason .viewing is a file: the scanner is sometimes
-# a child of the web server and sometimes a systemd unit that has never heard of
-# it, and a file works identically either way. In RAM where there is any, and
-# read from the checkout as well — see handoff.py.
-REQUEST_PATH = HO.path(HO.CROPBOX)
-
 # What to write into config.json's `cropBox` for a hand-drawn box: read all of
 # what was drawn, rather than deriving a crop inside it.
 PIN_WHOLE = [0.0, 0.0, 1.0, 1.0]
@@ -222,15 +215,22 @@ def take_request(path=None):
     """
     where = [path] if path else HO.candidates(HO.CROPBOX)
     raw = None
+    seen = False
     for candidate in where:
         try:
             if not os.path.exists(candidate):
                 continue
+            seen = True
             with open(candidate) as fh:
                 raw = fh.read()
             break
         except (IOError, OSError):
             continue
+    # Nothing there is the answer on nearly every frame, and it asked the
+    # kernel to unlink both absent names anyway. Cleared only when there was
+    # a request to clear, readable or not, and then everywhere, as above.
+    if not seen:
+        return None
     for candidate in where:
         try:
             os.remove(candidate)

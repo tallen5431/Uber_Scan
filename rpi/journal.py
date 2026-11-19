@@ -1473,6 +1473,59 @@ def card_app(parsed):
     return OP.screen_type(parsed.get('text') or '')['app']
 
 
+def figures(parsed, rate, whole=True, verdict_only=False):
+    """The figures every record of one reading states, worked out once.
+
+    Three things write a reading down — the row (row_for), the reading the
+    panel is sent (scan_pi.emit) and the offer line server.js holds the order
+    in the car by (scan_pi.emit_offer) — and each used to build these nine
+    from `parsed` and `rate` by hand. Ten of the fifteen keys emit and
+    emit_offer share were spelled differently, and one of the spellings was a
+    fault: emit_offer took `miles` from rate() and the two `miles*` flags from
+    parse(). On a deadline card rate() is where a lost decimal is put back
+    ("$18.00 Guaranteed (incl. tip) 24 mi Deliver by 6:25 PM" is 2.4 mi,
+    corrected), so the offer line said 2.4 miles and "not corrected" in one
+    breath, and Map view's yardstick (MapView.cardYardstick) trusted a
+    distance the reader had repaired. The row and the panel took both from
+    rate() and said corrected.
+
+    Each figure from the verdict, falling back to the card only where rate()
+    gave no answer of its own, for the reasons row_for gives against each.
+
+    `verdict_only` is the one deliberate difference between the builders that
+    lives here: the panel and the offer line never state a rate, a cost or a
+    billed time beside no verdict, and the row stores whatever rate it was
+    handed — a hand-built one from the keypad or a re-rate carries numbers and
+    no `ready`. rate() itself returns none of the three without a verdict, so
+    on everything the loop hands over the two answers are the same.
+    """
+    miles = rate.get('miles')
+    if miles is None:
+        miles = parsed.get('miles')
+    got = {
+        'pay': parsed.get('pay'),
+        'miles': miles,
+        # `in rate` rather than a truthiness test, because False is the answer
+        # for most readings and is not a missing one.
+        'milesCorrected': bool(rate['milesCorrected'] if 'milesCorrected' in rate
+                               else parsed.get('milesCorrected')),
+        'milesUncertain': bool(rate['milesUncertain'] if 'milesUncertain' in rate
+                               else parsed.get('milesUncertain')),
+        'perHour': _round(rate.get('perHour'), 2),
+        'cost': _round(rate.get('cost'), 2),
+        # `minutes`, the name rate() returns the billed time under: emit_offer
+        # once asked for a `billedMinutes` key nothing produces and published
+        # the card's minutes as the billed ones (see the Shop & Deliver case
+        # in scan_pi.emit_offer).
+        'billedMinutes': _round(rate.get('minutes'), 1),
+        'state': rate.get('state'),
+        'whole': bool(whole),
+    }
+    if verdict_only and not rate.get('ready'):
+        got.update(perHour=None, cost=None, billedMinutes=None)
+    return got
+
+
 def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
             locked=None, settled=False, whole=True, keep_places=True,
             places=None, where=None):
@@ -1484,17 +1537,16 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
     unreadable a month after the target moved, with no way to tell a verdict
     that was right then from one that would be wrong now.
     """
-    pay = parsed.get('pay')
+    fig = figures(parsed, rate, whole)
+    pay = fig['pay']
     # The distance the verdict was actually made over, for the same reason the
     # minutes below come from rate(): a delivery card states a distance with no
     # time beside it, so parse() had nothing to check it against and rate() —
     # which knows the clock — is where a lost decimal is recovered. Storing the
     # card's apparent 24 miles beside a rate worked out over 2.4 would be a row
     # that cannot be reconciled with itself. Falls back to the parsed value for
-    # a row written before rate() returned one.
-    miles = rate.get('miles')
-    if miles is None:
-        miles = parsed.get('miles')
+    # a row written before rate() returned one (figures()).
+    miles = fig['miles']
     # The minutes the verdict was actually made over. On a delivery card that
     # is the time left until the deadline, which parse() cannot work out on its
     # own — so it comes back from rate(), and only falls back to the card's own
@@ -1610,15 +1662,15 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # under "other", and tools/ worked it out again from the text.
         'app': card_app(parsed),
         # --- what the scanner made of it ------------------------------------
-        'perHour': _round(rate.get('perHour'), 2),
+        'perHour': fig['perHour'],
         'grossPerHour': _round(rate.get('grossPerHour'), 2),
         'perMile': _round(rate.get('perMile'), 2),
-        'cost': _round(rate.get('cost'), 2),
+        'cost': fig['cost'],
         # What the arithmetic actually divided by, which stops matching the
         # card's own minutes the moment a pad or a shopping allowance is set.
         # Without it nothing can reconstruct the rate from the row.
-        'billedMinutes': _round(rate.get('minutes'), 1),
-        'state': rate.get('state'),
+        'billedMinutes': fig['billedMinutes'],
+        'state': fig['state'],
         # --- the settings that produced that verdict -------------------------
         'target': rate.get('target'),
         'band': rate.get('band'),
@@ -1628,12 +1680,9 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         'mergedFrom': parsed.get('mergedFrom'),
         'hasTotal': bool(parsed.get('hasTotal')),
         # From rate() as well, and for the same reason: on a delivery card the
-        # correction happens there. `in rate` rather than a truthiness test,
-        # because False is the answer for most rows and is not a missing one.
-        'milesCorrected': bool(rate['milesCorrected'] if 'milesCorrected' in rate
-                               else parsed.get('milesCorrected')),
-        'milesUncertain': bool(rate['milesUncertain'] if 'milesUncertain' in rate
-                               else parsed.get('milesUncertain')),
+        # correction happens there.
+        'milesCorrected': fig['milesCorrected'],
+        'milesUncertain': fig['milesUncertain'],
         'locked': bool(locked),
         # What the reader actually read, which is the one thing this file never
         # kept and the one thing every fix to the parser has needed.
@@ -1675,7 +1724,7 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # on its own is a shorter, better-paying job than the card describes. So
         # it must never reach a median. It is written anyway, because an offer
         # that simply disappears is a hole nothing can account for later.
-        'whole': bool(whole),
+        'whole': fig['whole'],
         # --- where the car was when the card came up --------------------------
         #
         # Absent unless a GPS was reachable AND its fix was fresh, which is most

@@ -68,15 +68,47 @@ RAM = '/dev/shm'
 ENV_DIR = 'UBERSCAN_HANDOFF_DIR'
 
 
+# The scan loop's answer for this pass, or None outside one (begin_pass).
+_PASS_DIR = None
+
+
+def begin_pass():
+    """Answer _dir() once for this pass of the scan loop, and keep it to the next.
+
+    Every request the loop polls each frame — 📷 Snap, ⌖ Dropoff, the keypad's
+    cost, a drawn box — asked _dir() again for every name it built, two for
+    each path() and so four for each candidates(): about eight answers a frame
+    to one question whose answer moves once a boot, if at all. Asked once a
+    pass instead, so a mount that comes up late is still seen on the next
+    frame, which is all the per-call answer below was for.
+
+    end_pass() puts the per-call answer back, for whatever runs after the loop
+    in the same process; nothing else calls begin_pass, so the web side's
+    copies, the autopilot and the suites answer per call as before.
+    """
+    global _PASS_DIR
+    _PASS_DIR = None
+    _PASS_DIR = _dir()
+    return _PASS_DIR
+
+
+def end_pass():
+    """Back to answering per call (see begin_pass)."""
+    global _PASS_DIR
+    _PASS_DIR = None
+
+
 def _dir():
     """Where the requests go: asked for, else RAM, else the checkout.
 
     Answered per call rather than once at import, because the scanner is
     started before the desktop on a Pi and this file is imported early enough
     that a mount not yet up would be remembered as absent for the whole shift.
-    Three syscalls that the kernel answers from cache; this is not the loop's
-    expensive part.
+    Three syscalls that the kernel answers from cache; inside the scan loop,
+    once a pass (begin_pass).
     """
+    if _PASS_DIR is not None:
+        return _PASS_DIR
     asked = os.environ.get(ENV_DIR)
     if asked and os.path.isdir(asked) and os.access(asked, os.W_OK):
         return asked
@@ -85,7 +117,7 @@ def _dir():
     return HERE
 
 
-def _name(base):
+def _name(base, where=None):
     """The filename to use in whichever directory, keeping them apart.
 
     A dotfile is invisible in a checkout, which is right there and useless in a
@@ -94,12 +126,14 @@ def _name(base):
     reason `uberscan-live.jpg` is: so it is obvious whose it is and safe to
     delete.
     """
-    return base if _dir() == HERE else 'uberscan-' + base.lstrip('.')
+    where = _dir() if where is None else where
+    return base if where == HERE else 'uberscan-' + base.lstrip('.')
 
 
 def path(base):
     """Where to write, and the first place to look."""
-    return os.path.join(_dir(), _name(base))
+    where = _dir()
+    return os.path.join(where, _name(base, where))
 
 
 def legacy(base):

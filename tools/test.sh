@@ -48,21 +48,38 @@ pass=0
 fail=0
 failed_names=""
 
+# Each suite gets a handoff directory of its own (handoff.ENV_DIR). Only
+# test_server and test_stacking named one; every other suite that starts a
+# scanner or a server, or calls the request readers, read and wrote the
+# machine's shared /dev/shm files — each other's, and a real rig's on the same
+# machine. test_handoff is the exception: it is the suite that checks the
+# default rule itself (/dev/shm, the uberscan- names), and sets the variable
+# where it needs one.
+#
+# And each suite's seconds, because "the gate takes an hour and a half" was
+# known only as a total: which suites spend it was measured by hand each time
+# anybody asked.
 run() {
     local name="$1" cmd="$2"
     printf '  %-26s ' "$name"
-    local out status
-    out=$(eval "$cmd" 2>&1)
+    local out status hand=""
+    local began=$SECONDS
+    if [ "$name" != "test_handoff.py" ]; then
+        hand=$(mktemp -d)
+    fi
+    out=$(if [ -n "$hand" ]; then export UBERSCAN_HANDOFF_DIR="$hand"; fi; eval "$cmd" 2>&1)
     status=$?
+    if [ -n "$hand" ]; then rm -rf "$hand"; fi
+    local took=$((SECONDS - began))
     local last
     last=$(printf '%s\n' "$out" | grep -E 'passed|FAILED|skipping' | tail -1)
     if [ $status -eq 0 ]; then
         pass=$((pass + 1))
-        printf '%s\n' "${last:-ok}"
+        printf '%5ds  %s\n' "$took" "${last:-ok}"
     else
         fail=$((fail + 1))
         failed_names="$failed_names $name"
-        printf 'FAILED\n'
+        printf '%5ds  FAILED\n' "$took"
         printf '%s\n' "$out" | grep -E '^FAIL|Error|Traceback' | head -8 | sed 's/^/      /'
     fi
 }

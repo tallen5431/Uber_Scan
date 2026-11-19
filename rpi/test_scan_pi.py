@@ -346,6 +346,30 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     sys.argv = ['scan_pi', '--config', config, '--json', '--snapshot', '',
                 '--journal', journal] + list(extra_argv)
     deadline = time.time() + seconds
+    # The journal's rows other than the rig's own up and down, parsed again only
+    # when the file has grown: `until` is asked on every sleep of the loop, a
+    # hundred times a second, and the file changes a few times a run.
+    _parsed = {'size': -1, 'rows': []}
+
+    def written():
+        try:
+            size = os.path.getsize(journal)
+        except OSError:
+            return []
+        if size != _parsed['size']:
+            got = []
+            with open(journal) as fh:
+                for line in fh:
+                    # A line still being written is left for the next ask.
+                    if not line.endswith('\n'):
+                        size = -1
+                        break
+                    if line.strip():
+                        row = json.loads(line)
+                        if row.get('kind') != 'up':
+                            got.append(row)
+            _parsed.update(size=size, rows=got)
+        return _parsed['rows']
 
     def state():
         return dict(verdicts=verdicts, destinations=len(destinations),
@@ -361,12 +385,12 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
                               if a and isinstance(a[0], dict) and a[0].get('ready')),
                     # Not the rig's own start and stop rows. The start lands
                     # before anything is read, so counting it stopped every
-                    # "until a row lands" run before the first read. Matched
-                    # on the text Journal.append writes (sort_keys), because
-                    # this is asked on every sleep of the loop.
-                    rows=(sum(1 for line in open(journal)
-                              if '"kind": "up"' not in line)
-                          if os.path.exists(journal) else 0))
+                    # "until a row lands" run before the first read.
+                    rows=len(written()),
+                    # ...and the rows themselves, and the loop's Health, for
+                    # an `until` that stops on what a row or a counter says.
+                    written=written(),
+                    health=(healths[-1] if healths else None))
 
     def bounded_sleep(s):
         # The loop's own sleeps are how it yields; shortening them makes the
@@ -1619,27 +1643,53 @@ def payout_only(self, frames, now=None, geom=None):
             for _ in frames]
 
 
-def tally_over(look, seconds=22.0):
+def _tally(rows):
+    seen = [r for r in rows if r.get('kind') == 'seen']
+    offers = [r for r in rows if not r.get('kind')]
+    return (sum(r.get('saw') or 0 for r in seen),
+            sum(r.get('kept') or 0 for r in seen), len(offers))
+
+
+def tally_over(look, seconds=22.0, until=None):
     """Run the loop with a blinking card and add up what it says it saw."""
     import scan_pi as SP
     real_every = SP.HEALTH_EVERY
     SP.HEALTH_EVERY = 3.0                  # so a short run reports at all
     try:
         rows = run(TC.uberx_screen(), seconds=seconds, appear_at=0.4,
-                   vanish_at=10_000.0, look=look)['rows']
+                   vanish_at=10_000.0, look=look, until=until)['rows']
     finally:
         SP.HEALTH_EVERY = real_every
-    seen = [r for r in rows if r.get('kind') == 'seen']
-    offers = [r for r in rows if not r.get('kind')]
-    return (sum(r.get('saw') or 0 for r in seen),
-            sum(r.get('kept') or 0 for r in seen), len(offers))
+    return _tally(rows)
 
-saw, kept, offers = tally_over(None)
+
+def _then(pred, tail):
+    """An `until` that ends the run `tail` seconds after pred(state) first holds:
+    for a check that something happened and then nothing more did, which a run
+    stopped on the instant cannot see."""
+    first = []
+
+    def until(st):
+        if not first:
+            if not pred(st):
+                return False
+            first.append(time.time())
+        return time.time() - first[0] >= tail
+    return until
+
+
+# Until the tallies say the card was seen, kept as often as seen, and is in the
+# journal: the final state, which a fixed 22 s spent waiting past.
+saw, kept, offers = tally_over(None, until=lambda st: (
+    lambda t: t[0] >= 1 and t[1] == t[0] and t[2] >= 1)(_tally(st['written'])))
 ok_('a card that reads is counted as seen', saw >= 1)
 eq('...and as kept', kept, saw)
 ok_('...and really did reach the journal', offers >= 1)
 
-saw, kept, offers = tally_over(payout_only)
+# ...and the payout that never becomes one, until it has been seen and one more
+# health window (HEALTH_EVERY, 3 s here) has gone by without its being kept.
+saw, kept, offers = tally_over(payout_only, until=_then(
+    lambda st: _tally(st['written'])[0] >= 1, 3.5))
 ok_('a payout that never becomes an offer is counted as seen', saw >= 1)
 eq('...and not as kept', kept, 0)
 eq('...which is the truth: nothing was written', offers, 0)
@@ -1649,7 +1699,8 @@ eq('...which is the truth: nothing was written', offers, 0)
 # web side and the scanner write one file without either knowing about the
 # other's rows, and a new kind has to keep it.
 _mixed = run(TC.uberx_screen(), seconds=8.0, appear_at=0.4,
-             vanish_at=10_000.0)['rows']
+             vanish_at=10_000.0,
+             until=lambda st: any(not r.get('kind') for r in st['written']))['rows']
 ok_('every row is either an offer or a kind, never both',
     all(bool(r.get('kind')) != ('pay' in r) for r in _mixed))
 ok_('...and a tally carries the pair the sync keys on',
@@ -2141,6 +2192,35 @@ eq('...and the card\'s own yardstick fields',
    [7.6, True, True, 1, None, False, True])
 eq('...and that the card said it was an Early look, even as OCR spelled it',
    placed.get('earlyLook', 'absent'), True)
+# ...and the two `miles*` flags are rate()'s, beside rate()'s distance. On a
+# deadline card rate() is where a lost decimal is put back: "24 mi" with 20
+# minutes to the deadline is 2.4 mi, corrected. The line took `miles` from
+# rate() and the flags from parse(), so it said 2.4 miles and "not corrected",
+# while the row and the panel's reading said corrected — and Map view's
+# yardstick trusts a distance the reader did not repair.
+_dl = SP.OP.parse('$18.00 Guaranteed (incl. tip) 24 mi Deliver by 6:25 PM')
+_dl_rate = SP.OP.rate(_dl, {'nowMinutes': 18 * 60 + 5})
+_dl_line = said(lambda: SP.emit_offer('x', _dl, _dl_rate, whole=True))['offer']
+_dl_read = said(lambda: SP.emit(_dl_rate, _dl, {'total': 900}, True, whole=True))
+_dl_row = SP.JR.row_for(_dl, _dl_rate, 1, offer_id='x', whole=True)
+_dl_keys = ('pay', 'miles', 'milesCorrected', 'milesUncertain', 'perHour', 'cost',
+            'billedMinutes', 'state', 'whole')
+eq('a deadline card\'s lost decimal is put back and the offer line says it was corrected',
+   (_dl['miles'], _dl['milesCorrected'], _dl_line['miles'], _dl_line['milesCorrected']),
+   (24.0, False, 2.4, True))
+eq('...and the line, the reading and the row state the same figures for it',
+   ([_dl_line[k] for k in _dl_keys], [_dl_read[k] for k in _dl_keys]),
+   ([_dl_row[k] for k in _dl_keys], [_dl_row[k] for k in _dl_keys]))
+# The differences that stay, on purpose: the reading and the line give the
+# card's own minutes (the line through `cardMinutes`), and neither states a
+# rate, a cost or a billed time beside no verdict, where a row stores what a
+# hand-built rate carried.
+_hand = {'perHour': 20.0, 'cost': 1.5, 'minutes': 21.0, 'state': 'go'}
+_hand_line = said(lambda: SP.emit_offer('x', {'pay': 9.0, 'minutes': 21.0}, _hand))['offer']
+eq('...a rate with no verdict states no rate or cost on the line, and the row keeps them',
+   ((_hand_line['perHour'], _hand_line['cost'], _hand_line['billedMinutes']),
+    [SP.JR.figures({'pay': 9.0}, _hand)[k] for k in ('perHour', 'cost', 'billedMinutes')]),
+   ((None, None, 21.0), [20.0, 1.5, 21.0]))
 _refused = dict(_where, err=129.2, ok=False, why='rough')
 _rough = said(lambda: SP.emit_offer('x', _card, _rated, where=_refused, whole=True))['offer']
 eq('a fix the gate refused still rides, with the gate\'s answer',
@@ -4023,7 +4103,8 @@ ok_('the premise: this screen is street-shaped by the rig\'s own rule',
 ok_('...and yields an address the rig accepts',
     OP2.parse(_BOTH).get('address') is not None)
 run_both = run(TC.uberx_screen(), seconds=8.0, extra_argv=['--no-parallel'],
-               look=_street_and_address, press_dropoff=False)
+               look=_street_and_address, press_dropoff=False,
+               until=_then(lambda st: _both_reads[0] >= 2, 0.5))
 ok_('...over a run that really did read it', _both_reads[0] >= 2)
 _both_health = run_both.get('health')
 eq('a street-shaped screen the rig DID read an address off is not counted as '
@@ -4157,9 +4238,12 @@ def _offer_card_then_address(self, frames, now=None, geom=None):
             for _ in frames]
 
 
+# Until the address is out, and a second after it for a second answer to show:
+# the reads that matter are the three before it.
 run_card = run(TC.uberx_screen(), seconds=SP2.DROPOFF_WINDOW + 4.0,
                appear_at=10_000.0, extra_argv=['--no-parallel'],
-               look=_offer_card_then_address, press_dropoff=True)
+               look=_offer_card_then_address, press_dropoff=True,
+               until=_then(lambda st: st['destinations'] >= 1 and _card_reads[0] >= 3, 1.0))
 
 eq('the destination is read, not the card that was still on the phone',
    len(run_card['destinations']), 1)
@@ -4193,7 +4277,7 @@ def _address_with_a_payout(self, frames, now=None, geom=None):
 
 run_paid = run(TC.uberx_screen(), seconds=8.0, appear_at=10_000.0,
                extra_argv=['--no-parallel'], look=_address_with_a_payout,
-               press_dropoff=False)
+               press_dropoff=False, until=_then(lambda st: _paid_reads[0] >= 2, 0.5))
 ok_('the card really did carry an address to be tempted by',
     OP2.parse('$12.00 Guaranteed 23 min (4.6 mi) total Pickup '
               'Wingstop 800 Forrest St NW, Atlanta, GA 30318').get('address')
@@ -4240,7 +4324,9 @@ ok_('...and still reads a full address off the merchant line',
 ok_('...and still names the merchant, which is what gives it away',
     bool(_lost_parse.get('places')))
 run_lost = run(TC.uberx_screen(), seconds=8.0, extra_argv=['--no-parallel'],
-               look=_payout_lost_to_glare, press_dropoff=False)
+               look=_payout_lost_to_glare, press_dropoff=False,
+               until=_then(lambda st: _lost_reads[0] >= 2 and st['health'] is not None
+                           and st['health'].address_refused_as_offer >= 1, 0.5))
 ok_('...over a run that really did read it', _lost_reads[0] >= 2)
 eq('an offer card that lost its payout is still not a destination',
    len(run_lost['destinations']), 0)
@@ -4291,7 +4377,9 @@ def _street_but_no_address(self, frames, now=None, geom=None):
 eq('the premise: a street with no town, state or ZIP is refused',
    OP2.parse('Dropoff 3100 Esquire Dr N 14 min Start').get('address'), None)
 run_bare = run(TC.uberx_screen(), seconds=8.0, extra_argv=['--no-parallel'],
-               look=_street_but_no_address, press_dropoff=False)
+               look=_street_but_no_address, press_dropoff=False,
+               until=_then(lambda st: _bare_reads[0] >= 2 and st['health'] is not None
+                           and st['health'].street_seen_no_address >= 1, 0.5))
 ok_('...over a run that really did read it', _bare_reads[0] >= 2)
 eq('...and nothing was taken as a destination', len(run_bare['destinations']), 0)
 _bare_health = run_bare.get('health')
@@ -4318,7 +4406,9 @@ def _street_litter(self, frames, now=None, geom=None):
 
 
 run_litter = run(TC.uberx_screen(), seconds=6.0, extra_argv=['--no-parallel'],
-                 look=_street_litter, press_dropoff=False)
+                 look=_street_litter, press_dropoff=False,
+                 until=_then(lambda st: st['health'] is not None
+                             and st['health'].street_unreadable >= 1, 0.5))
 _litter_health = run_litter.get('health')
 ok_('[no address] litter read through the loop is counted apart from the screens a door '
     'could be on (%r)' % ((_litter_health.street_unreadable, _litter_health.street_seen_no_address)
@@ -4349,7 +4439,8 @@ SP2.DROPOFF_WINDOW = 1.0
 try:
     run_slow = run(TC.uberx_screen(), seconds=12.0, appear_at=10_000.0,
                    extra_argv=['--no-parallel'], look=_slow_address,
-                   press_dropoff=True)
+                   press_dropoff=True,
+                   until=_then(lambda st: st['destinations'] >= 1, 1.0))
 finally:
     SP2.DROPOFF_WINDOW = _was_window
 
@@ -4463,7 +4554,8 @@ eq('...and nothing on the screen was taken for an offer',
 # only one, because nothing on what was read says no stop is above it.
 run_cut = run(TC.planner_screen(), seconds=SP2.DROPOFF_WINDOW + 4.0,
               appear_at=0.0, vanish_at=1e9, extra_argv=['--no-parallel'],
-              press_dropoff=True, mount_width=900)
+              press_dropoff=True, mount_width=900,
+              until=_then(lambda st: st['planners'] >= 1, 1.0))
 eq('a drawn Trip Planner with its title off the top of the frame answers ⌖ with '
    'its stop, saying the list\'s ends were not both seen',
    [([(s['kind'], s['line']) for s in p[0]],

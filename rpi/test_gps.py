@@ -395,8 +395,17 @@ try:
     close_to('...at the right latitude', got['lat'], 34.0117)
     eq('...and the state says so', it.state()['state'], 'fixed')
     ok_('...and it reports how old the fix is', got['ageSeconds'] >= 0)
+    # The phone has said its one sentence and gone quiet, so the thread sits
+    # in recv(). stop() used to wait out its whole two-second join there —
+    # READ_TIMEOUT is five — on every stop the rig made with a phone attached.
+    _thread, _began = it._thread, time.monotonic()
     it.stop()
+    _took = time.monotonic() - _began
+    ok_('...and stopping a quiet session is prompt (%.2fs), the thread gone with it'
+        % _took, _took < 0.5 and not _thread.is_alive())
     eq('...and stopping says so', it.state()['state'], 'off')
+    eq('...and leaves no error behind, our own stop not being the phone\'s',
+       it.state()['error'], None)
 finally:
     phone.close()
 
