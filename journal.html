@@ -1950,14 +1950,9 @@
 
   // The value below which a given share of offers fall. Linear interpolation
   // between the two straddling samples, so a handful of offers still gives a
-  // sensible middle rather than jumping between whole readings.
-  function percentile(sorted, share) {
-    if (!sorted.length) return null;
-    if (sorted.length === 1) return sorted[0];
-    var pos = share * (sorted.length - 1);
-    var low = Math.floor(pos), high = Math.ceil(pos);
-    return sorted[low] + (sorted[high] - sorted[low]) * (pos - low);
-  }
+  // sensible middle rather than jumping between whole readings: R's type 7,
+  // advice.js's quantile, the one copy the reports share.
+  var percentile = Advice.quantile;
 
   // Three-hour blocks. The names and the edges are Advice.BLOCK_NAMES /
   // Advice.blockOf, because map.html's time filter cuts the same week at the

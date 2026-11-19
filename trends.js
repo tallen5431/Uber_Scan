@@ -279,13 +279,19 @@
 }(typeof self !== 'undefined' ? self : this, function (Advice) {
   'use strict';
 
-  var DAY_STARTS_AT = Advice && typeof Advice.DAY_STARTS_AT === 'number' ? Advice.DAY_STARTS_AT : 4;
+  // advice.js is loaded first on every page that loads this one (journal.html
+  // in its head) and required here in node: the 4am, the day keys and the
+  // one quantile are its.
+  var DAY_STARTS_AT = Advice.DAY_STARTS_AT;
+  // The one 30: the places report's MIN_N reads it (see the header's table).
   var FLOOR = 30;
   var FLOOR_DAYS = 2;
   var CI_ALPHA = 0.01;
   // A day's or a week's point on a line: the fewest offers its median is drawn
-  // from (under it the point is hollow and the band left out). Descriptive,
-  // the places report's DESC_MIN_N; nothing is shaded by it.
+  // from (under it the point is hollow and the band left out). Descriptive;
+  // nothing is shaded by it. The one 10: the places report's DESC_MIN_N (its
+  // DROP_MIN_N) and strategy.js's DIST_MIN_N read it, the floor under every
+  // descriptive median and percentile in the three.
   var DAY_MIN = 10;
   var RATE_MIN_N = 30;
   var RATE_COLLINEAR = 0.95;
@@ -412,23 +418,14 @@
     return { v: 1, n: rows.length, cols: cols };
   }
 
-  // The driver's day of a moment, in the zone of whoever asks: 'YYYY-MM-DD'.
-  function dayKeyOf(ms) {
-    var d = new Date(ms);
-    d.setHours(d.getHours() - DAY_STARTS_AT);
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-'
-      + String(d.getDate()).padStart(2, '0');
-  }
+  // The driver's day of a moment, in the zone of whoever asks: 'YYYY-MM-DD';
+  // and the Monday of a driver's day's week, as its key. advice.js's, the one
+  // copy, still exported here under these names for the page and report_check.
+  var dayKeyOf = Advice.dayKeyOf;
+  var weekKeyOf = Advice.weekKeyOf;
   function dateOfKey(key) {
     var p = key.split('-').map(Number);
     return new Date(p[0], p[1] - 1, p[2], 12);
-  }
-  // The Monday of a driver's day's week, as its key.
-  function weekKeyOf(dayKey) {
-    var d = dateOfKey(dayKey);
-    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-'
-      + String(d.getDate()).padStart(2, '0');
   }
   function addDays(key, n) {
     var d = dateOfKey(key);
@@ -503,13 +500,9 @@
     }
     return rangeMemo.s;
   }
-  // Linear between the two straddling values, as the page's percentile().
-  function q(s, share) {
-    if (!s.length) return null;
-    if (s.length === 1) return s[0];
-    var pos = share * (s.length - 1), lo = Math.floor(pos), hi = Math.ceil(pos);
-    return s[lo] + (s[hi] - s[lo]) * (pos - lo);
-  }
+  // Linear between the two straddling values (R's type 7): advice.js's
+  // quantile, which the page's percentile() is too.
+  var q = Advice.quantile;
   function quarts(vals) {
     var s = sorted(vals);
     return { n: s.length, p25: r2(q(s, 0.25)), p50: r2(q(s, 0.5)), p75: r2(q(s, 0.75)), p90: r2(q(s, 0.9)) };

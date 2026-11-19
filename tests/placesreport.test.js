@@ -2620,6 +2620,45 @@ function nbx() {
     }
   }());
 
+  /* --- one copy of each shared piece (the reporting code's second review) --- */
+  (function () {
+    var S1 = require('../tools/strategy.js'), E1 = require('../earnings.js');
+    function src(f) { return fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\/\/[^\n]*/g, ''); }
+    eq('[one copy] the 4am day and week keys are advice.js\'s in trends, earnings, strategy and the report',
+       [TR.dayKeyOf === A.dayKeyOf, TR.weekKeyOf === A.weekKeyOf, E1.driverDayOf === A.dayKeyOf,
+        E1.weekOfDay === A.weekKeyOf, S1.outingOf === A.dayKeyOf, P.outingOf === A.dayKeyOf],
+       [true, true, true, true, true, true]);
+    // 11:30pm on the 7th and 3:59am on the 8th are the 7th; 4am the 8th; a Saturday's week is Monday the 2nd.
+    eq('[one copy] ...which keep the 4am cut, the Monday and a stamp no clock reads',
+       [A.dayKeyOf(at(7, 23, 30)), A.dayKeyOf(at(8, 3, 59)), A.dayKeyOf(at(8, 4)), A.weekKeyOf('2026-03-07'),
+        A.weekKeyOf('2026-03-09'), A.dayKeyOf(8.64e15 * 2)], ['2026-03-07', '2026-03-07', '2026-03-08', '2026-03-02', '2026-03-09', null]);
+    eq('[one copy] the type-7 quantile is advice.js\'s in strategy, and the report\'s sorts then asks it',
+       [S1.quantile === A.quantile, A.quantile([1, 2, 3, 4], 0.5), A.quantile([5], 0.9), A.quantile([], 0.5),
+        P.quantile([4, 1, 3, 2], 0.25), A.median([4, 1, 3, 2]), A.median([])], [true, 2.5, 5, null, 1.75, 2.5, null]);
+    eq('[one copy] a Took taken back is earnings.js\'s list, which strategy reads; the 4am, the 10 and the 30 have one source',
+       [S1.TAKEN_BACK === E1.TAKEN_BACK, E1.DAY_STARTS_AT === A.DAY_STARTS_AT, S1.DIST_MIN_N === TR.DAY_MIN,
+        P.DESC_MIN_N === TR.DAY_MIN, P.MIN_N === TR.FLOOR],
+       [true, true, true, true, true]);
+    var dup = [];
+    ['trends.js', 'earnings.js', 'tools/strategy.js', 'tools/places_report.js', 'journal.html'].forEach(function (f) {
+      var t = src(f);
+      // A sorted list read between two indices; the bootstrap's in-place qOf
+      // (two selections on a resample, then a + (h - lo) * (b - a)) is not one.
+      if (/\[lo\] \+ \(h - lo\) \*|\(pos - lo\)/.test(t)) dup.push(f + ' interpolates its own quantile');
+      if (/var DAY_STARTS_AT = \d/.test(t)) dup.push(f + ' writes its own 4');
+      if (/TAKEN_BACK = \{/.test(t) && f !== 'earnings.js') dup.push(f + ' lists its own taken-back');
+      if (/var (DIST_MIN_N|DROP_MIN_N|MIN_N) = \d/.test(t)) dup.push(f + ' writes its own floor');
+    });
+    eq('[one copy] ...and no file carries its own copy of them', dup, []);
+    // The offers page adds earnings.js only when the Money tab asks, and it
+    // now reads root.Advice: advice.js must be a plain script in the head.
+    var jh = fs.readFileSync(path.join(__dirname, '..', 'journal.html'), 'utf8');
+    ok('[one copy] earnings.js takes Advice, and the offers page loads advice.js before it adds earnings.js',
+       /factory\(require\('\.\/advice\.js'\)\)/.test(src('earnings.js')) && /factory\(root\.Advice\)/.test(src('earnings.js'))
+       && jh.indexOf('<script src="advice.js"></script>') >= 0
+       && jh.indexOf('<script src="advice.js"></script>') < jh.indexOf("s.src = 'earnings.js'"));
+  }());
+
   console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
                    : '\nAll ' + pass + ' places-report checks passed');
   process.exitCode = fail ? 1 : 0;

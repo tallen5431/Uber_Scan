@@ -138,8 +138,9 @@ var ROOT = path.resolve(__dirname, '..');
  * colour comes only from a test and an interval — so the floor is the low end
  * of that range: below it a bootstrap interval of a median over a tail this
  * long is not worth drawing. Below it a cell is "too few", listed with its n
- * and never ranked or tested. */
-var MIN_N = 30;
+ * and never ranked or tested. The same 30 as trends.js FLOOR, whose own
+ * table arrived at it, and read from there so the two cannot come apart. */
+var MIN_N = TR.FLOOR;
 // ...and on two separate outings at least, Advice.areas' own rule: thirty
 // offers from one evening are one evening.
 var MIN_OUTINGS = A.AREA_DAYS;
@@ -154,7 +155,9 @@ var BOOTS = 1000;
 var GRID_MI = 2;
 // "Where trips leave you": taken trips are few, so this floor is lower and
 // the table is descriptive; its colour follows the same test-and-interval rule.
-var DROP_MIN_N = 10;
+// Ten, trends.js DAY_MIN: the one floor under a descriptive median in the
+// reports (DESC_MIN_N below is this; strategy.js's DIST_MIN_N reads it too).
+var DROP_MIN_N = TR.DAY_MIN;
 // A silence after a drop longer than the rig's own break (advice.js SHOWN_AT)
 // ends the wait unmeasured: the driver stopped, not the market.
 var NEXT_GAP_MIN = A.SHOWN_AT;
@@ -276,7 +279,7 @@ function bootCIPlain(values, seed, reps) {
   var r = rng(seed), n = values.length, meds = new Array(reps), buf = new Array(n);
   for (var k = 0; k < reps; k++) {
     for (var i = 0; i < n; i++) buf[i] = values[Math.floor(r() * n)];
-    meds[k] = MV.median(buf);
+    meds[k] = A.median(buf);
   }
   meds.sort(function (a, b) { return a - b; });
   return [round2(meds[Math.floor(0.025 * reps)]), round2(meds[Math.ceil(0.975 * reps) - 1])];
@@ -294,14 +297,9 @@ function seenAt(o) {
 // The block an offer is held still in: advice.js's eight, as map.html asks it.
 function stratum(o) { return A.blockOf(o.at); }
 
-// The driver's shift day, advice.js's outingsIn key (DAY_STARTS_AT).
-function outingOf(at) {
-  var d = new Date(at);
-  if (!isFinite(d.getTime())) return null;
-  d.setHours(d.getHours() - A.DAY_STARTS_AT);
-  var mm = String(d.getMonth() + 1).padStart(2, '0'), dd = String(d.getDate()).padStart(2, '0');
-  return d.getFullYear() + '-' + mm + '-' + dd;
-}
+// The driver's shift day, 'YYYY-MM-DD': advice.js's dayKeyOf, the key its
+// outingsIn counts by (DAY_STARTS_AT).
+var outingOf = A.dayKeyOf;
 
 /* The 2-mile cell a point is in, as { id, s, w, n, e, lat, lon }. Rows of
  * GRID_MI/69 degrees of latitude; each row's columns as wide as GRID_MI at
@@ -816,7 +814,7 @@ function cells(rows, key, opts) {
     if (!(k in memo)) {
       var others = (inBlock[b] || []).filter(function (x) { return x.g !== name; })
                                        .map(function (x) { return x.v; });
-      memo[k] = others.length ? MV.median(others) : null;
+      memo[k] = others.length ? A.median(others) : null;
     }
     return memo[k];
   }
@@ -842,18 +840,18 @@ function cells(rows, key, opts) {
     }
     var ppms = g.offers.map(payPerMile).filter(function (v) { return v !== null; });
     var top = topOf(g.offers, opts.tierOf);
-    var score = diffs.length ? round2(MV.median(diffs)) : null;
+    var score = diffs.length ? round2(A.median(diffs)) : null;
     var sci = bootCI(diffs, seedOf('s' + g.name));
     var clear = sci ? (sci[0] > 0 ? 'above' : sci[1] < 0 ? 'below' : null) : null;
     return {
       name: g.name, n: g.n, outings: g.days,
       median: round2(g.median), ci: bootCI(vals, seedOf('m' + g.name)),
       score: score, sci: sci, compared: diffs.length,
-      pay: pays.length ? round2(MV.median(pays)) : null,
+      pay: pays.length ? round2(A.median(pays)) : null,
       take: said.length ? round2(said.filter(function (o) { return o.state === 'go'; }).length
                                  / said.length) : null,
       // $/mi off the card, read and never ranked (see payPerMile).
-      ppm: ppms.length ? round2(MV.median(ppms)) : null, ppmN: ppms.length,
+      ppm: ppms.length ? round2(A.median(ppms)) : null, ppmN: ppms.length,
       ppmCi: ppms.length >= DESC_MIN_N ? bootCI(ppms, seedOf('d' + g.name)) : null,
       clear: clear,
       beats: !!(significant && clear),
@@ -885,8 +883,8 @@ function coverage(rows, placedRow) {
   var withPickup = pool.filter(function (o) { return typeof o.pickup === 'string' && o.pickup.trim(); });
   function side(list) {
     return { n: list.length,
-             perHour: list.length ? round2(MV.median(list.map(function (o) { return o.perHour; }))) : null,
-             pay: list.length ? round2(MV.median(list.filter(function (o) {
+             perHour: list.length ? round2(A.median(list.map(function (o) { return o.perHour; }))) : null,
+             pay: list.length ? round2(A.median(list.filter(function (o) {
                return typeof o.pay === 'number';
              }).map(function (o) { return o.pay; }))) : null };
   }
@@ -1021,12 +1019,12 @@ function dropTable(trips, keyName, hold) {
     var got = list.filter(function (t) { return !t.next.censored; });
     g.trips = list.length;
     g.ended = list.length - got.length;
-    g.nextPerHour = got.length ? round2(MV.median(got.map(function (t) { return t.next.perHour; }))) : null;
-    g.nextPay = got.length ? round2(MV.median(got.map(function (t) { return t.next.pay; }))) : null;
+    g.nextPerHour = got.length ? round2(A.median(got.map(function (t) { return t.next.perHour; }))) : null;
+    g.nextPay = got.length ? round2(A.median(got.map(function (t) { return t.next.pay; }))) : null;
     var any = list.filter(function (t) { return t.nextAny && !t.nextAny.censored; });
     g.anyN = any.length;
-    g.anyMin = any.length ? round2(MV.median(any.map(function (t) { return t.nextAny.wait; }))) : null;
-    g.anyPerHour = any.length ? round2(MV.median(any.map(function (t) { return t.nextAny.perHour; }))) : null;
+    g.anyMin = any.length ? round2(A.median(any.map(function (t) { return t.nextAny.wait; }))) : null;
+    g.anyPerHour = any.length ? round2(A.median(any.map(function (t) { return t.nextAny.perHour; }))) : null;
     g.anyGood = any.length ? share(any.filter(function (t) { return t.nextAny.good; }).length, any.length) : null;
     // Lower is better for a wait: the sign of `clear` says which way.
     if (keyName === 'cell') {
@@ -1963,7 +1961,9 @@ function isoWeek(day) {
   return y + '-W' + String(wk).padStart(2, '0');
 }
 
-function med(xs) { return xs.length ? round2(MV.median(xs)) : null; }
+// Advice.median, the one median the reports share (map-view.js's, which this
+// file read before, is the same rule and stays map-view's own).
+function med(xs) { return xs.length ? round2(A.median(xs)) : null; }
 function medCi(xs, seed) { return xs.length >= DESC_MIN_N ? bootCI(xs, seedOf(seed)) : null; }
 function share(k, n) { return n ? round2(k / n) : null; }
 
@@ -2558,12 +2558,10 @@ var SHORT_MILES = 0.35;
 var SIZE_BANDS = [[0, 4, 'short, under 4 mi'], [4, 8, 'medium, 4–8 mi'], [8, 12, 'long, 8–12 mi'],
                   [12, Infinity, '12 mi and over']];
 
-// The q-th quantile, linear between order statistics (R's type 7).
+// The q-th quantile of an unsorted list, linear between order statistics
+// (R's type 7): sorted here, then advice.js's quantile, the one copy.
 function quantile(xs, q) {
-  var v = xs.slice().sort(function (a, b) { return a - b; });
-  if (!v.length) return null;
-  var h = (v.length - 1) * q, lo = Math.floor(h);
-  return v[lo] + (h - lo) * ((v[lo + 1] === undefined ? v[lo] : v[lo + 1]) - v[lo]);
+  return A.quantile(xs.slice().sort(function (a, b) { return a - b; }), q);
 }
 // The same quantile, of a resample that may be reordered in place (the
 // bootstrap's own buffer): two selections, not a sort.
