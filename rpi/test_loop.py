@@ -30,6 +30,7 @@ the camera can see a card. A check that needs one there must ask the camera
 (`cam_out`), not the loop.
 """
 
+import inspect
 import json
 import os
 import re
@@ -226,6 +227,45 @@ def out_for(text, clipped=False, fitted=None):
 BANDS = []
 # ...and each map-label read asked for (scan_pi.MapLabels.submit).
 LABELS = []
+
+
+def _arity(fn):
+    try:
+        return len(inspect.signature(fn).parameters)
+    except (TypeError, ValueError):
+        return 3
+
+
+def after(pred, tail=0.0):
+    """An `until` that ends a run `tail` seconds after pred(rows, announced,
+    calls, seen) first holds. For a check that something happened and then did
+    not happen again — "said once", "back to the card box" — which a run
+    stopped on the instant cannot see, and which the rest of a fixed run spent
+    waiting for nothing to happen long after the answer was in."""
+    first = []
+
+    def until(rows, announced, calls, seen):
+        if not first:
+            if not pred(rows, announced, calls, seen):
+                return False
+            first.append(time.time())
+        return time.time() - first[0] >= tail
+    return until
+
+
+def _asked(seen):
+    """The press's answers on the dropoff line so far."""
+    return [d for d in seen['dropoffs'] if d[1].get('asked')]
+
+
+def _back_on_box(seen):
+    """A whole-screen read was made, and the read after it was the card box's
+    again — so that read was digested: the reader takes one at a time."""
+    return any(seen['wholes']) and seen['wholes'][-1] is False
+
+
+def _whole_sighted(seen):
+    return any(x.get('whole') for x in seen['sightings'])
 
 
 def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=None,
@@ -488,17 +528,42 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     if pi is not None:
         SP.PiHealth = pi
     deadline = time.time() + seconds
+    # Parsed again only when the file has grown. bounded() asks on every sleep
+    # of the loop, a hundred times a second, and parsed the whole journal each
+    # time for a file that changes a few times a run. A line still being
+    # written is left for the next ask rather than parsed in half.
+    parsed = {'size': -1, 'rows': []}
 
     def rows():
-        out = []
-        if os.path.exists(journal):
-            for line in open(journal):
-                if line.strip():
-                    out.append(json.loads(line))
-        return out
+        try:
+            size = os.path.getsize(journal)
+        except OSError:
+            return []
+        if size != parsed['size']:
+            out = []
+            with open(journal) as fh:
+                for line in fh:
+                    if not line.endswith('\n'):
+                        size = -1
+                        break
+                    if line.strip():
+                        out.append(json.loads(line))
+            parsed.update(size=size, rows=out)
+        return list(parsed['rows'])
+
+    # What an `until` taking a fourth argument is shown of the run so far: the
+    # lists run() returns, as they stand, so a run can stop on a log line, a
+    # dropoff, a planner or a whole-screen read rather than on the clock.
+    seen = dict(logs=logs, dropoffs=dropoffs, planners=said_planners,
+                sightings=sightings, popups=popups, wholes=wholes, crops=crops,
+                alive=alive, beats=beats, verdicts=verdicts, finder=finder,
+                submitted_whole=submitted_whole)
+    asks_seen = until is not None and _arity(until) >= 4
 
     def bounded(s):
-        if time.time() > deadline or (until is not None and until(rows(), announced, calls[0])):
+        if time.time() > deadline or (until is not None and (
+                until(rows(), announced, calls[0], seen) if asks_seen
+                else until(rows(), announced, calls[0]))):
             raise KeyboardInterrupt
         real_sleep(min(s, 0.01))
 
@@ -1047,7 +1112,12 @@ eq('...nor its cents lost behind a colon before the label, on every frame (%d re
 # --- a read that never returns stops the heartbeat ---------------------------
 # Twelve seconds: a heartbeat every four would leave the last one under four
 # seconds old; a rig that went quiet at 1.5s leaves it about twelve.
-r = run(lambda n, k: WHOLE, seconds=12.0, hang_from=1, stuck_after=1.5)
+# Until the restart is asked for and the last beat is six and a half seconds
+# behind, which is the claim, rather than twelve seconds whatever happened.
+r = run(lambda n, k: WHOLE, seconds=12.0, hang_from=1, stuck_after=1.5,
+        until=after(lambda rows, ann, calls, seen: seen['beats'] and any(
+            x.get('kind') == 'up' and x.get('state') == 'restart' for x in rows)
+            and time.time() - seen['beats'][-1] > 6.5))
 beats = r['beats']
 ok_('the loop beat while it was waiting (%d beats)' % len(beats), len(beats) >= 1)
 last_gap = time.time() - beats[-1] if beats else None
@@ -1219,7 +1289,8 @@ ok_('...and the box is still a person\'s choice in the saved config',
 # the height the reader wants.
 _card = [0.0, 0.4, 1.0, 0.5]
 r10 = run(lambda n, k: WHOLE, seconds=3.0,
-          config_extra={'manualBox': True, 'cropBox': _card})
+          config_extra={'manualBox': True, 'cropBox': _card},
+          until=lambda rows, ann, calls: calls >= 1)
 eq('a card box saved from before is the crop the rig reads by',
    r10['crops'][0], (_card, 0.5))
 
@@ -1235,7 +1306,10 @@ def _draw_on_first_read(n, k):
     return WHOLE
 
 
-r11 = run(_draw_on_first_read, seconds=4.0, handoff=_ho5)
+r11 = run(_draw_on_first_read, seconds=4.0, handoff=_ho5,
+          until=lambda rows, ann, calls, seen:
+          any(c == ([0.0, 0.25, 1.0, 0.4], 0.4) for c in seen['crops'])
+          and any('card box' in l for l in seen['logs']))
 ok_('a card box drawn mid-shift is taken (%r)' % r11['crops'][-1:],
     any(c == ([0.0, 0.25, 1.0, 0.4], 0.4) for c in r11['crops']))
 ok_('...and said in the log',
@@ -1503,7 +1577,10 @@ ok_('...over a run that did lose the phone for them (%r)'
 # run() gives every run one of its own for that reason.
 _slho = tempfile.mkdtemp()
 _sl = run(lambda n, k: WHOLE, seconds=8.0, freeze_at=1.5, stall_say=1.0,
-          alive_every=0.5, handoff=_slho)
+          alive_every=0.5, handoff=_slho,
+          until=lambda rows, ann, calls, seen: seen['beats'] and any(
+              x.get('kind') == 'up' and x.get('state') == 'restart' for x in rows)
+          and time.time() - seen['beats'][-1] > 3.5)
 _slups = _ups(_sl['rows'])
 ok_('a camera handing over the same picture is written as stalled (%r)' % _slups,
     ('camera', 'stalled') in _slups)
@@ -1564,8 +1641,12 @@ def _leave_stall_note(handoff, ahead=0.0):
 
 _agho = tempfile.mkdtemp()
 _leave_stall_note(_agho)
+# Two seconds past saying it stays up: a restart asked for in spite of the
+# note would be asked at the moment the stall is said, beside that line.
 _ag = run(lambda n, k: WHOLE, seconds=8.0, freeze_at=1.5, stall_say=1.0,
-          alive_every=0.5, handoff=_agho)
+          alive_every=0.5, handoff=_agho,
+          until=after(lambda rows, ann, calls, seen:
+                      any('stays up' in l for l in seen['logs']), 2.0))
 _agups = _ups(_ag['rows'])
 ok_('a stall soon after a restart over one is still written, and still told '
     'the panel (%r)' % _agups,
@@ -1646,7 +1727,9 @@ ok_('...and asks again once the last restart is STALL_AGAIN old: the stall sat '
 _afho = tempfile.mkdtemp()
 _leave_stall_note(_afho, ahead=3600.0)
 _af = run(lambda n, k: WHOLE, seconds=8.0, freeze_at=1.5, stall_say=1.0,
-          alive_every=0.5, handoff=_afho)
+          alive_every=0.5, handoff=_afho,
+          until=after(lambda rows, ann, calls, seen: any(
+              x.get('kind') == 'up' and x.get('state') == 'restart' for x in rows), 0.5))
 eq('a stall under a note stamped an hour ahead of the clock asks for its '
    'restart rather than sitting it out',
    len([x for x in _af['rows'] if x.get('kind') == 'up' and x.get('state') == 'restart']), 1)
@@ -1658,7 +1741,10 @@ eq('a stall under a note stamped an hour ahead of the clock asks for its '
 # resample window reading every half second for four — and the stall is held
 # off past the run, so nothing stops those reads.
 _rep = run(lambda n, k: FRAG, seconds=6.0, freeze_at=1.0, stall_say=60.0,
-           alive_every=0.5, health_every=0.2)
+           alive_every=0.5, health_every=0.2,
+           until=lambda rows, ann, calls, seen: any(
+               l.startswith('health') and re.search(r'\b\d+ frames since start the same picture', l)
+               for l in seen['logs']))
 _rep_lines = [l for l in _rep['logs'] if l.startswith('health') and 'same picture' in l]
 ok_('a frozen camera\'s repeated frames are counted on the health line (%r)'
     % (_rep_lines[-1:],),
@@ -2114,8 +2200,12 @@ def _press_on_first_read(handoff, text):
 
 
 _ho = tempfile.mkdtemp()
+# A second and a half past the answer, for "said once": a repeat would come on
+# the next pass of the loop, not seconds later.
 r5 = run(_press_on_first_read(_ho, WHOLE), extra_argv=['--no-parallel'], seconds=6.0,
-         handoff=_ho, dropoff_window=1.0)
+         handoff=_ho, dropoff_window=1.0,
+         until=after(lambda rows, ann, calls, seen: _asked(seen) and any(
+             'read as an address' in l for l in seen['logs']), 1.5))
 _said = [d for d in r5['dropoffs'] if d[1].get('asked')]
 ok_('a press that found no address is answered, not left silent (%r)'
     % (r5['dropoffs'][:1],), len(_said) == 1)
@@ -2140,8 +2230,12 @@ eq('...said once, over %d reads' % r5['calls'], len(_said), 1)
 # closes the press now.
 _ho2 = tempfile.mkdtemp()
 NAV_ADDR = 'Dropoff 123 Main St, Acworth, GA 30101 12 min Start'
+# ...and past the one-second window's end, where the "found nothing" this
+# checks against was said: the answer is found inside the window.
 r7 = run(_press_on_first_read(_ho2, NAV_ADDR), extra_argv=['--no-parallel'], seconds=6.0,
-         handoff=_ho2, dropoff_window=1.0)
+         handoff=_ho2, dropoff_window=1.0,
+         until=after(lambda rows, ann, calls, seen:
+                     any(d[0] is not None for d in seen['dropoffs']), 1.5))
 _found = [d for d in r7['dropoffs'] if d[0] is not None]
 _empty = [d for d in r7['dropoffs'] if d[0] is None]
 ok_('a press that finds an address is answered with it (%r)'
@@ -2157,7 +2251,8 @@ eq('...and is not ALSO reported as having found nothing', _empty, [])
 # nothing else.
 _ho3 = tempfile.mkdtemp()
 r8 = run(_press_on_first_read(_ho3, WHOLE), extra_argv=['--no-parallel'], seconds=6.0,
-         handoff=_ho3, dropoff_window=1.0, whole_text=NAV_ADDR)
+         handoff=_ho3, dropoff_window=1.0, whole_text=NAV_ADDR,
+         until=after(lambda rows, ann, calls, seen: _asked(seen) and _back_on_box(seen), 1.0))
 ok_('a ⌖ press reads the whole screen box (%r)' % r8['wholes'][:6], any(r8['wholes']))
 eq('...not before it was pressed', r8['wholes'][0], False)
 eq('...and goes back to the card box once it is answered', r8['wholes'][-1], False)
@@ -2183,7 +2278,8 @@ eq('...and the panel is told a read began for the card reads only',
 _ho4 = tempfile.mkdtemp()
 r9 = run(_press_on_first_read(_ho4, WHOLE), extra_argv=['--no-parallel'], seconds=6.0,
          handoff=_ho4, dropoff_window=1.0,
-         whole_text='$99.00 20 min (5.0 mi) trip Dropoff 9 Elm St, Acworth, GA 30101')
+         whole_text='$99.00 20 min (5.0 mi) trip Dropoff 9 Elm St, Acworth, GA 30101',
+         until=after(lambda rows, ann, calls, seen: _asked(seen) and _back_on_box(seen), 1.0))
 ok_('a press with a payout in the whole screen box was read whole', any(r9['wholes']))
 _pays = sorted(set((v[0][1] or {}).get('pay') for v in r9['verdicts']
                    if len(v[0]) > 1 and isinstance(v[0][1], dict)), key=str)
@@ -2281,7 +2377,9 @@ def _held(card=None):
 
 _hp1, _pl1 = tempfile.mkdtemp(), []
 rp1 = run(_press_on_first_read(_hp1, ''), extra_argv=['--no-parallel'], seconds=5.0,
-          handoff=_hp1, whole_text=_ONE_DROP_WHOLE, planners=_pl1)
+          handoff=_hp1, whole_text=_ONE_DROP_WHOLE, planners=_pl1,
+          until=after(lambda rows, ann, calls, seen:
+                      seen['planners'] and _back_on_box(seen), 1.0))
 eq('⌖ over a Trip Planner is answered with the planner, once (%d reads)' % rp1['calls'],
    len(rp1['planners']), 1)
 if rp1['planners']:
@@ -2352,7 +2450,9 @@ _CUT_PAGE = _PLANNERS['a page that starts mid-stop keeps the address above the f
                       'header, of no kind, partial at the top']
 _hpc = tempfile.mkdtemp()
 rpc = run(_press_on_first_read(_hpc, ''), extra_argv=['--no-parallel'], seconds=4.0,
-          handoff=_hpc, whole_text=_CUT_PAGE)
+          handoff=_hpc, whole_text=_CUT_PAGE,
+          until=after(lambda rows, ann, calls, seen:
+                      seen['planners'] and _whole_sighted(seen), 0.5))
 _cut = [s for x in rpc['sightings'] for s in x['stops']]
 ok_('a header at the foot of a page is kept, partial (%r)'
     % [(s['kind'], s['partial']) for s in _cut],
@@ -2373,7 +2473,8 @@ eq('...and the address above it is filed as nobody\'s end',
 # longer trip may be another customer's door.
 _hp1b = tempfile.mkdtemp()
 rp1b = run(_press_on_first_read(_hp1b, ''), extra_argv=['--no-parallel'], seconds=5.0,
-           handoff=_hp1b, whole_text=_ONE_DROP)
+           handoff=_hp1b, whole_text=_ONE_DROP,
+           until=after(lambda rows, ann, calls, seen: seen['planners'], 1.0))
 ok_('the premise: that read has one dropoff and no end to its list',
     [s['kind'] for s in OP.find_planner(_ONE_DROP)] == ['dropoff']
     and not OP.planner_bounded(_ONE_DROP))
@@ -2450,8 +2551,10 @@ _STORE_POPUP = ('<q Pickup from\nFable Bagel Co %\nGy 123 Lantern Grove Rd NW\n'
 _CUSTOMER_POPUP = ('Customer dropoff\n412 Wrenfield Ct NE\nMarietta, GA 30062, USA\n'
                    'Directions')
 _t0 = time.time() * 1000
+# Until the popup is said and read twice more, for "said once".
 rpop = run(lambda n, k: _DD_CARD if n <= 2 else _STORE_POPUP,
-           extra_argv=['--no-parallel'], seconds=5.0, handoff=tempfile.mkdtemp())
+           extra_argv=['--no-parallel'], seconds=5.0, handoff=tempfile.mkdtemp(),
+           until=lambda rows, ann, calls, seen: seen['popups'] and calls >= 5)
 _t1 = time.time() * 1000
 ok_('the premise: the card was announced and the popup read more than once (%d reads)'
     % rpop['calls'], rpop['announced'] and rpop['calls'] >= 4)
@@ -2465,7 +2568,8 @@ ok_("...stamped with its frame's own clock, inside the run (%r)"
 eq('...and the log names the role and not the place',
    [l for l in rpop['logs'] if l.startswith('place popup')], ["place popup read: the store's address"])
 rcus = run(lambda n, k: _DD_CARD if n <= 2 else _CUSTOMER_POPUP,
-           extra_argv=['--no-parallel'], seconds=5.0, handoff=tempfile.mkdtemp())
+           extra_argv=['--no-parallel'], seconds=5.0, handoff=tempfile.mkdtemp(),
+           until=lambda rows, ann, calls, seen: seen['popups'] and calls >= 5)
 ok_('the premise: a customer popup is an address under a Dropoff label, which a '
     'dropoff line would carry', OP.address_under_dropoff(_CUSTOMER_POPUP))
 eq("a customer's popup goes out on its own line and never as a dropoff line",
@@ -2504,7 +2608,11 @@ for _name, _t in (('the cut list', _PICKUP_CUT), ('the pickup block', _PICKUP_BL
 # second over the planner that replaces it — a still screen otherwise gets one
 # read and the health line, which speaks only after reads, never comes round.
 rpk1 = run(lambda n, k: FRAG if n == 1 else _PICKUP_CUT, extra_argv=['--no-parallel'],
-           seconds=6.0, handoff=tempfile.mkdtemp(), health_every=0.2)
+           seconds=6.0, handoff=tempfile.mkdtemp(), health_every=0.2,
+           until=lambda rows, ann, calls, seen: calls >= 3 and any(
+               l.startswith('health') and 'refused for not being under a Dropoff label' in l
+               for l in seen['logs']) and any(
+               (x.get('addressNotDropoff') or 0) >= 1 for x in rows if x.get('kind') == 'seen'))
 ok_('the premise: the card box read the cut planner, unpressed (%d reads)'
     % rpk1['calls'], rpk1['calls'] >= 3 and not any(rpk1['wholes']))
 eq('an address under no Dropoff label, unprompted, is not sent as the order\'s '
@@ -2529,7 +2637,8 @@ eq('an address under a Pickup label, unprompted, is not sent as the order\'s '
 # restaurant filed `asked: true` overrules whatever the card said.
 _hpk3 = tempfile.mkdtemp()
 rpk3 = run(_press_on_first_read(_hpk3, ''), extra_argv=['--no-parallel'], seconds=4.0,
-           handoff=_hpk3, dropoff_window=1.0, whole_text=_PICKUP_BLOCK)
+           handoff=_hpk3, dropoff_window=1.0, whole_text=_PICKUP_BLOCK,
+           until=after(lambda rows, ann, calls, seen: _asked(seen), 1.0))
 ok_('the premise: the press read the pickup block whole', any(rpk3['wholes']))
 eq('an address under a Pickup label answers a press with nothing, not with the '
    'restaurant', [((d[0] or {}).get('line'), d[1].get('asked'))
@@ -2547,7 +2656,8 @@ ok_('a sighting types an address under a Pickup label as a pickup only (%r)' % _
 # ...nor a planner whose headers did not read, pressed: the cut list again.
 _hpk4 = tempfile.mkdtemp()
 rpk4 = run(_press_on_first_read(_hpk4, ''), extra_argv=['--no-parallel'], seconds=4.0,
-           handoff=_hpk4, dropoff_window=1.0, whole_text=_PICKUP_CUT)
+           handoff=_hpk4, dropoff_window=1.0, whole_text=_PICKUP_CUT,
+           until=after(lambda rows, ann, calls, seen: _asked(seen), 1.0))
 eq('an unlabelled address on a screen with the planner\'s furniture answers a '
    'press with nothing', [((d[0] or {}).get('line'), d[1].get('asked'))
                           for d in rpk4['dropoffs']], [(None, True)])
@@ -2565,7 +2675,8 @@ ok_('the premise: none of the three carries the planner\'s furniture, a stop '
             for t in (_PICKING, _BARE_CUT, _BARE_NAV)))
 _hpk6 = tempfile.mkdtemp()
 rpk6 = run(_press_on_first_read(_hpk6, ''), extra_argv=['--no-parallel'], seconds=4.0,
-           handoff=_hpk6, dropoff_window=1.0, whole_text=_PICKING)
+           handoff=_hpk6, dropoff_window=1.0, whole_text=_PICKING,
+           until=after(lambda rows, ann, calls, seen: _asked(seen), 1.0))
 eq('a press over an address under a Pickup label, no planner in sight, is '
    'answered with nothing', [((d[0] or {}).get('line'), d[1].get('asked'))
                              for d in rpk6['dropoffs']], [(None, True)])
@@ -2575,7 +2686,8 @@ eq('an unlabelled town line nobody asked for, no planner furniture, is not sent'
    [((d[0] or {}).get('line'), d[1].get('asked')) for d in rpk7['dropoffs']], [])
 _hpk8 = tempfile.mkdtemp()
 rpk8 = run(_press_on_first_read(_hpk8, ''), extra_argv=['--no-parallel'], seconds=4.0,
-           handoff=_hpk8, dropoff_window=1.0, whole_text=_BARE_NAV)
+           handoff=_hpk8, dropoff_window=1.0, whole_text=_BARE_NAV,
+           until=after(lambda rows, ann, calls, seen: _asked(seen), 1.0))
 eq('...while a press over an unlabelled navigation screen still gets its address',
    [((d[0] or {}).get('line'), d[1].get('asked')) for d in rpk8['dropoffs']],
    [('1234 Made Up Ln, Acworth, GA 30101', True)])
@@ -2593,7 +2705,8 @@ ok_('the premise: that screen names a pickup above the dropoff and is no offer '
     and OP.find_planner(_BOTH_ENDS) is None
     and 'Pickup' in _BOTH_ENDS.split('Dropoff')[0])
 rpk5 = run(lambda n, k: _BOTH_ENDS, extra_argv=['--no-parallel'], seconds=4.0,
-           handoff=tempfile.mkdtemp())
+           handoff=tempfile.mkdtemp(),
+           until=after(lambda rows, ann, calls, seen: seen['dropoffs'], 1.5))
 eq('an address under a Dropoff label below a pickup is still the destination, '
    'unprompted', [((d[0] or {}).get('line'), d[1].get('asked'))
                   for d in rpk5['dropoffs']], [('34 Made Up Rd, Acworth, GA 30102', False)])
@@ -2643,7 +2756,8 @@ ok_('the premise: the card box shows the planner\'s grammar and not its title, '
 _ha1, _pa1 = tempfile.mkdtemp(), []
 _hold(_ha1, time.time() + 3600)
 ra1 = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
-          seconds=6.0, handoff=_ha1, whole_text=_AUTO_WHOLE, planners=_pa1)
+          seconds=6.0, handoff=_ha1, whole_text=_AUTO_WHOLE, planners=_pa1,
+          until=lambda rows, ann, calls, seen: calls >= 5 and seen['planners'])
 ok_('the premise: the card box read the planner several times, unpressed (%d reads)'
     % ra1['calls'], ra1['calls'] >= 4)
 eq('with an order held, the planner in the card box gets one whole-screen read, '
@@ -2681,7 +2795,9 @@ _UNTITLED = _AUTO_WHOLE.replace('Trip Planner\n', '', 1)
 ok_('the premise: that whole screen is the planner without its title',
     OP.find_planner(_UNTITLED) is not None and not OP.planner_titled(_UNTITLED))
 ra4 = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
-          seconds=4.0, handoff=_ha4, whole_text=_UNTITLED, planners=_pa4)
+          seconds=4.0, handoff=_ha4, whole_text=_UNTITLED, planners=_pa4,
+          until=after(lambda rows, ann, calls, seen:
+                      _whole_sighted(seen) and _back_on_box(seen), 0.3))
 ok_('the premise: it was read whole (%r)' % ra4['wholes'], sum(ra4['wholes']) == 1)
 eq('a whole screen with no "Trip Planner" title is not sent as the planner', _pa4, [])
 
@@ -2698,7 +2814,9 @@ _WHOLE_NAV = 'Dropoff\n77 Made Up Ct, Acworth, GA 30101\n12 min Start'
 ok_('the premise: that whole screen has a labelled address and no stop header',
     OP.find_planner(_WHOLE_NAV) is None and OP.address_stop(_WHOLE_NAV) == 'dropoff')
 ra5 = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
-          seconds=4.0, handoff=_ha5, whole_text=_WHOLE_NAV, planners=_pa5)
+          seconds=4.0, handoff=_ha5, whole_text=_WHOLE_NAV, planners=_pa5,
+          until=after(lambda rows, ann, calls, seen:
+                      _whole_sighted(seen) and _back_on_box(seen), 0.3))
 ok_('the premise: it was read whole (%r)' % ra5['wholes'], sum(ra5['wholes']) == 1)
 eq('an unpressed whole-screen read files an address under a Dropoff label off its '
    'sighting, as a navigation destination',
@@ -2712,7 +2830,9 @@ _ha5b = tempfile.mkdtemp()
 _hold(_ha5b, time.time() + 3600)
 _WHOLE_BARE = '77 Made Up Ct, Acworth, GA 30101\n12 min Start'
 ra5b = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
-           seconds=4.0, handoff=_ha5b, whole_text=_WHOLE_BARE)
+           seconds=4.0, handoff=_ha5b, whole_text=_WHOLE_BARE,
+           until=after(lambda rows, ann, calls, seen:
+                       _whole_sighted(seen) and _back_on_box(seen), 0.3))
 ok_('the premise: it was read whole, and its sighting carries the address (%r)'
     % ra5b['wholes'], sum(ra5b['wholes']) == 1
     and [s['line'] for x in ra5b['sightings'] if x['whole'] for s in x['stops']]
@@ -2736,7 +2856,9 @@ ok_('the premise: the last address on that screen is under a Dropoff label, and 
     and OP.address_stop(_WHOLE_SECOND) == 'dropoff'
     and not OP.address_under_dropoff(_WHOLE_SECOND))
 ra5c = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
-           seconds=4.0, handoff=_ha5c, whole_text=_WHOLE_SECOND)
+           seconds=4.0, handoff=_ha5c, whole_text=_WHOLE_SECOND,
+           until=after(lambda rows, ann, calls, seen:
+                       _whole_sighted(seen) and _back_on_box(seen), 0.3))
 ok_('the premise: it was read whole (%r)' % ra5c['wholes'], sum(ra5c['wholes']) == 1)
 eq('an unpressed whole-screen read files no second address under another\'s label',
    (ra5c['dropoffs'],
@@ -2765,7 +2887,9 @@ ok_('the premise: the card box is Uber\'s navigation with no address, and the wh
 _hn1 = tempfile.mkdtemp()
 _hold(_hn1, time.time() + 3600)
 rn1 = run(lambda n, k: FRAG if n == 1 else _NAV_BOX, extra_argv=['--no-parallel'],
-          seconds=6.0, handoff=_hn1, whole_text=_NAV_WHOLE)
+          seconds=6.0, handoff=_hn1, whole_text=_NAV_WHOLE,
+          until=lambda rows, ann, calls, seen: calls >= 5 and _whole_sighted(seen)
+          and _back_on_box(seen))
 ok_('the premise: the card box read the navigation screen several times, unpressed '
     '(%d reads)' % rn1['calls'], rn1['calls'] >= 4)
 eq('with an order held, a navigation screen in the card box gets one whole-screen read, '
@@ -2787,7 +2911,8 @@ eq('with no order held, a navigation screen in the card box is not read whole',
 _hn3 = tempfile.mkdtemp()
 _hold(_hn3, time.time() + 3600)
 rn3 = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX if n == 2 else _NAV_BOX,
-          extra_argv=['--no-parallel'], seconds=6.0, handoff=_hn3, whole_text=_NAV_WHOLE)
+          extra_argv=['--no-parallel'], seconds=6.0, handoff=_hn3, whole_text=_NAV_WHOLE,
+          until=lambda rows, ann, calls, seen: len(seen['wholes']) >= 6)
 _after = [w for i, w in enumerate(rn3['wholes']) if i >= 2]
 ok_('the premise: card-box reads of the navigation screen came after the planner\'s '
     'whole-screen read (%r)' % rn3['wholes'],
@@ -2806,7 +2931,9 @@ _SHEET = next(c['text'] for c in json.load(open(os.path.join(
 _hn4 = tempfile.mkdtemp()
 _hold(_hn4, time.time() + 3600)
 rn4 = run(lambda n, k: FRAG if n == 1 else _SHEET, extra_argv=['--no-parallel'],
-          seconds=4.0, handoff=_hn4, whole_text=_SHEET)
+          seconds=4.0, handoff=_hn4, whole_text=_SHEET,
+          until=after(lambda rows, ann, calls, seen:
+                      _whole_sighted(seen) and _back_on_box(seen), 0.3))
 ok_('the premise: the sheet was read whole (%r)' % rn4['wholes'], sum(rn4['wholes']) == 1)
 eq('an opened navigation sheet\'s address over "Dropoff type" is the held order\'s '
    'destination with no press',
@@ -2835,7 +2962,8 @@ ok_('the premise: the card box holds the sheet\'s lower half, the label to the o
     and OP.find_planner(_CSHEET) is None and OP.sheet_dropoff(_CSHEET) is not None)
 _hc1, _pc1 = tempfile.mkdtemp(), []
 rc1 = run(_press_on_first_read(_hc1, ''), extra_argv=['--no-parallel'], seconds=5.0,
-          handoff=_hc1, whole_text=_CSHEET, planners=_pc1)
+          handoff=_hc1, whole_text=_CSHEET, planners=_pc1,
+          until=after(lambda rows, ann, calls, seen: _asked(seen), 1.0))
 eq('⌖ over Uber\'s customer sheet is answered with its address, asked, once',
    [((d[0] or {}).get('line'), d[1].get('asked')) for d in rc1['dropoffs']],
    [('283 Quillon St NW, Smyrna', True)])
@@ -2847,7 +2975,9 @@ eq('...its sighting the sheet\'s one dropoff, its place and "Expected by" with i
 _hc2 = tempfile.mkdtemp()
 _hold(_hc2, time.time() + 3600)
 rc2 = run(lambda n, k: FRAG if n == 1 else _CSHEET_BOX, extra_argv=['--no-parallel'],
-          seconds=4.0, handoff=_hc2, whole_text=_CSHEET)
+          seconds=4.0, handoff=_hc2, whole_text=_CSHEET,
+          until=after(lambda rows, ann, calls, seen:
+                      _whole_sighted(seen) and _back_on_box(seen), 0.3))
 ok_('the premise: the customer sheet was read whole, unpressed (%r)' % rc2['wholes'],
     sum(rc2['wholes']) == 1)
 eq('...and with an order held its address is the held order\'s destination with no press',
@@ -2867,7 +2997,9 @@ ok_('the premise: under a press that planner gives its dropoff as the destinatio
     [d['line'] for d in assembled(rp1['sightings'])['dropoffs']]
     == ['4821 Kestrel Dr, Marietta'] and OP.planner_titled(_ONE_DROP_WHOLE))
 ra6 = run(lambda n, k: FRAG if n == 1 else _ONE_DROP, extra_argv=['--no-parallel'],
-          seconds=4.0, handoff=_ha6, whole_text=_ONE_DROP_WHOLE, planners=_pa6)
+          seconds=4.0, handoff=_ha6, whole_text=_ONE_DROP_WHOLE, planners=_pa6,
+          until=after(lambda rows, ann, calls, seen:
+                      _whole_sighted(seen) and _back_on_box(seen), 0.3))
 eq('an unpressed planner read sends the stops, unasked',
    [([s['line'] for s in p[0]], p[1].get('asked')) for p in _pa6],
    [(['4821 Kestrel Dr, Marietta'], False)])
@@ -2897,7 +3029,9 @@ ok_('the premise: the box read of the hotel dropoff has no stop header but the '
     OP.find_planner(_HOTEL_BOX) is None and OP.planner_furniture(_HOTEL_BOX)
     and OP.planner_bounded(_HOTEL_WHOLE) and OP.planner_titled(_HOTEL_WHOLE))
 ra7 = run(lambda n, k: FRAG if n == 1 else _HOTEL_BOX, extra_argv=['--no-parallel'],
-          seconds=4.0, handoff=_ha7, whole_text=_HOTEL_WHOLE, planners=_pa7)
+          seconds=4.0, handoff=_ha7, whole_text=_HOTEL_WHOLE, planners=_pa7,
+          until=after(lambda rows, ann, calls, seen:
+                      _whole_sighted(seen) and _back_on_box(seen), 0.3))
 _as7 = assembled([x for x in ra7['sightings'] if x['whole']], _held())
 eq('a planner dropoff at a hotel, no ZIP, is filed as the held order\'s destination: '
    'its street and town, label-proven',
@@ -2911,7 +3045,9 @@ eq('...said as filed on any held card, the list being seen whole',
 _ha8 = tempfile.mkdtemp()
 _hold(_ha8, time.time() + 3600)
 ra8 = run(lambda n, k: FRAG if n == 1 else _HOTEL_BOX, extra_argv=['--no-parallel'],
-          seconds=4.0, handoff=_ha8, whole_text=_HOTEL)
+          seconds=4.0, handoff=_ha8, whole_text=_HOTEL,
+          until=after(lambda rows, ann, calls, seen:
+                      _whole_sighted(seen) and _back_on_box(seen), 0.3))
 _seen8 = [x for x in ra8['sightings'] if x['whole']]
 eq('an unbounded planner\'s lone one-order dropoff is sent, unasked, label-proven '
    'and marked single-card-only',
@@ -2994,13 +3130,15 @@ eq('the held orders\' note is one signature, list or name, and a second order ch
 _hpk, _plk = tempfile.mkdtemp(), []
 run(_press_on_first_read(_hpk, ''), extra_argv=['--no-parallel'], seconds=4.0,
     handoff=_hpk, whole_text=_ONE_DROP_WHOLE, planners=_plk,
+    until=lambda rows, ann, calls, seen: seen['planners'],
     config_extra={'settings': {'target': 25, 'band': 15, 'costPerMile': 0.30,
                                'keepPlaces': False}})
 eq('with "keepPlaces": false the planner line says the journal may not keep the '
    'stops', [p[1].get('keep') for p in _plk], [False])
 _hpn, _pln = tempfile.mkdtemp(), []
 run(_press_on_first_read(_hpn, ''), extra_argv=['--no-parallel', '--no-journal'],
-    seconds=4.0, handoff=_hpn, whole_text=_ONE_DROP_WHOLE, planners=_pln)
+    seconds=4.0, handoff=_hpn, whole_text=_ONE_DROP_WHOLE, planners=_pln,
+    until=lambda rows, ann, calls, seen: seen['planners'])
 eq('...and nor with --no-journal', [p[1].get('keep') for p in _pln], [False])
 
 # A payout on the screen is an offer whatever else is printed round it.
@@ -3009,7 +3147,8 @@ ok_('the premise: that screen has a payout and a planner\'s grammar',
     OP.parse(_PAID_PLANNER)['pay'] == 12.5 and OP.find_planner(_PAID_PLANNER))
 _hp4 = tempfile.mkdtemp()
 rp4 = run(_press_on_first_read(_hp4, ''), extra_argv=['--no-parallel'], seconds=4.0,
-          handoff=_hp4, dropoff_window=1.0, whole_text=_PAID_PLANNER)
+          handoff=_hp4, dropoff_window=1.0, whole_text=_PAID_PLANNER,
+          until=after(lambda rows, ann, calls, seen: _asked(seen), 1.0))
 eq('a planner with a payout on the screen is not answered as a planner',
    rp4['planners'], [])
 eq('...and the press is told it found nothing, as for any offer card',
@@ -3025,7 +3164,9 @@ ok_('the premise: that screen has a payout, and an address under a Dropoff label
     and OP.address_under_dropoff(_PAID_NAV))
 _hp4b = tempfile.mkdtemp()
 rp4b = run(_press_on_first_read(_hp4b, ''), extra_argv=['--no-parallel'], seconds=4.0,
-           handoff=_hp4b, dropoff_window=1.0, whole_text=_PAID_NAV)
+           handoff=_hp4b, dropoff_window=1.0, whole_text=_PAID_NAV,
+           until=after(lambda rows, ann, calls, seen:
+                       _whole_sighted(seen) and _back_on_box(seen), 0.3))
 _paid_seen = [x['stops'] for x in rp4b['sightings'] if x['whole']]
 ok_('a sighting off a frame with a payout on it carries no address (%r)' % _paid_seen,
     bool(_paid_seen) and all(v == [] for v in _paid_seen))
@@ -3908,7 +4049,10 @@ for _what, _frame, _found_text, _said in (
     # the verify beat stops after that first round, and a count reached as
     # the round begins stops the loop before the round is digested.
     _fl = run(lambda n, k: '', real_look=(_EARLY_BOX, _found_text), offer=_frame,
-              config_extra=_EARLY_CFG, seconds=8.0, appear_at=0.0)
+              config_extra=_EARLY_CFG, seconds=8.0, appear_at=0.0,
+              until=after(lambda rows, ann, calls, seen, _said=_said: seen['finder'][0] > 0
+                          and any('found nothing usable' in l and _said in l
+                                  for l in seen['logs']), 0.5))
     _sample = [l for l in _fl['logs'] if 'found nothing usable' in l]
     ok_('a read the card finder was asked about, %s, says why in the log\'s sample '
         'line (%r)' % (_what, (_sample or [None])[0]),
@@ -4130,7 +4274,8 @@ eq('...and it is what the reader read',
 _hou = tempfile.mkdtemp()
 r22 = run(_press_on_first_read(_hou, WHOLE), extra_argv=['--no-parallel'], seconds=6.0,
           handoff=_hou, dropoff_window=1.0, whole_text=_NEW_LAYOUT,
-          fitted_for=lambda n: _crop)
+          fitted_for=lambda n: _crop,
+          until=after(lambda rows, ann, calls, seen: _asked(seen) and _back_on_box(seen), 0.5))
 _ud22 = os.path.join(os.path.dirname(r22['config']), 'scans', SP.UNPARSED_DIR)
 ok_('a ⌖ press was read whole', any(r22['wholes']))
 eq('...and a ⌖ read keeps no unparsed picture',
