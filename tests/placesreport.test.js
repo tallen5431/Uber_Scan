@@ -2456,6 +2456,38 @@ function nbx() {
   eq('[around] the drive to the pickup, the card\'s own figure, every counted offer (no GPS needed): under 1 mi and 3–5 mi',
      [AR.pickup.b.filter(function (v) { return v === 0; }).length, AR.pickup.b.filter(function (v) { return v === 3; }).length,
       AR.pickup.bands.length], [45, 45, 5]);
+  // Round B: the front page's when and where (glanceOf), on the same days.
+  var GL = repA.glance, glW = GL.windows.best.length ? GL.windows.best : GL.windows.leading;
+  var glAreas = [].concat.apply([], glW.map(function (w) { return w.areas || []; }));
+  var homeCell = P.cellOf(HOME).id;
+  // A record whose evenings sit two hours in A, each begun at home: the
+  // window's waiting area is A, and home's twenty minutes are left out.
+  var gRows = [];
+  [13, 20, 27].forEach(function (dd) {
+    for (var g0 = 0; g0 < 10; g0++) gRows.push(aCard('gh' + dd + '-' + g0, at(dd, 18, g0 * 2), HOME, 15));
+    for (var g1 = 0; g1 < 60; g1++) gRows.push(aCard('ga' + dd + '-' + g1, at(dd, 18, 20 + g1 * 2), AA, g1 % 3 ? 15 : 40));
+  });
+  var gWait = P.waitingLine(gRows, [], {}, {});
+  var GG = P.glanceOf(gRows, gWait, P.reportRulers(gRows));
+  var ggW = GG.windows.best.length ? GG.windows.best : GG.windows.leading;
+  var ggAreas = [].concat.apply([], ggW.map(function (w) { return w.areas || []; }));
+  eq('[glance] two hours a Friday evening in A, begun at home: A is the window\'s waiting area, home\'s cards left out',
+     [ggAreas.length > 0, ggAreas.every(function (e) { return e.a === aCellBox.id; }), GG.homeLeft >= 20,
+      ggAreas.some(function (e) { return e.a === homeCell; })], [true, true, true, false]);
+  eq('[glance] the windows are trends.js findWindows over When & where\'s line: Fridays in the evening, good per hour '
+     + 'waited, at When & where\'s cut and floor (2 h on 2 days)',
+     [glW.length > 0, glW[0].dows, glW[0].hours.every(function (h) { return h >= 18 && h <= 19; }), GL.cut, GL.windows.floorHours,
+      GL.windows.floorDays], [true, [5], true, cut20, 2, 2]);
+  eq('[glance] the waiting areas in a window leave home out (Offers around you\'s rule), a new view: When & where\'s own '
+     + 'slot table still holds home\'s cell', [glAreas.some(function (e) { return e.a === homeCell; }),
+       GL.homeLeft > 0, JSON.stringify(repA.whenwhere.slots['5|any'].cell).indexOf(homeCell) >= 0], [false, true, true]);
+  var glSec = P.glanceSection(repA), glPage = P.html(repA);
+  ok('[glance] the Overview opens on When and Where, each linking to its tab, Read before the numbers still reachable, '
+     + 'and words of what paid, never take or decline',
+     glPage.indexOf('<h3>When <a class="more" href="#whenwhere">') > 0
+     && glPage.indexOf('<h3>When <a') < glPage.indexOf('<div class="tiles">') && /href="#around">Offers around you/.test(glSec)
+     && /href="#caveats">Read before the numbers/.test(glPage) && /id="caveats"/.test(glPage)
+     && !/\b(take|takes|decline|accept)\b/i.test(glSec.replace(/<[^>]+>/g, ' ')));
   var aJson = JSON.stringify(AR);
   ok('[privacy] the tab\'s data hold no id, time, text, door, pickup or dropoff of a card',
      !/"(id|at|text|dropoff|firstAt)"/.test(aJson) && !/"pickup":"/.test(aJson) && !/"a[hbcs]\d/.test(aJson));
