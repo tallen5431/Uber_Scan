@@ -445,6 +445,17 @@ for _i in range(T.LOST_AFTER + 1):
 ok_('...and stops being reported once the screen is genuinely gone',
     not _gone.status()['stalled'])
 ok_('...which is said as lost instead', _gone.status()['lost'])
+# The scan loop asks `lost` and `stalled` on every frame as properties, without
+# building status(); the two must be one answer, both ways round.
+_both = T.QuadTracker(CAL.copy(), calibrated=CAL.copy())
+_seen = []
+settle(_both, reseated, 6, step=T.STALL_VISIBLE / 2.0)
+_seen.append((_both.lost, _both.stalled, _both.status()['lost'], _both.status()['stalled']))
+for _i in range(T.LOST_AFTER + 1):
+    _both.update(_blank, now=40.0 + _i)
+_seen.append((_both.lost, _both.stalled, _both.status()['lost'], _both.status()['stalled']))
+eq('the loop\'s per-frame lost and stalled are status()\'s, stuck and then gone',
+   _seen, [(False, True, False, True), (True, False, True, False)])
 
 # It must not fire in place of the ordinary path, which is far quicker.
 tr = T.QuadTracker(CAL.copy(), calibrated=CAL.copy())

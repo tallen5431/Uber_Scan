@@ -2794,6 +2794,8 @@ Open:
   written for the merge found this; the stops did not cause it. The line was
   measured whole in the phone layout only.
 
+**The scan loop asked the same questions several times a frame and built a dict each time to read one answer of it.** `tracker.status()` — a dict, two numpy corner distances — was called up to five times a frame (the updown watch, the tracker check's before and after, lost and stalled, AutoGain's `has_screen`) for its `lost` or `stalled` alone; `handoff._dir()` was answered about eight times a frame, two for every `path()`, four for every `candidates()`, across the 📷 Snap, ⌖ Dropoff, keypad cost and drawn-box polls; and `cropbox.take_request` unlinked both absent request names on every frame. **Now** `QuadTracker.lost` and `.stalled` are properties status() itself reads, so the two cannot answer differently; `handoff.begin_pass()` answers the directory once at the top of each pass and `end_pass()` puts the per-call answer back when the loop ends — still per pass, so a mount that comes up late is seen on the next frame, and nothing outside the loop changes; `take_request` clears only when a request was there. Measured on this x86 box under other work: `status()['lost']` 22-34 µs against 0.07 for `.lost`; the four request polls of one pass 36-45 µs, 27 inside a pass. Small here, and the Pi is several times slower at the same work on every frame. `cropbox.REQUEST_PATH`, which nothing read, is gone. Check: test_track 'the loop's per-frame lost and stalled are status()'s, stuck and then gone'; the rest is held by the suites that drive the loop (test_loop, test_scan_pi, test_handoff, test_cropbox) passing unchanged.
+
 ### The clock
 
 **A clock that is merely WRONG passed every guard in the rig, and the driver

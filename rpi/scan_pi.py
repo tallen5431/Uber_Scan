@@ -7564,6 +7564,9 @@ def main():
         # stretch the rig was scanning.
         updown.start(bool(args.gps), uptime())
         while True:
+            # Where the request files are, asked once for this pass rather than
+            # by every request polled below (handoff.begin_pass).
+            HO.begin_pass()
             # A read that finished while the camera kept running. Taken here,
             # at the top, because everything below can `continue` past it.
             if collect():
@@ -7579,7 +7582,7 @@ def main():
             # tracks the corners — see the note under STALL_SAY.
             sight = updown.watch(
                 time.monotonic(),
-                tracker.status()['lost'] if tracker is not None else None,
+                tracker.lost if tracker is not None else None,
                 gps_now(phone, gps_refused),
                 sight_now(frozen,
                           auto_gain.lit if (tracker is None and auto_gain is not None)
@@ -7883,9 +7886,8 @@ def main():
                 # size. Blurred frames are skipped: a smeared edge is a worse
                 # guess than the corners already held.
                 if tracker is not None and scanner.settled:
-                    was = tracker.status()
-                    jumps_before, lost_before = tracker.jumps, was['lost']
-                    stalled_before = was['stalled']
+                    jumps_before, lost_before = tracker.jumps, tracker.lost
+                    stalled_before = tracker.stalled
                     rebased_before = tracker.rebaselines
                     if tracker.update(luma, now):
                         scanner.quad = tracker.quad
@@ -7928,7 +7930,7 @@ def main():
                         log('corners re-locked: the phone is somewhere the stored '
                             'calibration did not expect, and has been for several '
                             'checks running. Mount moved?')
-                    lost_now = tracker.status()['lost']
+                    lost_now = tracker.lost
                     if lost_now != lost_before:
                         log('screen %s' % ('not visible — is the phone lit and in frame?'
                                            if lost_now else 'visible again'))
@@ -7941,7 +7943,7 @@ def main():
                     # corners, so corners drawn round the card read the journey
                     # and lose the payout. That case cannot be fixed by moving
                     # the box, only by the person who can see the screen.
-                    stalled_now = tracker.status()['stalled']
+                    stalled_now = tracker.stalled
                     if stalled_now != stalled_before:
                         log(('outline stuck: the corners have been off the screen '
                              'the camera can see for %ds. If the box is drawn '
@@ -8011,7 +8013,7 @@ def main():
                     # LIT_ENOUGH backstop is there to cover. Saying it out loud
                     # is what let the backstop be applied only where it belongs.
                     have_screen = (None if tracker is None
-                                   else not tracker.status()['lost'])
+                                   else not tracker.lost)
                     was_exposure = auto_gain.exposure
                     ctrls = auto_gain.update(lit, now, has_screen=have_screen)
                     # The photometric picture, before any preprocessing — the
@@ -8450,6 +8452,7 @@ def main():
         # different fault from one that never stopped.
         if clean:
             updown.stop()
+        HO.end_pass()
         reader.close()
         map_labels.close()
         if map_bands is not None:
