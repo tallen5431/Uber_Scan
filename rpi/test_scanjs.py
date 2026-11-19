@@ -20,6 +20,7 @@ without node: the Pi does not carry Playwright and does not need to.
 
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -929,6 +930,7 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
     const http = require('http');
     const src = process.env.SHELL_ROOT;
     let build = 'A', up = true;
+    const asked = {};
     const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript',
                     '.css': 'text/css', '.png': 'image/png',
                     '.webmanifest': 'application/manifest+json' };
@@ -942,12 +944,15 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
         res.end('not found');
         return;
       }
+      asked[rel] = (asked[rel] || 0) + 1;
       let body = fs.readFileSync(file);
       if (rel === 'live.html') {
         body = Buffer.from(body.toString('utf8').replace('<head>',
           '<head><script>window.__liveBuild = "' + build + '";</script>'));
       } else if (rel === 'map-view.js') {
         body = Buffer.from(body.toString('utf8') + '\n;window.__mvBuild = "' + build + '";\n');
+      } else if (rel === 'card-words.js' || rel === 'styles.css') {
+        body = Buffer.from(body.toString('utf8') + '\n/* build ' + build + ' */\n');
       }
       res.writeHead(200, { 'Content-Type': TYPES[path.extname(rel)] || 'application/octet-stream',
                            'Cache-Control': 'no-cache' });
@@ -997,6 +1002,18 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
     build = 'B';
     r.bMap = (await pair('/map.html'))[1];
     r.b = await pair('/live.html');
+    // Build D: one reload of the panel, which loads four files the build
+    // changed. Each used to start a whole-shell refresh of its own — five
+    // shells for one reload, 92 requests and 9.7 MB, measured — so the count
+    // asked is of scan.js, a shell file the panel never loads itself: only a
+    // refresh fetches it. The cache holding D first, then a moment for any
+    // refresh still running to land and be counted.
+    build = 'D';
+    for (const k of Object.keys(asked)) delete asked[k];
+    r.d = await pair('/live.html');
+    r.dCached = await cached('D');
+    await new Promise((res) => setTimeout(res, 1500));
+    r.dRefreshes = asked['scan.js'] || 0;
     build = 'C';
     r.cMap = (await pair('/map.html'))[1];
     r.cCached = await cached('C');
@@ -1419,6 +1436,10 @@ try:
        tb.get('bMap'), 'B')
     eq('[two builds] ...and the panel after it runs B\'s pair, never A\'s live.html with B\'s '
        'map-view.js', tb.get('b'), ['B', 'B'])
+    eq('[two builds] build D, four of the panel\'s files changed: one reload runs D\'s pair '
+       'and the shell is kept as D', (tb.get('d'), tb.get('dCached')), (['D', 'D'], True))
+    eq('[two builds] ...and the whole shell is fetched once for it, not once per changed file',
+       tb.get('dRefreshes'), 1)
     eq('[two builds] build C, the map page opened: the whole shell is kept as C',
        (tb.get('cMap'), tb.get('cCached')), ('C', True))
     eq('[two builds] ...and with the server gone the panel comes up from the cache as one '
@@ -1913,6 +1934,30 @@ try:
     shelled = ' '.join(listed)
     for page in sorted(f for f in os.listdir(ROOT) if f.endswith('.html')):
         ok_('the shell holds %s' % page, ("'" + page + "'") in shelled)
+
+    # ...and every file those pages load, which is what an offline load is made
+    # of. journal.html loads trends.js and earnings.js by a script tag it makes
+    # itself, and neither was in the shell: offline, the trend figures and the
+    # paid-range box had nothing to run, and online the cache could pair a new
+    # journal.html with whatever trends.js it last happened to keep, the
+    # mismatch the shell is kept as one build to prevent. Read off the pages —
+    # their tags, their stylesheets, and the `s.src = '...'` a page writes —
+    # so a script added later is asked about here without anyone listing it.
+    # The CDN's Leaflet and the vendored reader are out of the shell on
+    # purpose (the comments above ASSETS and isVendor say why).
+    loads = set()
+    for page in sorted(f for f in os.listdir(ROOT) if f.endswith('.html')):
+        page_src = open(os.path.join(ROOT, page)).read()
+        found = (re.findall(r'<script[^>]*\bsrc="([^"]+)"', page_src)
+                 + re.findall(r'<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"', page_src)
+                 + re.findall(r"\.src\s*=\s*'([^'/]+\.js)'", page_src))
+        for f in found:
+            if not re.match(r'(https?:)?//', f) and not f.startswith('vendor/'):
+                loads.add((page, f))
+    ok_('the pages\' own scripts are found to ask about (%d)' % len(loads),
+        ('journal.html', 'trends.js') in loads and ('live.html', 'card-words.js') in loads)
+    for page, f in sorted(loads):
+        ok_('the shell holds %s, which %s loads' % (f, page), ("'" + f + "'") in shelled)
 
     # ...and the app shell answers for the app's own entry and nothing else. A
     # navigation this build has never heard of gets an honest refusal, not a

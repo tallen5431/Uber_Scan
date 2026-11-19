@@ -24,7 +24,7 @@
  * install would not have put it back: a phone with no signal would have lost
  * the scanner entirely, in the name of shipping a scanner fix.
  */
-var SHELL = 'uberscan-shell-v54';   // v54: card-words.js joined the shell
+var SHELL = 'uberscan-shell-v55';   // v55: trends.js and earnings.js joined it
 
 /* Bumped only when the vendored engine itself changes, which is rare and
  * deliberate. Held apart from the shell so that shipping app code never costs
@@ -71,6 +71,15 @@ var ASSETS = [
   // ...and the shift so far, for the same reason: it needs the rig for its
   // figures, and offline it opens as itself and says it cannot reach it.
   'shift.html',
+  // Two scripts journal.html loads by a tag it writes when it needs them:
+  // trends.js for the trend figures and the offers CSV, earnings.js for the
+  // paid-range box. They were never listed, so offline those parts had
+  // nothing to run, and online the cache could pair a new journal.html with
+  // an old trends.js — the very mismatch the shell is kept as one build to
+  // prevent. rpi/test_scanjs.py now reads every script
+  // each page loads and asks that it is here.
+  'trends.js',
+  'earnings.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',
@@ -123,9 +132,45 @@ function keepShell(req, url, res) {
       if (!old || !inShell(url.pathname)) return c.put(req, res);
       return Promise.all([old.text(), res.clone().text()]).then(function (both) {
         if (both[0] === both[1]) return null;
-        return c.addAll(ASSETS);
+        return wholeShell(c, req, both[1]);
       });
     });
+  });
+}
+
+/* The whole shell, fetched once per build however many of its files notice.
+ *
+ * Every changed file used to start an addAll of its own, and a deploy changes
+ * several files that one page loads: the panel asks for live.html,
+ * map-view.js, card-words.js and styles.css, each saw itself differ from the
+ * cache before the first refresh had landed, and one reload after a deploy of
+ * those four pulled the shell five times over — 92 requests, 9.7 MB, measured
+ * with the worker in control. On a phone on the hotspot that is the data plan.
+ *
+ * So one refresh is in flight at a time, and a file that finds one running
+ * waits for it and then asks the cache again: the refresh fetched the server's
+ * copy, so normally it now holds what this file saw, and nothing more is done.
+ * Still different — a deploy landed while that refresh was half way — and one
+ * more refresh is started, or joined. One, not a loop: a server whose answer
+ * changed on every request would otherwise refresh the shell forever. */
+var refreshing = null;
+
+function refreshShell(c) {
+  if (!refreshing) {
+    refreshing = c.addAll(ASSETS).then(function () { refreshing = null; },
+                                       function (err) { refreshing = null; throw err; });
+  }
+  return refreshing;
+}
+
+function wholeShell(c, req, seen) {
+  if (!refreshing) return refreshShell(c);
+  return refreshing.catch(function () {}).then(function () {
+    return c.match(req);
+  }).then(function (now) {
+    return now ? now.text() : null;
+  }).then(function (now) {
+    return now === seen ? null : refreshShell(c);
   });
 }
 
