@@ -18,6 +18,7 @@ var https = require('https');
 var fs = require('fs');
 var path = require('path');
 var url = require('url');
+var zlib = require('zlib');
 
 var os = require('os');
 var spawn = require('child_process').spawn;
@@ -58,10 +59,11 @@ var HOST = process.env.HOST || '0.0.0.0';
 var SSL_DIR = path.join(ROOT, 'ssl');
 // The lite edition (lite/lite.js, CLAUDE.md): the camera, the reader and one
 // big card, with the NucBox, the reports and the uploads shut. One bit, read
-// once here; asked by name at four places only — the handler's first line,
-// the NucBox's bases (NBX), the startup banner and /api/trends (the offers
-// page's Trends tab, refused in lite's own words) — so the full rig's code is
-// the lite rig's code everywhere else, every money rule included.
+// once here; asked by name at a few places only — the handler's first line,
+// the NucBox's bases (NBX), the startup banner, /api/trends (the offers
+// page's Trends tab, refused in lite's own words) and gzip (gzipFor and its
+// two callers: none under lite) — so the full rig's code is the lite rig's
+// code everywhere else, every money rule included.
 var Lite = require('./lite/lite.js');
 var LITE = Lite.on(ROOT, process.env);
 
@@ -1521,26 +1523,39 @@ function addOnBase(inCar) {
  * once, with this). A stat is all an unchanged file costs now. The scanner
  * replaces the file through a rename, which a new inode says even inside one
  * mtime tick. */
-var carryTwoSeen = null;
+function carryTwo() { return settingOn('carryTwo'); }
 
-function carryTwo() {
-  var env = process.env.CARRY_TWO;
+/* A switch in rpi/config.json's `settings`: on only where it says exactly
+ * true, and its environment name (carryTwo is CARRY_TWO) set to 1 or 0
+ * overriding the file, for the suites. carryTwo above and screenDrop below.
+ *
+ * One reader and one cache for every switch since the server review (Nov
+ * 2026): carryTwo and screenDrop were this function written twice, each
+ * with its own copy of the file's settings and its own stat, and a third
+ * switch would have been a third. The cache holds the whole `settings`
+ * object, so whichever switch is asked after the file changes reads it for
+ * all of them. */
+var settingsSeen = null;    // {mtime, size, ino, settings}
+
+function settingOn(name) {
+  var env = process.env[name.replace(/[A-Z]/g, '_$&').toUpperCase()];
   if (env === '1') return true;
   if (env === '0') return false;
   var file = path.join(ROOT, 'rpi', 'config.json');
   var st;
-  try { st = fs.statSync(file); } catch (e) { carryTwoSeen = null; return false; }
-  var c = carryTwoSeen;
-  if (c && c.mtime === st.mtimeMs && c.size === st.size && c.ino === st.ino) return c.on;
-  var on = false;
-  try {
-    var cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
-    on = !!(cfg && cfg.settings && cfg.settings.carryTwo === true);
-  } catch (e) {
-    on = false;
+  try { st = fs.statSync(file); } catch (e) { settingsSeen = null; return false; }
+  var c = settingsSeen;
+  if (!(c && c.mtime === st.mtimeMs && c.size === st.size && c.ino === st.ino)) {
+    var settings = {};
+    try {
+      var cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (cfg && cfg.settings && typeof cfg.settings === 'object') settings = cfg.settings;
+    } catch (e) {
+      settings = {};
+    }
+    c = settingsSeen = { mtime: st.mtimeMs, size: st.size, ino: st.ino, settings: settings };
   }
-  carryTwoSeen = { mtime: st.mtimeMs, size: st.size, ino: st.ino, on: on };
-  return on;
+  return c.settings[name] === true;
 }
 
 /* The orders in the car as the assembler is handed them: the first-taken
@@ -5199,7 +5214,7 @@ function orderRecords(rows, floor) {
 function storeWaitsOut() {
   return storeWaits().map(function (st) {
     var s = st.waits.map(function (w) { return w.s; }).sort(function (a, b) { return a - b; });
-    var mid = s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+    var mid = percentileOf(s, 0.5);
     // ...and how many were found from the stop pattern (stopWaitsOf, the
     // owner's 7 Nov night: most pickups never pinned), and the worst: what
     // the places report's Store waits tab shows beside the median.
@@ -5439,12 +5454,41 @@ function targetsOut(offers, taken) {
   try {
     return Advice.targets(offers, taken, {
       target: line === null ? 25 : line,
-      key: function (r) { return MV.townFor(r, Advice.area); }
+      key: townOfCard
     });
   } catch (e) {
     console.error('targets: ' + e.message);
     return null;
   }
+}
+
+/* MV.townFor with Advice.area, remembered by its input: the card's dropoff and
+ * pickup, as townFor reads them (String() of each, null and undefined as '').
+ *
+ * targetsOut was most of /api/journal (the server review, Nov 2026: 81 ms of
+ * a 150 ms warm answer for 30 days of an invented 12,000-offer journal, and
+ * the All answer in proportion), and most of that was townFor: asked once
+ * per row for the hour blocks and again for All hours, and inside it the
+ * dropoff's town is worked out twice (townEndFor, then townOf). A busy
+ * record has a few hundred distinct dropoffs and pickups, so the same
+ * strings were read again and again. Exact: the answer is a function of
+ * those two strings and nothing else (Advice.area keeps no state), and the
+ * map is keyed on each whole, one inside the other, so no two pairs can
+ * share a key. Cleared whole past TOWN_SEEN_MAX pairs. */
+var TOWN_SEEN_MAX = 20000;
+var townSeen = new Map();       // dropoff -> Map(pickup -> town)
+var townSeenN = 0;
+function townOfCard(r) {
+  var d = r.dropoff == null ? '' : String(r.dropoff);
+  var p = r.pickup == null ? '' : String(r.pickup);
+  var byPickup = townSeen.get(d);
+  if (byPickup && byPickup.has(p)) return byPickup.get(p);
+  var town = MV.townFor({ dropoff: d, pickup: p }, Advice.area);
+  if (townSeenN >= TOWN_SEEN_MAX) { townSeen.clear(); townSeenN = 0; byPickup = null; }
+  if (!byPickup) { byPickup = new Map(); townSeen.set(d, byPickup); }
+  byPickup.set(p, town);
+  townSeenN += 1;
+  return town;
 }
 
 function storeWaits() {
@@ -5536,36 +5580,41 @@ function storeWaitHeard(h, pin, e, nearAt) {
  * (Assemble.chainName) and whose stores on record are all one place —
  * otherwise which branch is a guess, and a guess is not said. */
 function storeWaitFor(name, pin) {
+  var hits = storeHits(name, pin);
+  var waits = hits ? newestWaits(hits) : [];
+  if (waits.length < STORE_WAITS_MIN) return null;
+  var sorted = waits.slice().sort(function (a, b) { return a - b; });
+  return { n: waits.length, avgMin: Math.max(1, Math.round(sumOf(waits) / waits.length / 60)),
+           medianS: Math.round(percentileOf(sorted, 0.5)) };
+}
+
+/* The stores on record that `name` at `pin` can be, by storeWaitFor's rule
+ * above, or null where which one is a guess. One copy, since the server
+ * review (Nov 2026): storeWaitNote had rebuilt this filter for itself, and
+ * the next change to the rule would have reached one of them. */
+function storeHits(name, pin) {
   var said = storeNameSaid(name);
   if (!said) return null;
   var near = function (a, b) { return MV.crowMiles(a, b) * 1609.344 <= STORE_NEAR_M; };
   var hits = storeWaits().filter(function (st) { return Assemble.sameStore(st.name, said); });
   if (pin && typeof pin.lat === 'number' && typeof pin.lon === 'number') {
-    hits = hits.filter(function (st) { return near(st, pin); });
-  } else if (Assemble.chainName(said) || !hits.every(function (st) { return near(st, hits[0]); })) {
-    return null;
+    return hits.filter(function (st) { return near(st, pin); });
   }
+  if (Assemble.chainName(said) || !hits.every(function (st) { return near(st, hits[0]); })) return null;
+  return hits;
+}
+
+// ...their newest STORE_WAITS_KEEP waits, in seconds, oldest first.
+function newestWaits(hits) {
   var waits = [];
   hits.forEach(function (st) { waits = waits.concat(st.waits); });
-  waits = waits.sort(function (a, b) { return a.at - b.at; }).slice(-STORE_WAITS_KEEP)
+  return waits.sort(function (a, b) { return a.at - b.at; }).slice(-STORE_WAITS_KEEP)
     .map(function (w) { return w.s; });
-  if (waits.length < STORE_WAITS_MIN) return null;
-  var sorted = waits.slice().sort(function (a, b) { return a - b; });
-  var mid = sorted.length >> 1;
-  var median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-  return { n: waits.length, avgMin: Math.max(1, Math.round(sumOf(waits) / waits.length / 60)),
-           medianS: Math.round(median) };
 }
 
-// A held order's store, at its first pin that names a pickup.
-function storeWaitOfHold(h) {
-  var pin = (Array.isArray(h && h.pickupPins) ? h.pickupPins : []).filter(function (p) {
-    return typeof p.q === 'string';
-  })[0] || null;
-  return storeWaitFor(storeNameOf(h, pin ? pin.q : null), pin);
-}
-
-// ...and its usual wait at similar hours, for the card (storeWaitNote).
+// A held order's usual wait at similar hours, for the card (storeWaitNote),
+// at its first pin that names a pickup. (A storeWaitOfHold beside it, the
+// same pin for storeWaitFor, had no caller anywhere and is gone.)
 function storeWaitNoteOfHold(h, now) {
   var pin = (Array.isArray(h && h.pickupPins) ? h.pickupPins : []).filter(function (p) {
     return typeof p.q === 'string';
@@ -5747,15 +5796,10 @@ var STORE_WAIT_HOURS_MS = 2 * 3600000;
 var STORE_WAIT_NOTE_MIN = 3;
 
 function storeWaitNote(name, pin, now) {
-  var said = storeNameSaid(name);
-  // storeWaitFor's own answer first, for its rule of which stores: null for
-  // a chain with no pin, or a name on record at more than one place.
-  if (!said || !storeWaitFor(name, pin)) return null;
-  var near = function (a, b) { return MV.crowMiles(a, b) * 1609.344 <= STORE_NEAR_M; };
-  var hits = storeWaits().filter(function (st) { return Assemble.sameStore(st.name, said); });
-  if (pin && typeof pin.lat === 'number' && typeof pin.lon === 'number') {
-    hits = hits.filter(function (st) { return near(st, pin); });
-  }
+  // storeWaitFor's rule of which stores (null for a chain with no pin, or a
+  // name on record at more than one place) and its floor of visits first.
+  var hits = storeHits(name, pin);
+  if (!hits || newestWaits(hits).length < STORE_WAITS_MIN) return null;
   var day = 86400000;
   var clock = function (t) {
     var d = new Date(t);
@@ -5771,9 +5815,7 @@ function storeWaitNote(name, pin, now) {
   });
   if (s.length < STORE_WAIT_NOTE_MIN) return null;
   s.sort(function (a, b) { return a - b; });
-  var mid = s.length >> 1;
-  var median = s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-  return { n: s.length, usualMin: Math.max(1, Math.round(median / 60)) };
+  return { n: s.length, usualMin: Math.max(1, Math.round(percentileOf(s, 0.5) / 60)) };
 }
 
 /* One heartbeat, for the pickups: each named pin of each order in the car,
@@ -6229,7 +6271,26 @@ function finishFromFile(w) {
  * an order the list holds again, is forgotten. Returns how many are kept. */
 function loadFinishing() {
   var f = null;
-  try { f = JSON.parse(fs.readFileSync(finishPath(), 'utf8')); } catch (e) { f = null; }
+  var raw = null;
+  try { raw = fs.readFileSync(finishPath(), 'utf8'); } catch (e) { raw = null; }
+  if (raw !== null) {
+    try {
+      f = JSON.parse(raw);
+    } catch (e) {
+      // loadHolding's rule, for the same reason. A file that does not parse
+      // was read as no watches and said nothing, and saveFinishing below then
+      // removed it: every order a watch was keeping lost its order row, with
+      // no line anywhere (the server review, Nov 2026, measured with the
+      // file's last nine bytes cut off). Said now, and kept aside.
+      f = null;
+      var aside = finishPath() + '.bad';
+      var kept = true;
+      try { fs.renameSync(finishPath(), aside); } catch (e2) { kept = false; }
+      console.error('finishing: ' + finishPath() + ' could not be read (' + e.message
+                    + '), so no watch on an order put down is restored'
+                    + (kept ? '; it is kept as ' + aside : ''));
+    }
+  }
   var now = Date.now();
   var held = (scanner.held || []).map(holdIdOf);
   var all = (f && f.v === 1 && Array.isArray(f.watches) ? f.watches : []).map(finishFromFile)
@@ -7691,27 +7752,8 @@ function plannerPassedKeys(h) {
  * Took' or 'another customer'. No name: the customer stays off the journal. */
 var SCREEN_DROP_QUIET_MS = envNumber('SCREEN_DROP_QUIET_MS', 120000);
 var screenDropQuiet = {};
-var screenDropSeen = null;
-
-function screenDrop() {
-  var env = process.env.SCREEN_DROP;
-  if (env === '1') return true;
-  if (env === '0') return false;
-  var file = path.join(ROOT, 'rpi', 'config.json');
-  var st;
-  try { st = fs.statSync(file); } catch (e) { screenDropSeen = null; return false; }
-  var c = screenDropSeen;
-  if (c && c.mtime === st.mtimeMs && c.size === st.size && c.ino === st.ino) return c.on;
-  var on = false;
-  try {
-    var cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
-    on = !!(cfg && cfg.settings && cfg.settings.screenDrop === true);
-  } catch (e) {
-    on = false;
-  }
-  screenDropSeen = { mtime: st.mtimeMs, size: st.size, ino: st.ino, on: on };
-  return on;
-}
+// Read as carryTwo is (settingOn): `"screenDrop": true`, SCREEN_DROP=1/0.
+function screenDrop() { return settingOn('screenDrop'); }
 
 // A customer's name as two readings of it can agree: its letters, lower case,
 // at least three of them. "Pat Q." and "PatQ" are one name.
@@ -9532,15 +9574,30 @@ function latestPerOffer(rows, floor) {
  * whose journal the rig has always written app into (a lite rig's, from its
  * first offer) never loads the parser at all: lite stays lean on a Zero. */
 var RowParser = null;
+/* ...remembered per row, since the server review (Nov 2026): screenType was
+ * asked of every row written before `app` on every fold, and a fold runs
+ * again after each append. Measured on an invented 12,000-offer journal, half
+ * its rows without `app`, /api/trends?days=0 after an appended mark: 195 ms,
+ * 46 of them in rowApp. readJournal's array after an append is the old one's
+ * row objects with the new ones after, so a WeakMap on the row keeps each
+ * answer exactly as long as the row, and the answer depends on the row's
+ * text alone, which is kept beside it and checked. */
+var rowAppSeen = new WeakMap();
 function rowApp(r) {
   if (r.app === 'uber' || r.app === 'doordash' || r.app === null) return r.app;
   if (typeof r.text !== 'string' || !r.text) return null;
+  var hit = rowAppSeen.get(r);
+  if (hit && hit.text === r.text) return hit.app;
   if (!RowParser) RowParser = require('./offer-parser.js');
   var a = RowParser.screenType(r.text).app;
-  return a === 'uber' || a === 'doordash' ? a : null;
+  a = a === 'uber' || a === 'doordash' ? a : null;
+  rowAppSeen.set(r, { text: r.text, app: a });
+  return a;
 }
-function withApp(o) {
-  o.app = rowApp(o);
+// `o` is the fold's copy; `from` the journal's own row it was copied from,
+// which is what the answer is remembered against (a copy is new each fold).
+function withApp(o, from) {
+  o.app = rowApp(from || o);
   return o;
 }
 
@@ -9565,17 +9622,19 @@ function withApp(o) {
 var TrendsLib = null;
 function trendsOut(rows, floor, days) {
   if (!TrendsLib) TrendsLib = require('./trends.js');
-  var offers = latestPerOffer(rows, floor).filter(function (r) {
-    if ((r.at || 0) < CLOCK_BELIEVABLE_AFTER) return false;
-    if (floor && (r.at || 0) < floor) return false;
-    return !r.hidden;
-  });
+  var offers = shownOffers(windowOffers(latestPerOffer(rows, floor), floor).kept);
   var spans = [];
   try {
     Advice.runs(Advice.usable(offers), Advice.SHOWN_AT).forEach(function (g) {
       spans.push([Math.round(g[0].at / 1000), Math.round(g[g.length - 1].at / 1000)]);
     });
-  } catch (e) { spans = []; }
+  } catch (e) {
+    // The tab draws without its runs (hours online unknown) rather than not
+    // at all — but said, since the server review: it was swallowed, and a
+    // fault in Advice.runs would have read as a record with no scanning.
+    console.error('trends: the runs of scanning could not be worked out: ' + e.message);
+    spans = [];
+  }
   var newest = null, costed = null;
   for (var i = offers.length - 1; i >= 0 && !(newest && costed); i--) {
     if ((offers[i].at || 0) > Date.now()) continue;
@@ -9876,7 +9935,7 @@ function latestPerOfferUncached(rows) {
     if (r.kind) return;                       // something newer than this reader
     // Copies, because `hidden` and `accepted` are written onto these below
     // and the rows readJournal hands over now live across requests.
-    if (!r.id) { out.push(withApp(Object.assign({}, r))); return; }
+    if (!r.id) { out.push(withApp(Object.assign({}, r), r)); return; }
     if (!(r.id in byId)) {
       // The slot is claimed here and filled below, so the order of `out` is
       // still the order the cards were first seen in the file.
@@ -9896,8 +9955,8 @@ function latestPerOfferUncached(rows) {
      and for more it is a pure function of the whole list, which is what it is
      handed here. */
   Object.keys(byId).forEach(function (id) {
-    out[byId[id]] = withPay(withApp(Object.assign({}, bestReading(afterCorrection(readings[id])))),
-                            readings[id]);
+    var best = bestReading(afterCorrection(readings[id]));
+    out[byId[id]] = withPay(withApp(Object.assign({}, best), best), readings[id]);
   });
 
   out.forEach(function (o) {
@@ -10325,21 +10384,48 @@ function nextLocked(name) {
 
 var readWaiters = null;
 
-function readJournal(done) {
-  if (readWaiters) { readWaiters.push(done); return; }
-  readWaiters = [done];
+/* `failed(e)`, where given, is told of a throw in `done` instead of the
+ * process. Every request that reads the journal gives one (failedRequest,
+ * below), since the server review (Nov 2026): the throw went to
+ * uncaughtException, which logs and keeps the server up, and the request
+ * that caused it was never answered — the handler's own catch (handler)
+ * cannot see into a callback — so the page waited on it until the browser
+ * gave up. Measured with an invented fault in Advice.trustworthy: /api/today
+ * and /api/journal answered nothing for as long as the client would wait. */
+function readJournal(done, failed) {
+  var w = { done: done, failed: failed };
+  if (readWaiters) { readWaiters.push(w); return; }
+  readWaiters = [w];
   readJournalNow(function (rows, err, torn) {
     var waiting = readWaiters;
     readWaiters = null;
-    waiting.forEach(function (fn) {
+    waiting.forEach(function (one) {
       // A throw in one caller must not starve the others now that they share a
       // read. Rethrown on its own tick so it still reaches the process the way
       // it did when every caller had a read of its own — swallowed here, a
       // fault in one endpoint would become silence in all of them.
-      try { fn(rows, err, torn); }
-      catch (e) { setImmediate(function () { throw e; }); }
+      try { one.done(rows, err, torn); }
+      catch (e) {
+        if (one.failed) {
+          try { one.failed(e); return; } catch (e2) { e = e2; }
+        }
+        setImmediate(function () { throw e; });
+      }
     });
   });
+}
+
+/* ...the `failed` for a request: the handler's own words for a throw (a log
+ * line naming the request, and a 500), the lock the request holds given
+ * back first, so the next upload is not stranded behind it. A reply already
+ * begun is ended where it stands. */
+function failedRequest(req, res, release) {
+  return function (e) {
+    console.error('request failed: ' + req.method + ' ' + req.url + ' — ' + ((e && e.stack) || e));
+    if (release) release();
+    if (res.headersSent) { res.end(); return; }
+    send(res, 500, 'server error', { 'Content-Type': 'text/plain' });
+  };
 }
 
 function readJournalNow(done) {
@@ -10465,7 +10551,11 @@ if (isFinite(_clockAfterEnv) && _clockAfterEnv > 0) {
  * the whole server down from inside a file callback.
  *
  * Named here because it was written out four times and the place that needed it
- * most did not have it — see /api/journal/newest. */
+ * most did not have it — see /api/journal/newest. ...and then the number went
+ * on being written out by hand beside the name: six clamps on `since` and
+ * `until` (/api/journal and its CSV, /api/journal/notes, /api/trends,
+ * /api/today, /api/earnings) until the server review (Nov 2026). Every one
+ * says the name now, and rpi/test_lint.py holds the number to this line. */
 var CLOCK_BELIEVABLE_UNTIL = 4102444800000;
 
 /* ...and how far ahead of THIS machine's own clock a row may be stamped.
@@ -10517,6 +10607,44 @@ function percentileOf(sorted, share) {
   return sorted[low] + (sorted[high] - sorted[low]) * (pos - low);
 }
 
+/* The window over folded offers: one rule for every answer that lists or
+ * counts them — /api/journal, /api/today (shiftSummary), /api/trends and
+ * the Gold card.
+ *
+ * It was written out in each, and they had drifted (the server review, Nov
+ * 2026). /api/journal took `(r.at || 0)`, so a row with no `at` was a row
+ * from before the clock and was counted as one; shiftSummary asked
+ * `typeof`/`isFinite` and dropped such a row WITHOUT counting it; trendsOut
+ * and goldAnswer kept a third and fourth copy. So the offers page said "1
+ * offer from before the clock was set" and the driving screen said nothing,
+ * for one row with `at: null` in one file.
+ *
+ * `kept`: the offers in the window, hidden ones included (/api/journal can
+ * list them by name; every other caller drops them, shownOffers). `hidden`:
+ * how many of `kept` are. `beforeClock`: offers with no usable moment — no
+ * `at`, a null, a non-number, or one before CLOCK_BELIEVABLE_AFTER — in no
+ * window by construction, counted so the driver is told they exist, and a
+ * hidden one not counted, as both pages already agreed. `floor` 0 is All. */
+function windowOffers(offers, floor) {
+  var kept = [], beforeClock = 0, hidden = 0;
+  (offers || []).forEach(function (o) {
+    var at = (typeof o.at === 'number' && isFinite(o.at)) ? o.at : null;
+    if (at === null || at < CLOCK_BELIEVABLE_AFTER) {
+      if (!o.hidden) beforeClock += 1;
+      return;
+    }
+    if (floor && at < floor) return;
+    if (o.hidden) hidden += 1;
+    kept.push(o);
+  });
+  return { kept: kept, beforeClock: beforeClock, hidden: hidden };
+}
+
+// ...and the ones the driver has not hidden.
+function shownOffers(offers) {
+  return offers.filter(function (o) { return !o.hidden; });
+}
+
 // What one shift adds up to, over rows the journal has already been read into.
 //
 // Every figure here comes off ONE filtered set, which is the rule journal.html
@@ -10540,25 +10668,18 @@ function shiftSummary(rows, since) {
      `early` still counts, because rowsFor keeps every pre-clock row on purpose:
      a Pi boots in 1970 and those rows are in no window by construction, and
      this figure is how the driver is told they exist. */
-  var offers = latestPerOffer(rows, since);
-  var early = 0;
-  var window = [];
-  offers.forEach(function (o) {
-    // A row the driver hid is not an offer they were made — the test card
-    // presented to check the rig is not a job. /api/journal drops these before
-    // the offers page ever sees them, so a hidden row is in neither its count
-    // nor its set-aside figure, and this has to drop them too. Left in, they
-    // landed in BOTH: counted as an offer, then rejected by trustworthy and
-    // reported as one the scanner had set aside. The driving screen said "6
-    // offers · 2 set aside" where the offers page said "5 offers (1 set
-    // aside)" for the same day, and blamed the reader for an exclusion the
-    // driver had made.
-    if (o.hidden) return;
-    var at = (typeof o.at === 'number' && isFinite(o.at)) ? o.at : null;
-    if (at === null) return;
-    if (at < CLOCK_BELIEVABLE_AFTER) { early += 1; return; }
-    if (at >= since) window.push(o);
-  });
+  var w = windowOffers(latestPerOffer(rows, since), since);
+  var early = w.beforeClock;
+  // A row the driver hid is not an offer they were made — the test card
+  // presented to check the rig is not a job. /api/journal drops these before
+  // the offers page ever sees them, so a hidden row is in neither its count
+  // nor its set-aside figure, and this has to drop them too. Left in, they
+  // landed in BOTH: counted as an offer, then rejected by trustworthy and
+  // reported as one the scanner had set aside. The driving screen said "6
+  // offers · 2 set aside" where the offers page said "5 offers (1 set
+  // aside)" for the same day, and blamed the reader for an exclusion the
+  // driver had made.
+  var window = shownOffers(w.kept);
   var counted = window.filter(function (o) {
     return Advice.trustworthy(o)
       && typeof o.perHour === 'number' && isFinite(o.perHour);
@@ -10618,7 +10739,7 @@ function shiftSummary(rows, since) {
 // answer, keyed the same way, and does not reach into the other.
 var shiftCache = null;
 
-function todaySummary(since, done) {
+function todaySummary(since, done, failed) {
   // Whether this machine's own clock can be believed at all. The browser cannot
   // check it — the browser's clock is fine, it is the rig's that is not — and
   // every figure below is a window on a timeline the rig may not yet know it is
@@ -10691,7 +10812,7 @@ function todaySummary(since, done) {
         shiftCache = { size: size, stamp: stamp, since: since, answer: answer };
       }
       answered(answer);
-    });
+    }, failed);
   });
 }
 
@@ -14751,7 +14872,7 @@ function route(req, res) {
                                   have: existing.length + fresh.length }));
           });
         });
-      });
+      }, failedRequest(req, res, release));
       });
     });
   }
@@ -15054,7 +15175,7 @@ function route(req, res) {
   // like /api/journal/newest: the same VPN, the same driver's own data.
   if (req.method === 'GET' && req.url.split('?')[0] === '/api/journal/notes') {
     var sinceNotes = clampNumber((url.parse(req.url, true).query || {}).since,
-                                 0, 4102444800000, 0);
+                                 0, CLOCK_BELIEVABLE_UNTIL, 0);
     return readJournal(function (rows, readErr) {
       if (!rows) {
         return send(res, 200, JSON.stringify({
@@ -15074,7 +15195,7 @@ function route(req, res) {
       });
       send(res, 200, JSON.stringify({ ok: true, notes: notes }),
            { 'Content-Type': 'application/json; charset=utf-8' });
-    });
+    }, failedRequest(req, res));
   }
 
   if (req.method === 'GET' && req.url.split('?')[0] === '/api/journal/newest') {
@@ -15173,7 +15294,7 @@ function route(req, res) {
                                       offersSince: wantWindow ? offersSince : undefined,
                                       can: SYNC_CAN }),
            { 'Content-Type': 'application/json; charset=utf-8' });
-    });
+    }, failedRequest(req, res));
   }
 
   /* The driver's cost per mile — ONE key, and deliberately not "the settings".
@@ -15682,12 +15803,12 @@ function route(req, res) {
     // "today": a trailing 24 hours folds last night's shift into this morning's
     // figures, and only the browser knows where the driver is and therefore
     // when their day began.
-    var since = clampNumber(q.since, 0, 4102444800000, 0);
+    var since = clampNumber(q.since, 0, CLOCK_BELIEVABLE_UNTIL, 0);
     // ...and an end, for a reader that must page past `limit` (the places
     // report, the reporting review's R2): only the offers LISTED stop before
     // `until`; the window, its takes, records and every figure over it are
     // the same as without it, so a second page is only older offers.
-    var until = clampNumber(q.until, 0, 4102444800000, 0);
+    var until = clampNumber(q.until, 0, CLOCK_BELIEVABLE_UNTIL, 0);
     var withHidden = q.hidden === '1';
     return readJournal(function (rows, readErr, torn) {
       // This one may degrade — a driver looking at the offers page is better
@@ -15729,26 +15850,20 @@ function route(req, res) {
       // in every figure on the page under a date nobody drove. shiftSummary
       // already counts these for the driving screen; this is the same rule for
       // the same rows, and the page says how many there are.
-      var beforeClock = 0;
-      offers = offers.filter(function (r) {
-        // Hidden ones are not counted, because shiftSummary does not count
-        // them either, and the two pages printed different figures for the
-        // same file: 2 here, 1 on the driving screen, over one hidden test
-        // card read before NTP arrived.
-        if ((r.at || 0) < CLOCK_BELIEVABLE_AFTER) {
-          if (!r.hidden) beforeClock += 1;
-          return false;
-        }
-        return !floor || (r.at || 0) >= floor;
-      });
-      var hidden = offers.filter(function (r) { return r.hidden; }).length;
+      //
+      // Hidden ones are not counted, because shiftSummary does not count them
+      // either, and the two pages printed different figures for the same
+      // file: 2 here, 1 on the driving screen, over one hidden test card read
+      // before NTP arrived. windowOffers is that one rule now, for both.
+      var win = windowOffers(offers, floor);
+      var beforeClock = win.beforeClock;
+      var hidden = win.hidden;
+      offers = win.kept;
       // Hidden rows are still on disk — nothing here deletes — but they are out
       // of every figure and every export unless asked for by name. The test card
       // a driver presents to check the rig is not an offer they were made, and
       // leaving it in quietly drags the median toward whatever that card says.
-      if (!withHidden) {
-        offers = offers.filter(function (r) { return !r.hidden; });
-      }
+      if (!withHidden) offers = shownOffers(offers);
       // The whole window, before the cap: the per-mile tables and the orders
       // taken describe every offer in it, not the newest `limit` of them, and
       // an order whose card fell under the cap was missing from `taken`.
@@ -15794,7 +15909,10 @@ function route(req, res) {
         if (total > offers.length) {
           head['X-Uber-Scan-Truncated'] = offers.length + ' of ' + total;
         }
-        return send(res, 200, toCsv(offers), head);
+        // Gzipped for a browser off this machine that takes it (gzipFor):
+        // 8.6 MB of CSV for an invented 12,000-offer record is 1.1 MB at
+        // level 1, 38 ms of CPU on the container the suites run on.
+        return sendGzipped(req, res, 200, toCsv(offers), head, 1);
       }
       // What the rig watched go past, over the same window. Summed here rather
       // than shipped row by row: there is one of these every couple of minutes
@@ -15825,7 +15943,10 @@ function route(req, res) {
       var records = orderRecords(rows, floor);
       var window = pairs.filter(function (r) { return !floor || (r.at || 0) >= floor; })
                         .sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
-      send(res, 200, JSON.stringify({ count: offers.length, total: total,
+      // Gzipped at level 1 for a browser off this machine (gzipFor), as
+      // /api/trends is: 4.7 MB for 30 days of an invented 12,000-offer
+      // record is 0.58 MB, 19 ms of CPU (11.3 MB for All: 1.37 MB, 43 ms).
+      sendGzipped(req, res, 200, JSON.stringify({ count: offers.length, total: total,
                                       truncated: total > offers.length,
                                       days: days, hidden: hidden,
                                       watched: watched,
@@ -15883,8 +16004,8 @@ function route(req, res) {
                                       keepPlaces: typeof scanner.keepPlaces === 'boolean'
                                         ? scanner.keepPlaces : null,
                                       offers: offers }),
-           { 'Content-Type': 'application/json; charset=utf-8' });
-    });
+                  { 'Content-Type': 'application/json; charset=utf-8' }, 1);
+    }, failedRequest(req, res));
   }
 
   // The offers page's Trends tab (trends.js; the owner, Nov 2026): every offer
@@ -15902,7 +16023,7 @@ function route(req, res) {
     }
     var tq2 = url.parse(req.url, true).query || {};
     var tdays = clampNumber(tq2.days, 0, 3650, 30);
-    var tsince = clampNumber(tq2.since, 0, 4102444800000, 0);
+    var tsince = clampNumber(tq2.since, 0, CLOCK_BELIEVABLE_UNTIL, 0);
     return readJournal(function (rows, readErr) {
       if (!rows) {
         return send(res, 503, JSON.stringify({ ok: false, unreadable: readErr && readErr.code || 'unknown' }),
@@ -15910,19 +16031,15 @@ function route(req, res) {
       }
       var tfloor = tsince || (tdays > 0 ? Date.now() - tdays * 86400000 : 0);
       var tbody = JSON.stringify(trendsOut(rows, tfloor, tdays));
-      var thead = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store',
-                    'Vary': 'Accept-Encoding' };
       // Gzipped where the browser says it can take it (the reporting
       // review's T9): the answer is seven columns of digits, 1.3 MB for a 3x
       // record, and the phone on the rig's Wi-Fi or a VPN waited on it.
       // Level 1: the columns compress about fivefold at the fastest level,
-      // and the Pi's CPU is the scarcer thing (lite never reaches here).
-      if (/\bgzip\b/.test(String(req.headers['accept-encoding'] || '')) && tbody.length > 1024) {
-        thead['Content-Encoding'] = 'gzip';
-        return send(res, 200, require('zlib').gzipSync(tbody, { level: 1 }), thead);
-      }
-      send(res, 200, tbody, thead);
-    });
+      // and the Pi's CPU is the scarcer thing (lite never reaches here). Not
+      // for the Pi's own browser since the server review (gzipFor).
+      sendGzipped(req, res, 200, tbody, { 'Content-Type': 'application/json; charset=utf-8',
+                                          'Cache-Control': 'no-store' }, 1);
+    }, failedRequest(req, res));
   }
 
   // What the shift adds up to so far, for the one line of it the driving screen
@@ -15943,7 +16060,7 @@ function route(req, res) {
     // their day began. 4am, in their timezone, is journal.html's boundary and
     // the one the page sends.
     if (!isFinite(sinceMs) || sinceMs < CLOCK_BELIEVABLE_AFTER
-        || sinceMs > 4102444800000) {
+        || sinceMs > CLOCK_BELIEVABLE_UNTIL) {
       return send(res, 400, JSON.stringify({
         ok: false,
         error: 'since must be an epoch-ms moment in this century'
@@ -15952,7 +16069,7 @@ function route(req, res) {
     return todaySummary(sinceMs, function (answer) {
       send(res, 200, JSON.stringify(answer),
            { 'Content-Type': 'application/json; charset=utf-8' });
-    });
+    }, failedRequest(req, res));
   }
 
   // Today's shift as the end-of-shift report has it, for shift.html: see
@@ -16583,6 +16700,11 @@ function earningsFile(parses, alsoDays, pick, now, done) {
       if (dirErr) return done(dirErr);
       appendLines(text, function (err) { done(err || null, summary); });
     });
+  }, function (e) {
+    // A throw in the filing (readJournal's `failed`): said, and handed to the
+    // caller as an error, which answers it and gives back the earnings lock.
+    console.error('earnings: ' + ((e && e.stack) || e));
+    done(e);
   });
 }
 
@@ -16596,7 +16718,7 @@ function earningsRoute(req, res) {
 
   if (pathname === '/api/earnings' && (req.method === 'GET' || req.method === 'HEAD')) {
     var days = clampNumber(q.days, 0, 3650, EARNINGS_DAYS_DEFAULT);
-    var since = clampNumber(q.since, 0, 4102444800000, 0);
+    var since = clampNumber(q.since, 0, CLOCK_BELIEVABLE_UNTIL, 0);
     var floor = since || (days > 0 ? Date.now() - days * 86400000 : 0);
     return readJournal(function (rows, readErr) {
       earningsShots(function (shots) {
@@ -16641,7 +16763,7 @@ function earningsRoute(req, res) {
           entries: entries
         }); });
       });
-    });
+    }, failedRequest(req, res));
   }
 
   if (req.method !== 'POST') {
@@ -16818,7 +16940,7 @@ function earningsRoute(req, res) {
             if (fileErr) return reply(500, { ok: false, error: fileErr.message });
             reply(200, { ok: true, entries: summary.entries });
           });
-        });
+        }, failedRequest(req, res, release));
       });
     });
   }
@@ -16882,7 +17004,7 @@ function earningsRoute(req, res) {
                              undated: parses.filter(function (p) { return !(p.picked || p.day); }).length,
                              added: summary.added, changed: summary.changed });
               });
-            });
+            }, failedRequest(req, res, release));
           };
           next(0);
         });
@@ -16986,9 +17108,7 @@ function goldOrders(runs) {
 function goldAnswer(rows, now) {
   var S = goldStrategy();
   var floor = now - GOLD_DAYS * 86400000;
-  var offers = latestPerOffer(rows, floor).filter(function (r) {
-    return (r.at || 0) >= CLOCK_BELIEVABLE_AFTER && (r.at || 0) >= floor && !r.hidden;
-  });
+  var offers = shownOffers(windowOffers(latestPerOffer(rows, floor), floor).kept);
   var settings = goldSettings(rows);
   var res = S.analyse({ offers: offers, orders: goldOrders(takenRuns(rows, floor, offers)),
                         earnings: Earnings.fold(rows), light: true,
@@ -17006,7 +17126,7 @@ function goldRoute(req, res) {
     return readJournal(function (rows, readErr) {
       if (!rows) return answer(503, { ok: false, error: 'the journal could not be read (' + (readErr && readErr.code || 'unknown') + ')' });
       answer(200, goldAnswer(rows, Date.now()));
-    });
+    }, failedRequest(req, res));
   }
   if (req.method !== 'POST') {
     req.resume();
@@ -17090,7 +17210,7 @@ function goldRoute(req, res) {
             if (appendErr) return answer(500, { ok: false, error: 'could not save' });
             answer(200, { ok: true, settings: goldSettings([row]) });
           });
-        });
+        }, failedRequest(req, res, release));
       });
     });
   }
@@ -17098,16 +17218,157 @@ function goldRoute(req, res) {
   return answer(404, { ok: false, error: 'no such gold endpoint' });
 }
 
+/* A file's validator, off the stat serveFile already takes: its size and its
+ * modification time to the microsecond.
+ *
+ * Every static file went out whole on every load. `no-cache` with nothing to
+ * revalidate against means the browser must ask and the server can only
+ * answer with the body, so each page opened downloaded live.html, map-view.js
+ * and the rest again. Measured (the server review, Nov 2026), bytes on the
+ * wire for a reload: the panel's four files 976 kB before, 0.7 kB of 304s
+ * after; the offers page's five 1,167 kB, 0.9 kB. sw.js makes it every load:
+ * it asks the network first for every shell file ("the cost is a round trip
+ * per file"), which is how the server's build wins over the cache.
+ *
+ * `no-cache` stays, and is what keeps that rule: the browser still asks every
+ * time; it is only spared the body when the file has not changed. A deploy
+ * rewrites the file, which moves its mtime, so the next ask is a 200 with the
+ * new build. Not a hash of the content: that would read every file on every
+ * request to save reading it. */
+function fileTag(stat) {
+  return '"' + stat.size.toString(36) + '-' + Math.round(stat.mtimeMs * 1000).toString(36) + '"';
+}
+
+// Whether the request already holds `tag`: If-None-Match is a list, may say
+// `*`, and a weak W/ copy of a tag is the same file for a GET.
+function holdsTag(req, tag) {
+  var have = req.headers['if-none-match'];
+  if (!have) return false;
+  return String(have).split(',').some(function (t) {
+    t = t.trim();
+    return t === '*' || t.replace(/^W\//, '') === tag;
+  });
+}
+
+/* ---------- gzip, for a browser that is not this machine (the server review)
+ *
+ * The offers page's /api/journal is 4.7 MB of JSON for 30 days of a busy
+ * record (11.3 MB for All), its CSV 8.6 MB, and the shell files are text
+ * that gzips to about a third; all of it went out as it was, to a phone on the
+ * car's Wi-Fi or the copy at home over a VPN. /api/trends was gzipped by the
+ * reporting review (T9) and nothing else was. Now: the static text files,
+ * compressed once per file version and kept, and /api/journal and its CSV at
+ * level 1 per answer, as /api/trends is.
+ *
+ * NOT FOR LOOPBACK. The Pi's own panel and the lite kiosk are a browser on the
+ * same machine: no wire to save, and the Pi's CPU is the thing the camera
+ * needs. Measured on the container the suites run on, /api/journal?days=30
+ * at level 1 is 19 ms of CPU for each answer, All 43 ms; on a Pi it is
+ * several times that, for nothing. GZIP_LOOPBACK=1 compresses there too, for the suites, which can
+ * only reach the server on loopback.
+ *
+ * NOT UNDER LITE, at all: lite is a kiosk on the Pi with a phone on the same
+ * Wi-Fi for its settings, and has nothing large to send — /api/trends is
+ * shut, the offers page is a reading aid lite never needs to be quick at —
+ * so the CPU and the memory of the kept copies buy nothing on a Zero 2 W. */
+var GZIP_LOOPBACK = process.env.GZIP_LOOPBACK === '1';
+// The types worth compressing: text, and the JSON and SVG shapes of it. Not
+// the pictures, which are compressed already, nor `.gz` (TYPES, above).
+var GZIP_TYPES = /^(?:text\/|application\/(?:javascript|json|manifest\+json|x-ndjson)|image\/svg\+xml)/;
+
+function fromLoopback(req) {
+  var a = (req.socket && req.socket.remoteAddress) || '';
+  return a === '::1' || /^(?:::ffff:)?127\./.test(a);
+}
+
+// Whether this answer may go gzipped: the browser takes it (and has not said
+// q=0), the caller is not this machine, and this is not lite.
+function gzipFor(req) {
+  if (LITE) return false;
+  var took = String(req.headers['accept-encoding'] || '');
+  if (!/(?:^|,)\s*gzip\s*(?:;|,|$)/i.test(took) || /(?:^|,)\s*gzip\s*;\s*q\s*=\s*0(?:\.0*)?\s*(?:,|$)/i.test(took)) {
+    return false;
+  }
+  return GZIP_LOOPBACK || !fromLoopback(req);
+}
+
+/* An answer worked out per request (/api/journal, its CSV, /api/trends),
+ * gzipped where gzipFor says, on the thread pool rather than this thread:
+ * 11 MB at level 1 is tens of milliseconds the event stream to the panel
+ * would otherwise wait behind. Vary on every one of them but lite's, so no
+ * cache between the two hands a gzipped answer to a browser that did not ask. */
+function sendGzipped(req, res, status, body, headers, level) {
+  headers = Object.assign({}, headers);
+  if (!LITE) headers.Vary = 'Accept-Encoding';
+  if (body.length <= 1024 || !gzipFor(req)) return send(res, status, body, headers);
+  zlib.gzip(body, { level: level || 1 }, function (err, buf) {
+    if (err) return send(res, status, body, headers);
+    headers['Content-Encoding'] = 'gzip';
+    send(res, status, buf, headers);
+  });
+}
+
+/* The static files, compressed once per version (the ETag: size and mtime)
+ * and kept, so a reload asks zlib nothing. Bounded twice: a file over
+ * STATIC_GZ_FILE_MAX is streamed as it is (the OCR engine's 3.9 MB scripts,
+ * which sw.js keeps cache-first and a phone fetches once), and the copies
+ * kept together stay under STATIC_GZ_KEEP, the oldest dropped first. The
+ * shell's text files are 2.7 MB and 0.88 MB gzipped, so the bound is a
+ * ceiling, not a working size. Level 6, zlib's default: 97 ms for all of
+ * them, once a deploy. */
+var STATIC_GZ_FILE_MAX = 1024 * 1024;
+var STATIC_GZ_KEEP = 4 * 1024 * 1024;
+var staticGz = new Map();          // file -> {tag, buf}, oldest first
+var staticGzBytes = 0;
+
+function staticGzip(file, tag, done) {
+  var hit = staticGz.get(file);
+  if (hit && hit.tag === tag) return done(null, hit.buf);
+  fs.readFile(file, function (readErr, raw) {
+    if (readErr) return done(readErr);
+    zlib.gzip(raw, function (err, buf) {
+      if (err) return done(err);
+      var was = staticGz.get(file);
+      if (was) { staticGzBytes -= was.buf.length; staticGz.delete(file); }
+      staticGz.set(file, { tag: tag, buf: buf });
+      staticGzBytes += buf.length;
+      while (staticGzBytes > STATIC_GZ_KEEP && staticGz.size > 1) {
+        var oldest = staticGz.keys().next().value;
+        staticGzBytes -= staticGz.get(oldest).buf.length;
+        staticGz.delete(oldest);
+      }
+      done(null, buf);
+    });
+  });
+}
+
 function serveFile(req, res, file, type) {
   fs.stat(file, function (err, stat) {
     if (err || !stat.isFile()) {
       return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });
     }
+    var tag = fileTag(stat);
     var headers = {
       'Content-Type': type || TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream',
-      'Content-Length': stat.size,
-      'Cache-Control': 'no-cache'
+      'Cache-Control': 'no-cache',
+      'ETag': tag
     };
+    // The gzipped copy is another representation, so it has a tag of its own:
+    // a browser that kept one and asks for the other must not get a 304.
+    var squeezable = !LITE && GZIP_TYPES.test(headers['Content-Type']);
+    if (squeezable) headers.Vary = 'Accept-Encoding';
+    var gz = squeezable && stat.size > 1024 && stat.size <= STATIC_GZ_FILE_MAX && gzipFor(req);
+    if (gz) headers.ETag = tag = tag.slice(0, -1) + '-gz"';
+    if (holdsTag(req, tag)) return send(res, 304, '', headers);
+    if (gz) {
+      return staticGzip(file, tag, function (gzErr, buf) {
+        if (gzErr) return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });
+        headers['Content-Encoding'] = 'gzip';
+        headers['Content-Length'] = buf.length;
+        send(res, 200, req.method === 'HEAD' ? '' : buf, headers);
+      });
+    }
+    headers['Content-Length'] = stat.size;
     if (req.method === 'HEAD') return send(res, 200, '', headers);
 
     res.writeHead(200, headers);
@@ -17313,6 +17574,14 @@ function shiftReported(day, done) {
   var finish = function (code, answer) {
     var waiting = shiftWaiting[day] || [];
     delete shiftWaiting[day];
+    // Past SHIFT_CACHE_MS an answer is never handed out again, only replaced
+    // by its day's next run, so it is dropped here rather than kept for the
+    // life of the process: shift.html can ask for any day, each answer is up
+    // to SHIFT_OUT_MAX of report, and nothing removed one (the server review,
+    // Nov 2026).
+    Object.keys(shiftKept).forEach(function (d) {
+      if (!(Date.now() - shiftKept[d].at < SHIFT_CACHE_MS)) delete shiftKept[d];
+    });
     if (code === 200) shiftKept[day] = { at: answer.at, answer: answer };
     waiting.forEach(function (d) { d(code, answer); });
   };

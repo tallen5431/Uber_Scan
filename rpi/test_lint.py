@@ -1364,6 +1364,32 @@ ok_('assemble.js STITCH_MS (%s ms) is at least twice rpi/scan_pi.py SCREEN_AUTO_
     % (_stitch and _stitch.group(1), _hot and _hot.group(1)),
     _stitch and _hot and int(_stitch.group(1)) >= 2 * float(_hot.group(1)) * 1000)
 
+# --- server.js keeps one copy of each rule (the server review, Nov 2026) ------
+#
+# The review found a function nothing called (storeWaitOfHold) and the same
+# arithmetic written out by hand where the file already had it: three medians
+# beside percentileOf, which journal.html's own medians are held to. A rule in
+# two places is two answers the first time one is touched. Code only: the
+# comments are stripped first, so a function named in prose is still uncalled.
+_srv = open(os.path.join(ROOT, 'server.js'), encoding='utf-8').read()
+_srv_code = re.sub(r'//[^\n]*', '', re.sub(r'/\*[\s\S]*?\*/', '', _srv))
+_srv_lone = [_n for _n in re.findall(r'^function (\w+)\(', _srv, re.M)
+             if len(re.findall(r'\b%s\b' % _n, _srv_code)) == 1]
+eq('every top-level function in server.js has a caller in its code', _srv_lone, [])
+eq('server.js works a median out by percentileOf, not by hand (`.length % 2 ?`)',
+   re.findall(r'\.length % 2 \?[^\n]*', _srv_code), [])
+# ...and rpi/config.json's switches (carryTwo, screenDrop) through settingOn
+# alone: they were one reader written twice, each statting the file per call
+# with a cache of its own.
+eq('server.js reads each rpi/config.json switch through settingOn, not its own copy of the reader',
+   (re.findall(r'cfg\.settings\.\w+ === true', _srv_code), len(re.findall(r'^function settingOn\(', _srv, re.M))),
+   ([], 1))
+# ...and 1 Jan 2100 is CLOCK_BELIEVABLE_UNTIL, written out once: six clamps
+# had gone on spelling the number beside the name.
+eq('server.js writes 4102444800000 once, as CLOCK_BELIEVABLE_UNTIL',
+   re.findall(r'[^\n]*\b4102444800000\b[^\n]*', _srv_code),
+   ['var CLOCK_BELIEVABLE_UNTIL = 4102444800000;'])
+
 # --- what a new session reads first: CLAUDE.md --------------------------------
 #
 # The lite edition was decided once, with reasons, and a session that does not

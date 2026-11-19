@@ -1258,8 +1258,11 @@ function offer(x) {
   async function serve(lite) {
     var port = 20000 + Math.floor(Math.random() * 20000);
     var proc = cp.spawn('node', [path.join(__dirname, '..', 'server.js')], {
+      // GZIP_LOOPBACK: this suite reaches the server on loopback, which the
+      // server review took out of gzip (the Pi's own panel pays no CPU); the
+      // phone on the Wi-Fi is the browser T9 is for.
       env: Object.assign({}, process.env, { PORT: String(port), HTTPS_PORT: '0', SCANNER: '0', JOURNAL: journal,
-                                            LITE: lite ? '1' : '0' }),
+                                            LITE: lite ? '1' : '0', GZIP_LOOPBACK: '1' }),
       stdio: 'ignore' });
     for (var tries = 0; tries < 100; tries++) {
       try { await get(port, '/api/lite'); return { proc: proc, port: port }; } catch (e) {

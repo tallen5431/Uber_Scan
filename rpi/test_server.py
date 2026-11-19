@@ -15624,6 +15624,362 @@ with open(_rr, 'rb') as _fh:
     eq('[reread] ...and the journal on disk is untouched', _fh.read() == _rr_bytes, True)
 shutil.rmtree(_rrdir, ignore_errors=True)
 
+
+# --- the server review (Nov 2026): what a reload costs, and what it sends ----
+#
+# Every static file went out whole on every load (`no-cache` and no
+# validator), so a reload of the panel downloaded its 976 kB again. Each file
+# now carries an ETag off its size and mtime and an unchanged one answers 304;
+# `no-cache` stays, so the browser still asks every time and a new build still
+# wins (sw.js). A changed file is a 200 with the new bytes, which is the half
+# that keeps a deploy reaching the car: checked on the places report's folder,
+# which is served by the same serveFile and is a folder this suite may write.
+def _hget(base, path, headers=None, method='GET'):
+    req = urllib.request.Request(base + path, headers=headers or {}, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, r.read(), {k.lower(): v for k, v in r.headers.items()}
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(), {k.lower(): v for k, v in e.headers.items()}
+
+
+_svdir = tempfile.mkdtemp()
+_svj = os.path.join(_svdir, 'offers.jsonl')
+open(_svj, 'w').close()
+_svplaces = os.path.join(_svdir, 'places')
+os.makedirs(_svplaces)
+_svpage = os.path.join(_svplaces, 'index.html')
+with open(_svpage, 'w') as _fh:
+    _fh.write('<p>first build</p>')
+with open(os.path.join(ROOT, 'live.html'), 'rb') as _fh:
+    _live_bytes = _fh.read()
+proc, base = start({'SCANNER': '0', 'PLACES_REPORT_DIR': _svplaces}, _svj)
+try:
+    _s1 = _hget(base, '/live.html')
+    _tag = _s1[2].get('etag') or ''
+    eq('[serve] a static file carries a validator and still says no-cache (sw.js: the server\'s build wins)',
+       (_s1[0], bool(_tag), _s1[2].get('cache-control'), _s1[1] == _live_bytes),
+       (200, True, 'no-cache', True))
+    _s2 = _hget(base, '/live.html', {'If-None-Match': _tag})
+    eq('[serve] ...and asked again with it, an unchanged file is a 304 with no body, the same tag, no-cache',
+       (_s2[0], len(_s2[1]), _s2[2].get('etag'), _s2[2].get('cache-control')), (304, 0, _tag, 'no-cache'))
+    eq('[serve] ...a weak copy of the tag, or the tag in a list, is the same file',
+       (_hget(base, '/live.html', {'If-None-Match': 'W/' + _tag})[0],
+        _hget(base, '/live.html', {'If-None-Match': '"other", ' + _tag})[0]), (304, 304))
+    eq('[serve] ...another file\'s tag is not, and a HEAD with the tag is a 304 too',
+       (_hget(base, '/live.html', {'If-None-Match': '"other"'})[0],
+        _hget(base, '/card-words.js', {'If-None-Match': _tag})[0],
+        _hget(base, '/live.html', {'If-None-Match': _tag}, method='HEAD')[0]), (200, 200, 304))
+    _p1 = _hget(base, '/places/')
+    with open(_svpage, 'w') as _fh:
+        _fh.write('<p>second build</p>')     # one byte longer, and a later mtime
+    _later = time.time() + 5
+    os.utime(_svpage, (_later, _later))
+    _p2 = _hget(base, '/places/', {'If-None-Match': _p1[2].get('etag') or ''})
+    eq('[serve] a file rewritten since (a deploy) answers its old tag with a 200 and the new bytes',
+       (_p1[0], _p2[0], _p2[1], _p2[2].get('etag') != _p1[2].get('etag')),
+       (200, 200, b'<p>second build</p>', True))
+finally:
+    stop(proc)
+
+# Gzip, for a browser that is not this machine: the shell's text files
+# (compressed once per version, with a tag of their own), /api/journal and
+# its CSV, and /api/trends. Never for loopback — the Pi's own panel and the
+# lite kiosk pay no CPU for a wire they do not have — and never under lite.
+# This suite can only reach the server on loopback, so GZIP_LOOPBACK=1 stands
+# in for the phone; the rule itself is checked without it.
+import gzip as _gzip
+write(_svj, [offer(i, NOW - 3600000 + i * 60000) for i in range(30)])
+_GZ = {'Accept-Encoding': 'gzip, deflate, br'}
+proc, base = start({'SCANNER': '0'}, _svj)
+try:
+    _l1 = _hget(base, '/live.html', _GZ)
+    _j1 = _hget(base, '/api/journal?days=1', _GZ)
+    _t1 = _hget(base, '/api/trends?days=1', _GZ)
+    eq('[serve] on loopback (the Pi\'s own panel) nothing is gzipped, asked or not: a file, /api/journal, '
+       '/api/trends', (_l1[2].get('content-encoding'), _l1[1] == _live_bytes, _j1[2].get('content-encoding'),
+                       _t1[2].get('content-encoding')), (None, True, None, None))
+    eq('[serve] ...and each says it varies on Accept-Encoding, for whatever cache sits between',
+       (_l1[2].get('vary'), _j1[2].get('vary'), _t1[2].get('vary')), ('Accept-Encoding',) * 3)
+finally:
+    stop(proc)
+proc, base = start({'SCANNER': '0', 'GZIP_LOOPBACK': '1'}, _svj)
+try:
+    _plain = _hget(base, '/live.html')
+    _gz1 = _hget(base, '/live.html', _GZ)
+    _gztag = _gz1[2].get('etag') or ''
+    eq('[serve] a browser off this machine gets the file gzipped, the same bytes underneath, a tag of its own',
+       (_gz1[2].get('content-encoding'), _gzip.decompress(_gz1[1]) == _live_bytes if _gz1[1][:2] == b'\x1f\x8b'
+        else False, len(_gz1[1]) < len(_live_bytes) / 2, _gztag.endswith('-gz"'),
+        _gztag != _plain[2].get('etag'), _gz1[2].get('cache-control')),
+       ('gzip', True, True, True, True, 'no-cache'))
+    _gz2 = _hget(base, '/live.html', dict(_GZ, **{'If-None-Match': _gztag}))
+    eq('[serve] ...asked again with that tag: a 304, kept copy and all (no-cache still)',
+       (_gz2[0], len(_gz2[1]), _gz2[2].get('content-encoding')), (304, 0, None))
+    eq('[serve] ...but the plain copy\'s tag is not the gzipped one\'s, nor the other way round',
+       (_hget(base, '/live.html', dict(_GZ, **{'If-None-Match': _plain[2].get('etag') or ''}))[0],
+        _hget(base, '/live.html', {'If-None-Match': _gztag})[0]), (200, 200))
+    eq('[serve] ...and gzip;q=0 is a no, not a yes',
+       _hget(base, '/live.html', {'Accept-Encoding': 'gzip;q=0, deflate'})[2].get('content-encoding'), None)
+    eq('[serve] a picture is not gzipped (it is compressed already)',
+       _hget(base, '/icons/icon-192.png', _GZ)[2].get('content-encoding'), None)
+    _jp = _hget(base, '/api/journal?days=1')
+    _jg = _hget(base, '/api/journal?days=1', _GZ)
+    _cp = _hget(base, '/api/journal.csv?days=1')
+    _cg = _hget(base, '/api/journal.csv?days=1', _GZ)
+
+    def _gunz(b):
+        return _gzip.decompress(b) if b[:2] == b'\x1f\x8b' else b''
+    _jgu = _gunz(_jg[1])
+    eq('[serve] /api/journal gzipped for it: the same 30 offers underneath',
+       (_jg[2].get('content-encoding'), len(json.loads(_jgu or b'{}').get('offers') or []),
+        json.loads(_jgu or b'{}').get('offers') == json.loads(_jp[1]).get('offers')), ('gzip', 30, True))
+    eq('[serve] ...and its CSV, byte for byte, with its download headers',
+       (_cg[2].get('content-encoding'), _gunz(_cg[1]) == _cp[1], _cg[2].get('content-disposition')),
+       ('gzip', True, _cp[2].get('content-disposition')))
+finally:
+    stop(proc)
+proc, base = start({'SCANNER': '0', 'GZIP_LOOPBACK': '1', 'LITE': '1'}, _svj)
+try:
+    _ll = _hget(base, '/live.html', _GZ)
+    _lj = _hget(base, '/api/journal?days=1', _GZ)
+    eq('[serve] lite gzips nothing (a Zero 2 W\'s CPU, for a kiosk with nothing large to send), and has no Vary',
+       (_ll[2].get('content-encoding'), _lj[2].get('content-encoding'), _ll[2].get('vary'),
+        _lj[2].get('vary'), bool(_ll[2].get('etag'))), (None, None, None, None, True))
+finally:
+    stop(proc)
+shutil.rmtree(_svdir, ignore_errors=True)
+
+
+def _logged(env, journal, preload=None):
+    """A server whose log is kept: (proc, base, read the log). `preload`, a
+    script node runs first (-r), for a check that has to watch or break a
+    module the server requires — the suite's, never the server's own seam."""
+    port = free_port()
+    logpath = journal + '.log'
+    fh = open(logpath, 'w')
+    pre = []
+    if preload is not None:
+        prepath = journal + '.pre.js'
+        with open(prepath, 'w') as pf:
+            pf.write(preload)
+        pre = ['-r', prepath]
+    p = subprocess.Popen(['node'] + pre + [os.path.join(ROOT, 'server.js')],
+                         env=dict(os.environ, PORT=str(port), HTTPS_PORT='0', JOURNAL=journal, **env),
+                         stdout=fh, stderr=fh)
+    b = 'http://127.0.0.1:%d' % port
+    for _ in range(120):
+        try:
+            urllib.request.urlopen(b + '/api/status', timeout=1).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+    return p, b, lambda: (fh.flush(), open(logpath).read())[1]
+
+
+# A finishing.json that does not parse (finishWatch's file, beside the
+# journal) was read as no watches and said nothing, and saveFinishing then
+# removed it: every order a watch was keeping lost its order row, silently.
+# loadHolding's rule now: said at boot, and the file kept aside.
+_fndir = tempfile.mkdtemp()
+_fnj = os.path.join(_fndir, 'offers.jsonl')
+open(_fnj, 'w').close()
+_fnwhole = json.dumps({'v': 1, 'watches': [
+    {'id': 'fin-torn', 'holdId': 'fin-torn@1', 'dropAt': NOW - 60000, 'ends': NOW + 600000,
+     'to': {'kind': 'none'}, 'from': None}]})
+_fntorn = _fnwhole[:-9]
+with open(os.path.join(_fndir, 'finishing.json'), 'w') as _fh:
+    _fh.write(_fntorn)
+proc, base, _fnlog = _logged({'SCANNER': '0'}, _fnj)
+try:
+    time.sleep(0.3)
+    _fnbad = os.path.join(_fndir, 'finishing.json.bad')
+    eq('[finish] a torn finishing.json is said at boot and kept aside, not removed',
+       ('could not be read' in _fnlog(),
+        open(_fnbad).read() if os.path.exists(_fnbad) else None,
+        os.path.exists(os.path.join(_fndir, 'finishing.json'))),
+       (True, _fntorn, False))
+finally:
+    stop(proc)
+shutil.rmtree(_fndir, ignore_errors=True)
+
+# rowApp asked offer-parser.js's screenType of every row written before `app`
+# on every fold, and the fold runs again after each append: 46 ms of a
+# 195 ms /api/trends on an invented 12,000-offer journal. Remembered per row
+# now. Counted by wrapping screenType before the server loads it: five old
+# rows, folded, a mark appended, folded again — five asks, not ten.
+_SAY_SCREEN = ("var P = require(%r); var st = P.screenType;\n"
+               "P.screenType = function (t) { process.stderr.write('screenType asked\\n'); "
+               "return st.apply(this, arguments); };\n" % os.path.join(ROOT, 'offer-parser.js'))
+_radir = tempfile.mkdtemp()
+_raj = os.path.join(_radir, 'offers.jsonl')
+_ratext = '$9.50\nGuaranteed (incl. tip)\n20 min (4.0 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta'
+write(_raj, [offer(i, NOW - 3600000 + i * 60000, text=_ratext) for i in range(5)])
+proc, base, _ralog = _logged({'SCANNER': '0'}, _raj, preload=_SAY_SCREEN)
+try:
+    _ra1 = get(base, '/api/trends?days=1')
+    write(_raj, [{'v': 1, 'kind': 'mark', 'id': 'off2', 'at': NOW, 'accepted': True, 'via': 'offers'}], mode='a')
+    time.sleep(0.05)
+    _ra2 = get(base, '/api/trends?days=1')
+    eq('[rowApp] five rows written before `app`, folded twice around an append: screenType asked five times, '
+       'not ten, and the same app read', (_ralog().count('screenType asked'), _ra1['rows']['cols'].get('app'),
+                                          _ra1['rows']['cols'].get('app') == _ra2['rows']['cols'].get('app')),
+       (5, _ra2['rows']['cols'].get('app'), True))
+finally:
+    stop(proc)
+shutil.rmtree(_radir, ignore_errors=True)
+
+# One window over the folded offers (server.js windowOffers) for /api/journal,
+# /api/today, /api/trends and the Gold card. Written four times, they had
+# drifted: /api/journal counted a row with no `at` as one from before the
+# clock, /api/today dropped it and counted nothing, so the two pages
+# disagreed about one row. A row with no usable moment is before the clock
+# everywhere now; a hidden one is counted nowhere, as before.
+_wdir = tempfile.mkdtemp()
+_wj = os.path.join(_wdir, 'offers.jsonl')
+_wrows = [offer(1, NOW - 600000), offer(2, NOW - 500000), offer(3, None), offer(4, None),
+          offer(5, None, hidden=True), offer(6, 1000)]
+del _wrows[2]['at'], _wrows[2]['firstAt']           # no `at` at all
+write(_wj, _wrows)
+proc, base = start({'SCANNER': '0'}, _wj)
+try:
+    _wall = get(base, '/api/journal?days=0&limit=0')
+    _wday = get(base, '/api/journal?days=1')
+    _wtoday = get(base, '/api/today?since=%d' % (NOW - 3600000))
+    _wtr = get(base, '/api/trends?days=0')
+    eq('[window] a row with no `at`, one with at: null and one from 1970 are all before the clock, on the '
+       'offers page (All and a day) and the driving screen alike; the hidden one counted by neither',
+       (_wall.get('beforeClock'), _wday.get('beforeClock'), _wtoday.get('beforeClock')), (3, 3, 3))
+    eq('[window] ...and none of them is in any list or figure: the two real offers, everywhere',
+       (sorted(o['id'] for o in _wall.get('offers') or []), _wday.get('total'), _wtoday.get('offers'),
+        _wtr.get('total')), (['off1', 'off2'], 2, 2, 2))
+finally:
+    stop(proc)
+shutil.rmtree(_wdir, ignore_errors=True)
+
+# The Targets box's towns (targetsOut): MV.townFor was asked twice per row per
+# answer (the hour blocks, then All hours), and it was most of /api/journal.
+# Remembered by its input now — the card's dropoff and pickup, exactly. Eight
+# offers at two places, the journal asked twice: two asks, not thirty-two,
+# and the same towns.
+_SAY_TOWN = ("var MV = require(%r); var tf = MV.townFor;\n"
+             "MV.townFor = function () { process.stderr.write('townFor asked\\n'); "
+             "return tf.apply(this, arguments); };\n" % os.path.join(ROOT, 'map-view.js'))
+_tfdir = tempfile.mkdtemp()
+_tfj = os.path.join(_tfdir, 'offers.jsonl')
+write(_tfj, [offer(i, NOW - 3600000 + i * 60000, pickup='Maple Grill',
+                   dropoff=('12 Fable Ct, Marietta' if i % 2 else '7 Wren Way, Kennesaw')) for i in range(8)])
+proc, base, _tflog = _logged({'SCANNER': '0'}, _tfj, preload=_SAY_TOWN)
+try:
+    _tf1 = get(base, '/api/journal?days=1').get('targets')
+    _tf2 = get(base, '/api/journal?days=1').get('targets')
+    eq('[targets] eight offers at two places, asked twice: townFor asked twice in all, the same answer both times',
+       (_tflog().count('townFor asked'), _tf1 == _tf2, bool(_tf1)), (2, True, True))
+finally:
+    stop(proc)
+shutil.rmtree(_tfdir, ignore_errors=True)
+
+# A throw inside a readJournal callback reached uncaughtException, which keeps
+# the server up and answers nothing: the page waited until it gave up. Each
+# request's callback now answers 500 with a log line, giving back any lock it
+# holds. The faults are invented, through a preload: Advice.trustworthy on one
+# offer (/api/today, /api/journal), Earnings.fold (the earnings lock's
+# /api/earnings/pick, asked twice: a lock kept would leave the second
+# waiting), and Advice.runs, which the Trends answer swallowed without a word.
+_BREAK = ("var A = require(%r); var tw = A.trustworthy;\n"
+          "A.trustworthy = function (o) { if (o && o.id === 'off9') throw new Error('invented fault'); "
+          "return tw.apply(this, arguments); };\n"
+          "var E = require(%r); E.fold = function () { throw new Error('invented fold fault'); };\n"
+          % (os.path.join(ROOT, 'advice.js'), os.path.join(ROOT, 'earnings.js')))
+_BREAK_RUNS = ("require(%r).runs = function () { throw new Error('invented runs fault'); };\n"
+               % os.path.join(ROOT, 'advice.js'))
+
+
+def _within(base, path, body=None, seconds=4):
+    """Status, or 'no answer' where none came inside `seconds`."""
+    data = None if body is None else json.dumps(body).encode('utf-8')
+    req = urllib.request.Request(base + path, data=data,
+                                 headers={'Content-Type': 'application/json'} if data else {})
+    try:
+        with urllib.request.urlopen(req, timeout=seconds) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except Exception:
+        return 'no answer'
+
+
+_brdir = tempfile.mkdtemp()
+_brj = os.path.join(_brdir, 'offers.jsonl')
+write(_brj, [offer(i, NOW - 3600000 + i * 60000) for i in range(10)])
+proc, base, _brlog = _logged({'SCANNER': '0'}, _brj, preload=_BREAK)
+try:
+    eq('[thrown] a fault inside the journal\'s callback answers 500 at once: /api/today, /api/journal',
+       (_within(base, '/api/today?since=%d' % (NOW - 7200000)), _within(base, '/api/journal?days=1')),
+       (500, 500))
+    eq('[thrown] ...under the earnings lock too, and the lock is given back: asked twice, two answers',
+       (_within(base, '/api/earnings/pick', {'key': 'k1', 'match': 'none'}),
+        _within(base, '/api/earnings/pick', {'key': 'k1', 'match': 'none'})), (500, 500))
+    time.sleep(0.2)
+    _brl = _brlog()
+    eq('[thrown] ...each said in the log, naming the request, and the server still answers',
+       ('request failed: GET /api/today' in _brl, 'request failed: GET /api/journal' in _brl,
+        'request failed: POST /api/earnings/pick' in _brl, _within(base, '/api/status')),
+       (True, True, True, 200))
+finally:
+    stop(proc)
+proc, base, _brlog = _logged({'SCANNER': '0'}, _brj, preload=_BREAK_RUNS)
+try:
+    _brt = get(base, '/api/trends?days=1')
+    time.sleep(0.2)
+    eq('[thrown] Trends without its runs (Advice.runs failing) still draws, and now says why',
+       (_brt.get('ok'), _brt.get('runs'), 'trends: the runs of scanning could not be worked out' in _brlog()),
+       (True, [], True))
+finally:
+    stop(proc)
+shutil.rmtree(_brdir, ignore_errors=True)
+
+# /api/shift's answers (shiftKept, one per day asked) were never dropped:
+# each is up to 4 MB of report and shift.html can ask for any day. An answer
+# past SHIFT_CACHE_MS is never handed out again, so it goes. Counted by what
+# the process still holds: the report stands in for tools/shift_report.py
+# (PYTHON), each answer 200 kB, and a preload counts the parsed reports a
+# forced collection has not reclaimed. Six days asked: one held, not six.
+_skdir = tempfile.mkdtemp()
+_skj = os.path.join(_skdir, 'offers.jsonl')
+open(_skj, 'w').close()
+_skfake = os.path.join(_skdir, 'fake_report')
+with open(_skfake, 'w') as _fh:
+    _fh.write('#!%s\nimport json\nprint(json.dumps({"invented": True, "pad": "x" * 200000}))\n'
+              % sys.executable)
+os.chmod(_skfake, 0o755)
+_COUNT_REPORTS = (
+    "var v8 = require('v8'); v8.setFlagsFromString('--expose_gc');\n"
+    "var gc = require('vm').runInNewContext('gc');\n"
+    "var live = 0, reg = new FinalizationRegistry(function () { live -= 1; });\n"
+    "var parse = JSON.parse;\n"
+    "JSON.parse = function (s) { var o = parse.apply(this, arguments);\n"
+    "  if (typeof s === 'string' && s.length > 100000 && o && typeof o === 'object') { live += 1; reg.register(o); }\n"
+    "  return o; };\n"
+    "process.on('SIGUSR2', function () { gc(); setTimeout(function () { gc();\n"
+    "  setTimeout(function () { process.stderr.write('reports held ' + live + '\\n'); }, 200); }, 200); });\n")
+proc, base, _sklog = _logged({'SCANNER': '0', 'PYTHON': _skfake, 'SHIFT_CACHE_MS': '1'}, _skj,
+                             preload=_COUNT_REPORTS)
+try:
+    _skc = [raw(base, '/api/shift?day=2026-11-0%d' % _d)[0] for _d in range(1, 7)]
+    time.sleep(0.1)
+    proc.send_signal(__import__('signal').SIGUSR2)
+    for _ in range(40):
+        if 'reports held' in _sklog():
+            break
+        time.sleep(0.1)
+    _skheld = __import__('re').findall(r'reports held (\d+)', _sklog())
+    eq('[shift] six days\' reports asked, each past its 1 ms keep before the next: one held, not six',
+       (_skc, _skheld[-1:] if _skheld else None), ([200] * 6, ['1']))
+finally:
+    stop(proc)
+shutil.rmtree(_skdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)
