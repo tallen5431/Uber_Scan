@@ -15857,6 +15857,28 @@ finally:
     stop(proc)
 shutil.rmtree(_wdir, ignore_errors=True)
 
+# The Targets box's towns (targetsOut): MV.townFor was asked twice per row per
+# answer (the hour blocks, then All hours), and it was most of /api/journal.
+# Remembered by its input now — the card's dropoff and pickup, exactly. Eight
+# offers at two places, the journal asked twice: two asks, not thirty-two,
+# and the same towns.
+_SAY_TOWN = ("var MV = require(%r); var tf = MV.townFor;\n"
+             "MV.townFor = function () { process.stderr.write('townFor asked\\n'); "
+             "return tf.apply(this, arguments); };\n" % os.path.join(ROOT, 'map-view.js'))
+_tfdir = tempfile.mkdtemp()
+_tfj = os.path.join(_tfdir, 'offers.jsonl')
+write(_tfj, [offer(i, NOW - 3600000 + i * 60000, pickup='Maple Grill',
+                   dropoff=('12 Fable Ct, Marietta' if i % 2 else '7 Wren Way, Kennesaw')) for i in range(8)])
+proc, base, _tflog = _logged({'SCANNER': '0'}, _tfj, preload=_SAY_TOWN)
+try:
+    _tf1 = get(base, '/api/journal?days=1').get('targets')
+    _tf2 = get(base, '/api/journal?days=1').get('targets')
+    eq('[targets] eight offers at two places, asked twice: townFor asked twice in all, the same answer both times',
+       (_tflog().count('townFor asked'), _tf1 == _tf2, bool(_tf1)), (2, True, True))
+finally:
+    stop(proc)
+shutil.rmtree(_tfdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

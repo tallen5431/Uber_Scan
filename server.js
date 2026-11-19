@@ -5454,12 +5454,41 @@ function targetsOut(offers, taken) {
   try {
     return Advice.targets(offers, taken, {
       target: line === null ? 25 : line,
-      key: function (r) { return MV.townFor(r, Advice.area); }
+      key: townOfCard
     });
   } catch (e) {
     console.error('targets: ' + e.message);
     return null;
   }
+}
+
+/* MV.townFor with Advice.area, remembered by its input: the card's dropoff and
+ * pickup, as townFor reads them (String() of each, null and undefined as '').
+ *
+ * targetsOut was most of /api/journal (the server review, Nov 2026: 81 ms of
+ * a 150 ms warm answer for 30 days of an invented 12,000-offer journal, and
+ * the All answer in proportion), and most of that was townFor: asked once
+ * per row for the hour blocks and again for All hours, and inside it the
+ * dropoff's town is worked out twice (townEndFor, then townOf). A busy
+ * record has a few hundred distinct dropoffs and pickups, so the same
+ * strings were read again and again. Exact: the answer is a function of
+ * those two strings and nothing else (Advice.area keeps no state), and the
+ * map is keyed on each whole, one inside the other, so no two pairs can
+ * share a key. Cleared whole past TOWN_SEEN_MAX pairs. */
+var TOWN_SEEN_MAX = 20000;
+var townSeen = new Map();       // dropoff -> Map(pickup -> town)
+var townSeenN = 0;
+function townOfCard(r) {
+  var d = r.dropoff == null ? '' : String(r.dropoff);
+  var p = r.pickup == null ? '' : String(r.pickup);
+  var byPickup = townSeen.get(d);
+  if (byPickup && byPickup.has(p)) return byPickup.get(p);
+  var town = MV.townFor({ dropoff: d, pickup: p }, Advice.area);
+  if (townSeenN >= TOWN_SEEN_MAX) { townSeen.clear(); townSeenN = 0; byPickup = null; }
+  if (!byPickup) { byPickup = new Map(); townSeen.set(d, byPickup); }
+  byPickup.set(p, town);
+  townSeenN += 1;
+  return town;
 }
 
 function storeWaits() {
