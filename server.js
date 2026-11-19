@@ -1523,26 +1523,39 @@ function addOnBase(inCar) {
  * once, with this). A stat is all an unchanged file costs now. The scanner
  * replaces the file through a rename, which a new inode says even inside one
  * mtime tick. */
-var carryTwoSeen = null;
+function carryTwo() { return settingOn('carryTwo'); }
 
-function carryTwo() {
-  var env = process.env.CARRY_TWO;
+/* A switch in rpi/config.json's `settings`: on only where it says exactly
+ * true, and its environment name (carryTwo is CARRY_TWO) set to 1 or 0
+ * overriding the file, for the suites. carryTwo above and screenDrop below.
+ *
+ * One reader and one cache for every switch since the server review (Nov
+ * 2026): carryTwo and screenDrop were this function written twice, each
+ * with its own copy of the file's settings and its own stat, and a third
+ * switch would have been a third. The cache holds the whole `settings`
+ * object, so whichever switch is asked after the file changes reads it for
+ * all of them. */
+var settingsSeen = null;    // {mtime, size, ino, settings}
+
+function settingOn(name) {
+  var env = process.env[name.replace(/[A-Z]/g, '_$&').toUpperCase()];
   if (env === '1') return true;
   if (env === '0') return false;
   var file = path.join(ROOT, 'rpi', 'config.json');
   var st;
-  try { st = fs.statSync(file); } catch (e) { carryTwoSeen = null; return false; }
-  var c = carryTwoSeen;
-  if (c && c.mtime === st.mtimeMs && c.size === st.size && c.ino === st.ino) return c.on;
-  var on = false;
-  try {
-    var cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
-    on = !!(cfg && cfg.settings && cfg.settings.carryTwo === true);
-  } catch (e) {
-    on = false;
+  try { st = fs.statSync(file); } catch (e) { settingsSeen = null; return false; }
+  var c = settingsSeen;
+  if (!(c && c.mtime === st.mtimeMs && c.size === st.size && c.ino === st.ino)) {
+    var settings = {};
+    try {
+      var cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (cfg && cfg.settings && typeof cfg.settings === 'object') settings = cfg.settings;
+    } catch (e) {
+      settings = {};
+    }
+    c = settingsSeen = { mtime: st.mtimeMs, size: st.size, ino: st.ino, settings: settings };
   }
-  carryTwoSeen = { mtime: st.mtimeMs, size: st.size, ino: st.ino, on: on };
-  return on;
+  return c.settings[name] === true;
 }
 
 /* The orders in the car as the assembler is handed them: the first-taken
@@ -7710,27 +7723,8 @@ function plannerPassedKeys(h) {
  * Took' or 'another customer'. No name: the customer stays off the journal. */
 var SCREEN_DROP_QUIET_MS = envNumber('SCREEN_DROP_QUIET_MS', 120000);
 var screenDropQuiet = {};
-var screenDropSeen = null;
-
-function screenDrop() {
-  var env = process.env.SCREEN_DROP;
-  if (env === '1') return true;
-  if (env === '0') return false;
-  var file = path.join(ROOT, 'rpi', 'config.json');
-  var st;
-  try { st = fs.statSync(file); } catch (e) { screenDropSeen = null; return false; }
-  var c = screenDropSeen;
-  if (c && c.mtime === st.mtimeMs && c.size === st.size && c.ino === st.ino) return c.on;
-  var on = false;
-  try {
-    var cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
-    on = !!(cfg && cfg.settings && cfg.settings.screenDrop === true);
-  } catch (e) {
-    on = false;
-  }
-  screenDropSeen = { mtime: st.mtimeMs, size: st.size, ino: st.ino, on: on };
-  return on;
-}
+// Read as carryTwo is (settingOn): `"screenDrop": true`, SCREEN_DROP=1/0.
+function screenDrop() { return settingOn('screenDrop'); }
 
 // A customer's name as two readings of it can agree: its letters, lower case,
 // at least three of them. "Pat Q." and "PatQ" are one name.

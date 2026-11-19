@@ -1378,6 +1378,12 @@ _srv_lone = [_n for _n in re.findall(r'^function (\w+)\(', _srv, re.M)
 eq('every top-level function in server.js has a caller in its code', _srv_lone, [])
 eq('server.js works a median out by percentileOf, not by hand (`.length % 2 ?`)',
    re.findall(r'\.length % 2 \?[^\n]*', _srv_code), [])
+# ...and rpi/config.json's switches (carryTwo, screenDrop) through settingOn
+# alone: they were one reader written twice, each statting the file per call
+# with a cache of its own.
+eq('server.js reads each rpi/config.json switch through settingOn, not its own copy of the reader',
+   (re.findall(r'cfg\.settings\.\w+ === true', _srv_code), len(re.findall(r'^function settingOn\(', _srv, re.M))),
+   ([], 1))
 
 # --- what a new session reads first: CLAUDE.md --------------------------------
 #
