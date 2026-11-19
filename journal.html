@@ -8010,7 +8010,8 @@
         + (cut() === null ? '—' : money2(cut())) + '/hr, the top ' + st.top + '% of this range. It used to be the target '
         + 'the panel judged each offer against at the time; the target moved over the weeks, so that count weighed one '
         + 'day against a different line from the next. One fixed line for the whole range compares them fairly. '
-        + 'Hours online are the Runs tab\'s runs of scanning, first card to last, credited to the day each began: '
+        + 'Hours online are the Runs tab\'s runs of scanning, first card to last, cut at 4am like the cards, so a '
+        + 'run past 4am gives its small hours to the night before: '
         + tot.good + ' good offers over ' + tot.hours.toFixed(1) + ' hours in all. Grouped by day or week as pressed '
         + 'under "How it\'s changing". Descriptive; it feeds nothing.';
     }
@@ -8260,11 +8261,11 @@
           : 'nothing of the month before in this range — press All to compare');
       $('trCalNote').textContent = 'Each day: its ' + statWords() + ', counted against the one ruler above. '
         + 'Hatched: off, no card that day. Each day\'s title says how often a good offer came, from 2 hours online. '
-        + (earned ? 'Earned is the pay of the offers you ticked taken over the day\'s hours online, each run credited to '
-           + 'the day it began; a day is shaded where a 99% interval (each take weighted by its pay) lies wholly above '
+        + (earned ? 'Earned is the pay of the offers you ticked taken over the day\'s hours online (a run past 4am '
+           + 'gives its small hours to the night before, as its cards); a day is shaded where a 99% interval (each take weighted by its pay) lies wholly above '
            + 'or below the range\'s ' + statFmt(cal.ref) + ' an hour; under ' + cal.floorHours + ' hours online it is '
            + 'grey with its hours. A week\'s figure is shaded on two days or more.'
-           : good ? 'Hours online are that day\'s runs of scanning, each credited to the day it began. A day is shaded where '
+           : good ? 'Hours online are that day\'s minutes of scanning, cut at 4am like the cards. A day is shaded where '
            + 'a 99% Poisson interval on its good count, over its hours, lies wholly above or below the range\'s '
            + (cal.ref === null ? '—' : cal.ref.toFixed(2)) + ' an hour; under ' + cal.floorHours + ' hours online it is grey '
            + 'with its hours. A week\'s figure is shaded on two days or more, as a grid cell.'
@@ -8429,7 +8430,7 @@
       });
       var on = sw.days.filter(function (d) { return !d.off; }).length;
       $('trSameNote').textContent = on + ' of ' + sw.days.length + ' ' + name + ' in the range had the rig on. Bars under '
-        + 'each: hours online that day (each run credited to the day it began). A hollow point rests on fewer than '
+        + 'each: hours online that day (cut at 4am like the cards). A hollow point rests on fewer than '
         + T.DAY_MIN + ' offers (P90) or under ' + T.GOOD_FLOOR_HOURS + ' hours online (the two rates); an off day has no '
         + 'point. Earned is the card\'s pay of the offers you ticked taken, gross. Press a point to list that day\'s offers.';
     }

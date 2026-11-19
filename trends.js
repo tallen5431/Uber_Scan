@@ -742,9 +742,15 @@
    *
    * `runs` are [from, to] in ms: the offers page's own runs of scanning
    * (Advice.runs over Advice.usable, first card to last card), sent by the
-   * server beside the rows. A run is credited to the driver day it STARTED on
-   * — a run across 4am is one sitting, not two. Hours, not "time worked": the
-   * runs page says the same of its own total. */
+   * server beside the rows. hoursBy credits a run to the driver day it
+   * STARTED on — a run across 4am as one sitting, which is the Runs tab's
+   * question. NO RATE ON THIS TAB READS IT ANY MORE (the reporting review,
+   * Nov 2026): a rate is good offers over hours, and the cards are counted on
+   * their own driver day, so a run from 1am to 7am Monday put its 4-7am cards
+   * on Monday and all six hours on Sunday — Sunday read 0 good in 6 h, Monday
+   * 19 good in no time, and the calendar's week column disagreed with the
+   * week card's over the same week. Every rate takes onlineHoursBy instead.
+   * Kept, exported, for a caller that asks the sitting's question. */
   function hoursBy(runs, by) {
     var out = Object.create(null);
     (runs || []).forEach(function (sp) {
@@ -781,6 +787,20 @@
         e.hours += (end - t) / 3.6e6;
         t = end;
       }
+    });
+    return out;
+  }
+  /* The one hours rule for a rate (F1 of the reporting review): the slices'
+   * own hours summed by the driver day each slice falls on — or its week
+   * (Monday 4am) or month — so hours and cards are on the same day by
+   * construction, and a day, a week column, a month and the week card are
+   * each the pool of the same slices the grid and the timeline pool. The 1
+   * Nov night counts its real 9 hours (1am happens twice), split at 4am. */
+  function onlineHoursBy(runs, by) {
+    var pieces = onlinePieces(runs), out = Object.create(null);
+    Object.keys(pieces).forEach(function (k) {
+      var p = pieces[k], key = by === 'week' ? weekKeyOf(p.day) : by === 'month' ? p.month : p.day;
+      out[key] = (out[key] || 0) + p.hours;
     });
     return out;
   }
@@ -954,7 +974,7 @@
    * where one is given — the page always gives one — else the row's own
    * target at the time, round one's. Descriptive: it feeds nothing. */
   function goodPerHour(rows, runs, by, cut) {
-    var hours = hoursBy(runs, by);
+    var hours = onlineHoursBy(runs, by);
     var g = groupBy(rows, function (r) { return by === 'week' ? r.week : r.day; });
     return g.keys.sort().map(function (k) {
       var list = g.by[k], hrs = hours[k] || 0;
@@ -1114,8 +1134,9 @@
   /* Round two (the owner: "make comparing over time easy"): `opts.stat` and
    * `opts.cut` as the grid's, so a tile reads the same figure as the grid and
    * is counted against the same fixed ruler. A day's goodRate is its good
-   * offers over its hours online (hoursBy: a run is credited to the day it
-   * began, as the good-per-hour chart has always done), shaded by the plain
+   * offers over its hours online (onlineHoursBy: the slices of every run on
+   * that driver day, so a run across 4am puts its small hours on the night
+   * before, where their cards are counted too), shaded by the plain
    * Poisson interval at GOOD_FLOOR_HOURS — one day is one day, and a day's
    * own swing is the very thing a tile is asked about.
    *
@@ -1131,7 +1152,7 @@
     var p = STAT_P[stat] || 0.5, cut = opts.cut, cpm = cpmOf(opts);
     var all = valuesOf(rows, 'perHour');
     var refQ = all.length ? q(sorted(all), p) : null;
-    var hours = hoursBy(runs, 'day');
+    var hours = onlineHoursBy(runs, 'day');
     var totalH = 0, totalK = 0;
     Object.keys(hours).forEach(function (k) { totalH += hours[k]; });
     rows.forEach(function (r) { if (isGood(r, cut)) totalK += 1; });
@@ -1242,14 +1263,13 @@
   function monthFigures(rows, runs, stat, cut, cpm) {
     var mo = monthsOf(rows);
     if (!mo) return null;
-    var hours = hoursBy(runs, 'day');
+    var hours = onlineHoursBy(runs, 'month');
     function side(m) {
       var list = rows.filter(function (r) { return r.month === m; });
       var e = { month: m, offers: list.length, days: daysIn(list) };
       if (!list.length) { e.value = null; e.n = 0; return e; }
       if (stat === 'goodRate' || stat === 'earned') {
-        var h = 0;
-        Object.keys(hours).forEach(function (k) { if (k.slice(0, 7) === m) h += hours[k]; });
+        var h = hours[m] || 0;
         e.good = list.filter(function (r) { return isGood(r, cut); }).length;
         e.hours = r2(h); e.n = e.good;
         e.value = h > 0 ? r2(e.good / h) : null;
@@ -1554,12 +1574,13 @@
    * point each: its P90 $/hr (with its n), its good offers per hour online
    * and its earned per hour online (gross: the card's pay of its takes), with
    * the hours online under them. A day with no minute online and no card is
-   * `off` (no point, said so). Hours as the calendar's tiles: a day's runs,
-   * each credited to the day it began. A P90 under DAY_MIN offers, and a
+   * `off` (no point, said so). Hours as the calendar's tiles: the day's own
+   * slices (onlineHoursBy), so a run across 4am gives its small hours to the
+   * night before, as its cards are. A P90 under DAY_MIN offers, and a
    * rate under GOOD_FLOOR_HOURS online, is `thin` (a hollow point). */
   function sameWeekday(rows, runs, dow, opts) {
     opts = opts || {};
-    var hours = hoursBy(runs, 'day'), keys = Object.keys(hours);
+    var hours = onlineHoursBy(runs, 'day'), keys = Object.keys(hours);
     var g = groupBy(rows, function (r) { return r.day; });
     var all = g.keys.concat(keys).sort();
     if (!all.length) return { dow: dow, days: [] };
@@ -1937,7 +1958,7 @@
     periodSpan: periodSpan, inPeriod: inPeriod,
     weekSpanMs: weekSpanMs, weekKeys: weekKeys, weekReview: weekReview, BLOCK_NAMES: BLOCK_NAMES,
     onlinePieces: onlinePieces, hoursByCell: hoursByCell, cellDetail: cellDetail,
-    periods: periods, hoursBy: hoursBy, goodPerHour: goodPerHour, hourly: hourly, monthsOf: monthsOf,
+    periods: periods, hoursBy: hoursBy, onlineHoursBy: onlineHoursBy, goodPerHour: goodPerHour, hourly: hourly, monthsOf: monthsOf,
     grid: grid, calendar: calendar, fit3: fit3, rateFit: rateFit, rateCard: rateCard,
     compare: compare, scatter: scatter, csvPeriods: csvPeriods, csvHourly: csvHourly
   };

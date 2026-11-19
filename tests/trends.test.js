@@ -134,8 +134,57 @@ function offer(x) {
                                        offer({ id: 'g2', at: at(2, 18, 6), perHour: 26 }),
                                        offer({ id: 'g3', at: at(2, 18, 7), perHour: 20 })]));
   var gp = T.goodPerHour(goodRows, runs, 'day');
-  eq('good per hour online: the day\'s good offers over its runs\' hours, a run across 4am credited to the day it began',
-     [gp[0].key, gp[0].good, gp[0].hours, gp[0].rate, T.hoursBy(runs, 'day')['2026-03-02']], ['2026-03-02', 2, 4, 0.5, 4]);
+  eq('good per hour online: the day\'s good offers over its own slices\' hours, a run across 4am cut there (its '
+     + '3:30-4am half the night before\'s), while hoursBy still credits the sitting to the day it began',
+     [gp[0].key, gp[0].good, gp[0].hours, gp[0].rate, T.hoursBy(runs, 'day')['2026-03-02'],
+      T.onlineHoursBy(runs, 'day')['2026-03-03']], ['2026-03-02', 2, 3.5, 0.57, 4, 0.5]);
+
+  /* --- one hours rule for every rate (the reporting review's F1) --- */
+  // A night across Monday 4am: 1am-7am Mon 23 Nov 2026, the 4-7am cards $40
+  // (good), the rest $15; Thu, Fri and Tue evenings at $15. Every view's
+  // hours for a day, a week and a month are the same slices.
+  (function () {
+    var L = function (y, m, d, h) { return new Date(y, m - 1, d, h).getTime(); };
+    var offs = [], rr = [], id = 0;
+    function run(a, b, ph) {
+      for (var t = a; t <= b; t += 600000) offs.push({ id: 'h' + (id++), at: t, pay: 10, perHour: ph(t), minutes: 20, miles: 4, app: 'uber' });
+      rr.push([a, b]);
+    }
+    run(L(2026, 11, 19, 18), L(2026, 11, 19, 21), function () { return 15; });
+    run(L(2026, 11, 20, 18), L(2026, 11, 20, 21), function () { return 15; });
+    run(L(2026, 11, 23, 1), L(2026, 11, 23, 7), function (t) { return new Date(t).getHours() >= 4 ? 40 : 15; });
+    run(L(2026, 11, 24, 18), L(2026, 11, 24, 20), function () { return 15; });
+    var R = T.readRows(T.rowsOf(offs)), cutF = 40;
+    var cal = T.calendar(R, rr, { stat: 'goodRate', cut: cutF });
+    var tlw = T.timeline(R, rr, { by: 'week', stat: 'goodRate', cut: cutF });
+    var wr = T.weekReview(R, rr, '2026-11-23', { cut: cutF });
+    var gpw = T.goodPerHour(R, rr, 'week', cutF);
+    var tile = function (d) { return cal.days.filter(function (x) { return x.day === d; })[0]; };
+    eq('F1: Sunday night\'s 1-4am is Sunday\'s (3 h, no good), Monday\'s 4-7am Monday\'s (3 h, 19 good)',
+       [tile('2026-11-22').hours, tile('2026-11-22').good, tile('2026-11-23').hours, tile('2026-11-23').good,
+        tile('2026-11-23').value], [3, 0, 3, 19, 6.33]);
+    eq('F1: the calendar\'s week column, the timeline\'s week row, the good-per-hour chart and the week card agree',
+       [cal.weeks.map(function (w) { return [w.week, w.hours, w.good]; }),
+        tlw.rows.map(function (r) { return [r.key, r.hours]; }).reverse(),
+        gpw.map(function (e) { return [e.key, e.hours, e.good]; }), [wr.prev.hours, wr.now.hours, wr.now.good]],
+       [[['2026-11-16', 9, 0], ['2026-11-23', 5, 19]], [['2026-11-16', 9], ['2026-11-23', 5]],
+        [['2026-11-16', 9, 0], ['2026-11-23', 5, 19]], [9, 5, 19]]);
+    var mon = T.sameWeekday(R, rr, 1, { cut: cutF }).days.filter(function (d) { return d.day === '2026-11-23'; })[0];
+    eq('F1: one weekday over the weeks takes the same day hours', [mon.hours, mon.good, mon.goodRate, mon.rateThin],
+       [3, 19, 6.33, false]);
+    // The 1 Nov night: 10pm 31 Oct to 6am 1 Nov is nine real hours (1am twice):
+    // 6 to October's driver day 31 Oct, 3 to 1 Nov.
+    var offs2 = [], rr2 = [];
+    offs = offs2; rr = rr2;
+    run(L(2026, 10, 30, 18), L(2026, 10, 30, 21), function () { return 15; });
+    run(L(2026, 10, 31, 22), L(2026, 11, 1, 6), function (t) { var d = new Date(t); return d.getDate() === 1 && d.getHours() >= 4 ? 40 : 15; });
+    run(L(2026, 11, 2, 18), L(2026, 11, 2, 21), function () { return 15; });
+    var R2 = T.readRows(T.rowsOf(offs2));
+    var cal2 = T.calendar(R2, rr2, { stat: 'goodRate', cut: 40 });
+    var tlm = T.timeline(R2, rr2, { by: 'month', stat: 'goodRate', cut: 40 });
+    eq('F1: "Nov so far · Oct" are the timeline\'s month rows across the 1 Nov change (10 h and 5 h of 15 real)',
+       [cal2.months.now.hours, cal2.months.before.hours, tlm.rows.map(function (r) { return r.hours; })], [5, 10, [5, 10]]);
+  }());
 
   /* --- the grid: floor and shading together --- */
   var r2 = rng(11), gridRows = [];
