@@ -13733,11 +13733,10 @@ function nbxLine(g) {
   return out;
 }
 
-function nbxRoute(req, res) {
+function nbxRoute(req, res, p) {
   var reply = function (code, body) {
     sendJson(res, code, body);
   };
-  var p = req.url.split('?')[0];
   if (p === '/api/nbx') {
     // What the page asks first, so with nothing set it does what it always
     // did. Whether, not where: the addresses stay on this machine.
@@ -13940,11 +13939,10 @@ if (STREETS_FILE) {
   }
 }
 
-function streetsRoute(req, res) {
+function streetsRoute(req, res, p) {
   var reply = function (code, body) {
     sendJson(res, code, body);
   };
-  var p = req.url.split('?')[0];
   if (p === '/api/streets') {
     return reply(200, STREETS.ix
       ? { ok: true, loaded: true, counts: STREETS.ix.counts, bbox: STREETS.ix.bbox,
@@ -13971,445 +13969,999 @@ function streetsRoute(req, res) {
   return reply(200, out);
 }
 
-function route(req, res) {
-  // Noting what happened to an offer: which ones were taken, and which to hide.
-  //
-  // It appends a line and can do nothing else. There is no field here for free
-  // text and no way to reach an existing row, because this server has no
-  // authentication and sits on whatever wifi the car is near — so the worst a
-  // stranger can do with it is add a note to a journal they cannot read the
-  // addresses out of, and nothing they add can destroy a reading.
-  //
-  // Hiding is a note too, for the same reason. A mis-tap on a phone in a moving
-  // car should cost an entry in a list, not a row of data that took a shift to
-  // collect.
-  if (req.method === 'POST' && req.url.split('?')[0] === '/api/offers/mark') {
-    return readJsonBody(req, function (err, body) {
-      if (err || !body) return sendJson(res, 400, { ok: false, error: 'bad body' });
-      var note = { v: 1, at: Date.now() };
-      if (typeof body.id === 'string' && body.id.length && body.id.length < 80) {
-        note.kind = 'mark';
-        note.id = body.id;
-      } else if (body.match && typeof body.match === 'object') {
-        note.kind = 'rule';
-        note.match = {
-          pay: numOrNull(body.match.pay),
-          minutes: numOrNull(body.match.minutes),
-          miles: numOrNull(body.match.miles)
-        };
-        if (note.match.pay === null || note.match.minutes === null) {
-          return sendJson(res, 400, { ok: false, error: 'a rule needs a pay and a time' });
-        }
-      } else {
-        return sendJson(res, 400, { ok: false, error: 'no offer named' });
+// Noting what happened to an offer: which ones were taken, and which to hide.
+//
+// It appends a line and can do nothing else. There is no field here for free
+// text and no way to reach an existing row, because this server has no
+// authentication and sits on whatever wifi the car is near — so the worst a
+// stranger can do with it is add a note to a journal they cannot read the
+// addresses out of, and nothing they add can destroy a reading.
+//
+// Hiding is a note too, for the same reason. A mis-tap on a phone in a moving
+// car should cost an entry in a list, not a row of data that took a shift to
+// collect.
+function markRoute(req, res) {
+  return readJsonBody(req, function (err, body) {
+    if (err || !body) return sendJson(res, 400, { ok: false, error: 'bad body' });
+    var note = { v: 1, at: Date.now() };
+    if (typeof body.id === 'string' && body.id.length && body.id.length < 80) {
+      note.kind = 'mark';
+      note.id = body.id;
+    } else if (body.match && typeof body.match === 'object') {
+      note.kind = 'rule';
+      note.match = {
+        pay: numOrNull(body.match.pay),
+        minutes: numOrNull(body.match.minutes),
+        miles: numOrNull(body.match.miles)
+      };
+      if (note.match.pay === null || note.match.minutes === null) {
+        return sendJson(res, 400, { ok: false, error: 'a rule needs a pay and a time' });
       }
-      // Two answers and a way of taking either back.
+    } else {
+      return sendJson(res, 400, { ok: false, error: 'no offer named' });
+    }
+    // Two answers and a way of taking either back.
+    //
+    // `true` is "I took this" and `false` is "I passed on this" — a KNOWN
+    // pass, which Advice.ifCleared stops counting as a card that might have
+    // been taken. `null` is neither: it withdraws whatever was said, and the
+    // fold below leaves the offer with no `accepted` at all, which is what
+    // an offer nobody marked carries.
+    //
+    // The third one is needed because there are presses that undo an
+    // answer rather than give the opposite one: the ✓ pressed again, the
+    // panel's Took pressed again ("Press again if that was wrong"), and the
+    // offers page's Undo. Before a pass meant anything those wrote `false`,
+    // and false and absent were read alike everywhere, so it did not matter.
+    // It matters now: a ✓ mis-tapped onto the wrong row and undone at once
+    // would have been filed as a pass the driver never made, and the review
+    // would have stopped asking about that card. A page still running the
+    // old code sends that `false` with no `via`, and the fold reads it as
+    // the take-back it is.
+    if (typeof body.accepted === 'boolean' || body.accepted === null) {
+      note.accepted = body.accepted;
+    }
+    if (typeof body.hidden === 'boolean') note.hidden = body.hidden;
+    if (note.accepted === undefined && note.hidden === undefined) {
+      return sendJson(res, 400, { ok: false, error: 'nothing to note' });
+    }
+    // Which surface the press came from: one of MARK_VIA or absent, and
+    // anything else refused here, before the append.
+    if (body.via !== undefined) {
+      if (MARK_VIA.indexOf(body.via) === -1) {
+        return sendJson(res, 400, { ok: false, error: 'unknown via' });
+      }
+      note.via = body.via;
+    }
+    // The offers page's ✓ on a RECENT card is a ✓ Took on it (offersTickHolds);
+    // asked before the row is written, so the row can say it held.
+    var fromOffers = note.kind === 'mark' && note.via === 'offers' && note.accepted === true
+      ? offersTickHolds(note.id, Date.now()) : null;
+    var offersHolds = !!(fromOffers && fromOffers.card);
+    if (offersHolds) note.inCar = true;
+    // A ✓ Took on an Uber add-on says so on its own mark row: `addon: true`
+    // and, when an Uber order is in the car, `addonTo` — the root of the
+    // trip it joins (addOnBase, tripOf), ids only. Asked here, before the
+    // row is written, of the card the handler below will take the order
+    // from (the slot's, or the panel's copy when the slot holds none or is
+    // behind) and of the car as it stands — the same question placeTook
+    // asks of the same two a moment later. On 16 Oct no row said a ticked
+    // card was an add-on at all.
+    if (note.kind === 'mark' && note.accepted === true && (marksTheHold(note.via) || offersHolds)) {
+      var aboutCard = offersHolds ? fromOffers.card
+        : scanner.offer && scanner.offer.id === note.id ? scanner.offer
+        : body.offer && typeof body.offer === 'object' && body.offer.id === note.id
+          ? body.offer : null;
+      if (isAddOnCard(aboutCard) && !aboutCard.heldCard) {
+        note.addon = true;
+        var addOnto = addOnBase(heldOrders(Date.now()).filter(function (o) {
+          return o.id !== note.id;
+        }));
+        if (addOnto) note.addonTo = tripOf(addOnto);
+      }
+    }
+    appendLines(JSON.stringify(note) + '\n', function (writeErr) {
+      if (writeErr) return sendJson(res, 500, { ok: false, error: writeErr.message });
+      // Remember it against the offer the driving screen is holding, so a
+      // reload does not forget. The button's state was page-local: mark an
+      // offer, reload the panel, and it offered to mark it again — while the
+      // shift line beside it had already counted it. Two figures forty pixels
+      // apart disagreeing about the same thing the driver just did.
       //
-      // `true` is "I took this" and `false` is "I passed on this" — a KNOWN
-      // pass, which Advice.ifCleared stops counting as a card that might have
-      // been taken. `null` is neither: it withdraws whatever was said, and the
-      // fold below leaves the offer with no `accepted` at all, which is what
-      // an offer nobody marked carries.
+      // Only when it names that offer. A mark for anything else is about a
+      // row on the offers page and says nothing about what is on this screen.
       //
-      // The third one is needed because there are presses that undo an
-      // answer rather than give the opposite one: the ✓ pressed again, the
-      // panel's Took pressed again ("Press again if that was wrong"), and the
-      // offers page's Undo. Before a pass meant anything those wrote `false`,
-      // and false and absent were read alike everywhere, so it did not matter.
-      // It matters now: a ✓ mis-tapped onto the wrong row and undone at once
-      // would have been filed as a pass the driver never made, and the review
-      // would have stopped asking about that card. A page still running the
-      // old code sends that `false` with no `via`, and the fold reads it as
-      // the take-back it is.
-      if (typeof body.accepted === 'boolean' || body.accepted === null) {
-        note.accepted = body.accepted;
+      // Or the offer the panel sends with the mark. After a server restart
+      // mid-shift the offer on record is gone — it is process memory — but
+      // the panel still shows "Took $10.00?" for it and the driver presses
+      // it. The mark was written and no order went in the car: Drop and
+      // Dropoff never appeared and the next card was judged alone, on the
+      // one path this feature exists for. The panel knows the offer it is
+      // marking, so it says, and that stands in when nothing is on record.
+      //
+      // ...ONLY when nothing is on record. It used to stand in whenever the
+      // mark named a different card, which is also the case where the panel
+      // is simply BEHIND: the socket dropped, /api/events replays the last
+      // reading and never the offer, and the driver ticks the card they
+      // took while the server has already moved on to the next one. The
+      // older card then replaced the newer one on the slot, /api/status said
+      // 'a' with 'b' on the phone, and b's next re-read was no longer the
+      // same card — so recordPairing wrote b's pair row a second time, into
+      // a file that cannot be corrected. Reproduced against this server:
+      // pair rows ['a', 'b'] became ['a', 'b', 'b'].
+      //
+      // The order still goes in the car — that is what the driver said —
+      // from the panel's copy of it, and the card on the slot is left alone.
+      var marked = null;
+      var offered = body.offer && typeof body.offer === 'object'
+          && body.offer.id === note.id && typeof note.id === 'string';
+      // ...from the driving panel only (marksTheHold): a review tick is the
+      // mark row above and nothing else — the slot and the car untouched.
+      if (note.kind === 'mark' && note.accepted !== undefined && marksTheHold(note.via)) {
+        if (scanner.offer && scanner.offer.id === note.id) {
+          marked = scanner.offer;
+        } else if (offered && !scanner.offer) {
+          scanner.offer = Object.assign({}, body.offer);
+          scanner.offerAt = scanner.offerAt || Date.now();
+          marked = scanner.offer;
+        } else if (offered) {
+          marked = Object.assign({}, body.offer);
+        }
+      } else if (offersHolds) {
+        // ...or the offers page's ✓ on a recent card: that card's reading as
+        // the slot had it, and the slot left alone.
+        marked = fromOffers.card;
       }
-      if (typeof body.hidden === 'boolean') note.hidden = body.hidden;
-      if (note.accepted === undefined && note.hidden === undefined) {
-        return sendJson(res, 400, { ok: false, error: 'nothing to note' });
-      }
-      // Which surface the press came from: one of MARK_VIA or absent, and
-      // anything else refused here, before the append.
-      if (body.via !== undefined) {
-        if (MARK_VIA.indexOf(body.via) === -1) {
-          return sendJson(res, 400, { ok: false, error: 'unknown via' });
-        }
-        note.via = body.via;
-      }
-      // The offers page's ✓ on a RECENT card is a ✓ Took on it (offersTickHolds);
-      // asked before the row is written, so the row can say it held.
-      var fromOffers = note.kind === 'mark' && note.via === 'offers' && note.accepted === true
-        ? offersTickHolds(note.id, Date.now()) : null;
-      var offersHolds = !!(fromOffers && fromOffers.card);
-      if (offersHolds) note.inCar = true;
-      // A ✓ Took on an Uber add-on says so on its own mark row: `addon: true`
-      // and, when an Uber order is in the car, `addonTo` — the root of the
-      // trip it joins (addOnBase, tripOf), ids only. Asked here, before the
-      // row is written, of the card the handler below will take the order
-      // from (the slot's, or the panel's copy when the slot holds none or is
-      // behind) and of the car as it stands — the same question placeTook
-      // asks of the same two a moment later. On 16 Oct no row said a ticked
-      // card was an add-on at all.
-      if (note.kind === 'mark' && note.accepted === true && (marksTheHold(note.via) || offersHolds)) {
-        var aboutCard = offersHolds ? fromOffers.card
-          : scanner.offer && scanner.offer.id === note.id ? scanner.offer
-          : body.offer && typeof body.offer === 'object' && body.offer.id === note.id
-            ? body.offer : null;
-        if (isAddOnCard(aboutCard) && !aboutCard.heldCard) {
-          note.addon = true;
-          var addOnto = addOnBase(heldOrders(Date.now()).filter(function (o) {
-            return o.id !== note.id;
-          }));
-          if (addOnto) note.addonTo = tripOf(addOnto);
-        }
-      }
-      appendLines(JSON.stringify(note) + '\n', function (writeErr) {
-        if (writeErr) return sendJson(res, 500, { ok: false, error: writeErr.message });
-        // Remember it against the offer the driving screen is holding, so a
-        // reload does not forget. The button's state was page-local: mark an
-        // offer, reload the panel, and it offered to mark it again — while the
-        // shift line beside it had already counted it. Two figures forty pixels
-        // apart disagreeing about the same thing the driver just did.
+      // The order a Took is about to put down, if it replaces one: see the
+      // drop row below.
+      var replacedHold = null;
+      // ...and, with carrying two on, whether this Took ADDED an order
+      // beside one already in the car (the panel offers to undo that), and
+      // the pay of an order a Took past MAX_HELD put down (said).
+      var addedHold = null;
+      var putDownPay = null;
+      var carriedAtTook = 0;
+      var joinedAtTook = false;
+      if (marked) {
+        marked.accepted = note.accepted;
+        var before = holding(Date.now());
+        // ...and it becomes the order in the car, which is what the next
+        // offer gets measured against. Taking the mark back puts it down
+        // again: the driver pressed it twice because they did not take it,
+        // and stacking onto a job they refused is the same wrong number as
+        // stacking onto one they already delivered.
         //
-        // Only when it names that offer. A mark for anything else is about a
-        // row on the offers page and says nothing about what is on this screen.
+        // Except a Took on the held order's own card come back under a new
+        // id (heldOwnCard): the order in the car is the one the driver took
+        // already, and replacing it would restart its clock and write a
+        // drop for an order that is still in the car.
         //
-        // Or the offer the panel sends with the mark. After a server restart
-        // mid-shift the offer on record is gone — it is process memory — but
-        // the panel still shows "Took $10.00?" for it and the driver presses
-        // it. The mark was written and no order went in the car: Drop and
-        // Dropoff never appeared and the next card was judged alone, on the
-        // one path this feature exists for. The panel knows the offer it is
-        // marking, so it says, and that stands in when nothing is on record.
-        //
-        // ...ONLY when nothing is on record. It used to stand in whenever the
-        // mark named a different card, which is also the case where the panel
-        // is simply BEHIND: the socket dropped, /api/events replays the last
-        // reading and never the offer, and the driver ticks the card they
-        // took while the server has already moved on to the next one. The
-        // older card then replaced the newer one on the slot, /api/status said
-        // 'a' with 'b' on the phone, and b's next re-read was no longer the
-        // same card — so recordPairing wrote b's pair row a second time, into
-        // a file that cannot be corrected. Reproduced against this server:
-        // pair rows ['a', 'b'] became ['a', 'b', 'b'].
-        //
-        // The order still goes in the car — that is what the driver said —
-        // from the panel's copy of it, and the card on the slot is left alone.
-        var marked = null;
-        var offered = body.offer && typeof body.offer === 'object'
-            && body.offer.id === note.id && typeof note.id === 'string';
-        // ...from the driving panel only (marksTheHold): a review tick is the
-        // mark row above and nothing else — the slot and the car untouched.
-        if (note.kind === 'mark' && note.accepted !== undefined && marksTheHold(note.via)) {
-          if (scanner.offer && scanner.offer.id === note.id) {
-            marked = scanner.offer;
-          } else if (offered && !scanner.offer) {
-            scanner.offer = Object.assign({}, body.offer);
-            scanner.offerAt = scanner.offerAt || Date.now();
-            marked = scanner.offer;
-          } else if (offered) {
-            marked = Object.assign({}, body.offer);
-          }
-        } else if (offersHolds) {
-          // ...or the offers page's ✓ on a recent card: that card's reading as
-          // the slot had it, and the slot left alone.
-          marked = fromOffers.card;
-        }
-        // The order a Took is about to put down, if it replaces one: see the
-        // drop row below.
-        var replacedHold = null;
-        // ...and, with carrying two on, whether this Took ADDED an order
-        // beside one already in the car (the panel offers to undo that), and
-        // the pay of an order a Took past MAX_HELD put down (said).
-        var addedHold = null;
-        var putDownPay = null;
-        var carriedAtTook = 0;
-        var joinedAtTook = false;
-        if (marked) {
-          marked.accepted = note.accepted;
-          var before = holding(Date.now());
-          // ...and it becomes the order in the car, which is what the next
-          // offer gets measured against. Taking the mark back puts it down
-          // again: the driver pressed it twice because they did not take it,
-          // and stacking onto a job they refused is the same wrong number as
-          // stacking onto one they already delivered.
-          //
-          // Except a Took on the held order's own card come back under a new
-          // id (heldOwnCard): the order in the car is the one the driver took
-          // already, and replacing it would restart its clock and write a
-          // drop for an order that is still in the car.
-          //
-          // ANY order in the car's own card: with two carried, a Took on the
-          // second's card come back is that order too.
-          var inCar = heldOrders(Date.now());
-          carriedAtTook = inCar.length;
-          joinedAtTook = tripJoined(inCar);
-          if (note.accepted && before && marked.heldCard
-              && inCar.some(function (h) { return holdIdOf(h) === marked.heldCard; })) {
-            // the mark is written; the hold stands as it is
-          } else if (note.accepted) {
-            // A second ✓ Took while an order is still held used to replace
-            // it in silence: the first order left the car with no drop row,
-            // and the journal could not say how it ended. With carrying two
-            // off the first is put down — and SAID: a drop row `by:
-            // 'replaced'`, and a note on the panel. With it on, the second is
-            // ADDED, and only a re-offer or a Took past MAX_HELD puts one
-            // down, said the same way (placeTook).
-            var tookAt = Date.now();
-            // When its card came onto the slot — this card's, not the slot's
-            // (cardArrivedAt): see `acceptedAt` below. One no longer kept
-            // came before the card on the slot, so that card's offerAt is the
-            // nearest bound on it, as it was before.
-            // The offers page's tick: when that card arrived, as offersTickHolds
-            // judged it recent by.
-            var cardAt = (offersHolds ? fromOffers.at : null)
-              || cardArrivedAt(marked.id) || scanner.offerAt || tookAt;
-            var took = asHold({
-              id: marked.id,
-              pay: marked.pay,
-              minutes: typeof marked.billedMinutes === 'number'
-                ? marked.billedMinutes : marked.minutes,
-              miles: marked.miles,
-              cost: marked.cost,
-              // Where this one ENDS, so the next offer can be judged on more
-              // than the clock. See Advice.sameArea: two pickups on the same
-              // block are ordinary, two dropoffs twenty miles apart is the
-              // trap, and only the second is worth refusing over.
-              dropoff: marked.dropoff || null,
-              // ...and whether that destination came off the CARD or off a scan
-              // of the driver's screen. Carried, because it was being dropped
-              // here and the loss was permanent.
-              //
-              // The ⌖ Dropoff button works before the accept as well as after:
-              // an offer card usually prints "Customer dropoff" and no address
-              // — 129 of this driver's 272 cards name no destination at all —
-              // so tapping the address open while SCREENING is the ordinary
-              // way to find out where a job goes before taking it. That path
-              // sets `dropoffScanned` on the card (see the screening branch
-              // above); this object copied `dropoff` and left the flag behind,
-              // so the order went into the car with a scanned address wearing
-              // a card-read label.
-              //
-              // It is not a display detail. recordPairing writes
-              // `scanned: !!held.dropoffScanned` into the append-only journal,
-              // and the header above it says that field IS the difference the
-              // button exists to make — "whether the destination came off the
-              // card or off a scan of the screen after the accept". Every pair
-              // judged against an order screened this way recorded the wrong
-              // answer to the one question it was there to answer, and a
-              // journal row cannot be corrected later.
-              //
-              // Measured against the real server, screening press then accept:
-              // the card reads `dropoffScanned: true` and the held order read
-              // `false`, with the address itself identical.
-              dropoffScanned: !!marked.dropoffScanned,
-              pickup: marked.pickup || null,
-              // ...and the store's door DoorDash's stops card printed under
-              // that name (the parser's `pickupLine`, "<n> <street>, <town>"),
-              // a non-empty string or null: what this server searches the
-              // restaurant by for the GPS drop's guard (pickupAsks), what a
-              // navigation screen's address is refused as the store's by
-              // (Assemble.heldPickup), and what the same-store note reads as
-              // this order's pickup (sameStoreOf). The hold kept the name
-              // alone, and a chain's name is no place.
-              pickupLine: typeof marked.pickupLine === 'string' && marked.pickupLine
-                ? marked.pickupLine : null,
-              // ...and DoorDash's map label for a card that named no dropoff
-              // (`dropoffGuess`, dropoffGuessOf), so the run with two orders
-              // in the car can draw this order's end as "≈ from DoorDash's
-              // map" until a screen gives it one (the owner, 31 Oct). Drawing
-              // only: never `dropoff`, never searched for a pin, never armed.
-              dropoffGuess: !marked.dropoff && marked.dropoffGuess
-                && typeof marked.dropoffGuess.line === 'string' && marked.dropoffGuess.line
-                ? { line: marked.dropoffGuess.line, from: marked.dropoffGuess.from || null } : null,
-              // Whether this reading was one the rig would state a verdict
-              // about. A doubted order in the car makes every pair judged
-              // against it nonsense, and an uncosted one makes the pair's
-              // money gross — and Advice.stack can only apply either rule to
-              // what it is handed. Carried rather than recomputed: rate()
-              // decided both, and a second derivation is a second thing to
-              // drift.
-              doubt: marked.doubt || null,
-              uncosted: !!marked.uncosted,
-              // From when the card was on the screen, not from the press.
-              // The panel keeps "Took?" for the last offer however old it
-              // is, so a mark can be hours late — the driver ticking last
-              // night's job the next morning — and a hold dated from the
-              // press would then stack the morning's first offer onto a
-              // job finished at midnight. Dated from the card, holding()
-              // expires it on the card's own clock, which for a prompt
-              // press is the same moment. THIS card's: a Took from a panel
-              // behind the slot names the card before it (cardArrivedAt).
-              acceptedAt: cardAt,
-              // ...and where the car was when its card came up, with the
-              // card's own size: what live.html's Map view checks this
-              // order's end against. See cardOf.
-              card: cardOf(marked),
-              // The card as the driver took it, and when they pressed: what
-              // recognises it if it comes back under a new id. See
-              // heldOwnCard. Not `dropoff` above, which a ⌖ press rewrites.
-              seenAs: Object.assign(cardSeen(marked, false), { tookAt: tookAt }),
-              // Where each of its ends came from, and when: the assembler's
-              // record (Assemble.cardFields), kept beside `dropoff` and
-              // `dropoffScanned` above, which it keeps in step.
-              fields: Assemble.cardFields(marked, cardAt),
-              // ...and the list's own fields (see MAX_HELD): which app, the
-              // press, the card's deadline. A scanner older than the offer
-              // line's `app` and `deliverBy` leaves them null.
-              app: typeof marked.app === 'string' ? marked.app : null,
-              tookAt: tookAt,
-              deliverBy: typeof marked.deliverBy === 'number' ? marked.deliverBy : null,
-              addOn: false,
-              of: null,
-              // ...and the card as it was offered, for the order's record
-              // when it leaves (offeredOf, orderDraft): the verdict and $/hr
-              // the panel showed, the card's own minutes, its places as
-              // printed and how often it was read. Nothing computes off it.
-              offered: offeredOf(marked)
-            });
-            // ...and, off DoorDash's card with two stores or more, every
-            // store in the card's order with its printed door (storesOf; the
-            // owner, 31 Oct: "the pins for the pickup and drop off could be
-            // captured and mapped"): each door asked for its pin as
-            // `pickupLine` is (pickupAsks), and the run drawn car -> each
-            // store -> the end (heldStoresOf, live.html), with the card's
-            // dropoff shape — how many customers, and the orders under one.
-            // Set only on such an order, so every other hold is the shape it
-            // was, key for key.
-            var tookStores = storesOf(marked);
-            if (tookStores) {
-              took.stores = tookStores;
-              took.dropoffs = countOf(marked.dropoffs, 1);
-              took.dropoffOrders = countOf(marked.dropoffOrders, 1);
-            }
-            // ...and which surface took it, for the offers page's alone.
-            if (offersHolds) took.tookOn = 'offers';
-            keepTookPress(took.id, tookAt);
-            // Placed by placeTook: replacing the order in the car, as the
-            // slot did, with carrying two off; added beside it with it on.
-            var placed = placeTook(took, marked, inCar, tookAt);
-            replacedHold = placed.replaced;
-            putDownPay = placed.putDownPay;
-            if (placed.added) addedHold = took;
-            // ...and the assembler told: its pool of planner pages is retried
-            // against this hold, where everything read before the Took is
-            // about the order before and is refused.
-            Assemble.took(assembly, assemblerHeld(Date.now()));
-            retryPool();
-          } else {
-            // Through holding() as well: taking the mark back off an order the
-            // rest of the rig has already forgotten should not depend on which
-            // of the two ways of asking this line happens to use.
-            var carried = heldOrders(Date.now()).filter(function (h) {
-              return h.id === note.id;
-            });
-            if (carried.length) {
-              setHeld(scanner.held.filter(function (h) { return carried.indexOf(h) === -1; }));
-              // No drop row is written for a Took taken back (it was not
-              // delivered, and AUDITS.md's pin log names it open), but the
-              // order did leave the car, and its record says how. The
-              // offers page's untick is putDown's `offers` instead, below.
-              if (note.via !== 'offers') orderRowsAlone(carried, 'untick', Date.now());
-            }
-          }
-        }
-        // ...and whether there is now an order in the car, because marking is
-        // the ONLY moment the panel can learn it in time to matter.
-        //
-        // The driver accepts on their phone, the card vanishes from the mount,
-        // they press "Took" here - and the destination is on the phone RIGHT
-        // NOW. But the panel only heard about a held order through a reading
-        // (see withStack, which attaches `holding` when `read.ready`), and
-        // there is no reading: the card is gone. So the two buttons that exist
-        // for this exact moment, Drop and the destination scan, stayed hidden
-        // until the NEXT offer card arrived - by which time the phone is
-        // showing that card and not the address.
-        //
-        // Answered off the same question as everywhere else, so a hold the
-        // server has already expired does not put a button back on the panel.
-        //
-        // ...and, beside the yes or no, the order as the stream describes it
-        // (heldForPanel), so Map view has the held end from this moment and
-        // not from the next reading. Until one arrived the page drew the
-        // accepted card's dropoff as that CARD's, and lost it with the card.
-        // The offers page's ✓ taken back (or a pass) on an order in the car is
-        // Drop for that order, `by: 'offers'` (offersTickHolds' header).
-        var offersPutDown = [];
-        if (note.kind === 'mark' && note.via === 'offers'
-            && (note.accepted === null || note.accepted === false)) {
-          offersPutDown = heldOrders(Date.now()).filter(function (h) { return h.id === note.id; });
-          if (offersPutDown.length) putDown(Date.now(), 'offers', function () {}, offersPutDown);
-        }
-        var heldAfter = holding(Date.now());
-        // The replaced order's drop row, the same shape putDown writes, and
-        // the panel told — every panel, through the stream, and this one in
-        // the reply too in case its stream is down. Best-effort like every
-        // annotation: the mark is already on disk and is the driver's fact.
-        // A row for EACH order put down: a trip replaced is every order of it
-        // (placeTook), an add-on's row saying so (asAddOnRow).
-        if (replacedHold && replacedHold.length) {
-          var dropNow = Date.now();
-          var dropRows = replacedHold.map(function (r) {
-            var dropRow = { v: 1, kind: 'drop', at: dropNow, id: r.id,
-                            seq: dropNow, acceptedAt: r.acceptedAt,
-                            by: 'replaced' };
-            // ...with two in the car at the press, as putDown says it.
-            if (carriedAtTook >= 2) dropRow.carried = carriedAtTook;
-            return JSON.stringify(asAddOnRow(withOutcome(dropRow, r), r)) + '\n'
-              // ...and its record (orderRow), ended by this Took.
-              + orderLine(orderRow(r, 'replaced', dropNow, { carried: carriedAtTook }));
+        // ANY order in the car's own card: with two carried, a Took on the
+        // second's card come back is that order too.
+        var inCar = heldOrders(Date.now());
+        carriedAtTook = inCar.length;
+        joinedAtTook = tripJoined(inCar);
+        if (note.accepted && before && marked.heldCard
+            && inCar.some(function (h) { return holdIdOf(h) === marked.heldCard; })) {
+          // the mark is written; the hold stands as it is
+        } else if (note.accepted) {
+          // A second ✓ Took while an order is still held used to replace
+          // it in silence: the first order left the car with no drop row,
+          // and the journal could not say how it ended. With carrying two
+          // off the first is put down — and SAID: a drop row `by:
+          // 'replaced'`, and a note on the panel. With it on, the second is
+          // ADDED, and only a re-offer or a Took past MAX_HELD puts one
+          // down, said the same way (placeTook).
+          var tookAt = Date.now();
+          // When its card came onto the slot — this card's, not the slot's
+          // (cardArrivedAt): see `acceptedAt` below. One no longer kept
+          // came before the card on the slot, so that card's offerAt is the
+          // nearest bound on it, as it was before.
+          // The offers page's tick: when that card arrived, as offersTickHolds
+          // judged it recent by.
+          var cardAt = (offersHolds ? fromOffers.at : null)
+            || cardArrivedAt(marked.id) || scanner.offerAt || tookAt;
+          var took = asHold({
+            id: marked.id,
+            pay: marked.pay,
+            minutes: typeof marked.billedMinutes === 'number'
+              ? marked.billedMinutes : marked.minutes,
+            miles: marked.miles,
+            cost: marked.cost,
+            // Where this one ENDS, so the next offer can be judged on more
+            // than the clock. See Advice.sameArea: two pickups on the same
+            // block are ordinary, two dropoffs twenty miles apart is the
+            // trap, and only the second is worth refusing over.
+            dropoff: marked.dropoff || null,
+            // ...and whether that destination came off the CARD or off a scan
+            // of the driver's screen. Carried, because it was being dropped
+            // here and the loss was permanent.
+            //
+            // The ⌖ Dropoff button works before the accept as well as after:
+            // an offer card usually prints "Customer dropoff" and no address
+            // — 129 of this driver's 272 cards name no destination at all —
+            // so tapping the address open while SCREENING is the ordinary
+            // way to find out where a job goes before taking it. That path
+            // sets `dropoffScanned` on the card (see the screening branch
+            // above); this object copied `dropoff` and left the flag behind,
+            // so the order went into the car with a scanned address wearing
+            // a card-read label.
+            //
+            // It is not a display detail. recordPairing writes
+            // `scanned: !!held.dropoffScanned` into the append-only journal,
+            // and the header above it says that field IS the difference the
+            // button exists to make — "whether the destination came off the
+            // card or off a scan of the screen after the accept". Every pair
+            // judged against an order screened this way recorded the wrong
+            // answer to the one question it was there to answer, and a
+            // journal row cannot be corrected later.
+            //
+            // Measured against the real server, screening press then accept:
+            // the card reads `dropoffScanned: true` and the held order read
+            // `false`, with the address itself identical.
+            dropoffScanned: !!marked.dropoffScanned,
+            pickup: marked.pickup || null,
+            // ...and the store's door DoorDash's stops card printed under
+            // that name (the parser's `pickupLine`, "<n> <street>, <town>"),
+            // a non-empty string or null: what this server searches the
+            // restaurant by for the GPS drop's guard (pickupAsks), what a
+            // navigation screen's address is refused as the store's by
+            // (Assemble.heldPickup), and what the same-store note reads as
+            // this order's pickup (sameStoreOf). The hold kept the name
+            // alone, and a chain's name is no place.
+            pickupLine: typeof marked.pickupLine === 'string' && marked.pickupLine
+              ? marked.pickupLine : null,
+            // ...and DoorDash's map label for a card that named no dropoff
+            // (`dropoffGuess`, dropoffGuessOf), so the run with two orders
+            // in the car can draw this order's end as "≈ from DoorDash's
+            // map" until a screen gives it one (the owner, 31 Oct). Drawing
+            // only: never `dropoff`, never searched for a pin, never armed.
+            dropoffGuess: !marked.dropoff && marked.dropoffGuess
+              && typeof marked.dropoffGuess.line === 'string' && marked.dropoffGuess.line
+              ? { line: marked.dropoffGuess.line, from: marked.dropoffGuess.from || null } : null,
+            // Whether this reading was one the rig would state a verdict
+            // about. A doubted order in the car makes every pair judged
+            // against it nonsense, and an uncosted one makes the pair's
+            // money gross — and Advice.stack can only apply either rule to
+            // what it is handed. Carried rather than recomputed: rate()
+            // decided both, and a second derivation is a second thing to
+            // drift.
+            doubt: marked.doubt || null,
+            uncosted: !!marked.uncosted,
+            // From when the card was on the screen, not from the press.
+            // The panel keeps "Took?" for the last offer however old it
+            // is, so a mark can be hours late — the driver ticking last
+            // night's job the next morning — and a hold dated from the
+            // press would then stack the morning's first offer onto a
+            // job finished at midnight. Dated from the card, holding()
+            // expires it on the card's own clock, which for a prompt
+            // press is the same moment. THIS card's: a Took from a panel
+            // behind the slot names the card before it (cardArrivedAt).
+            acceptedAt: cardAt,
+            // ...and where the car was when its card came up, with the
+            // card's own size: what live.html's Map view checks this
+            // order's end against. See cardOf.
+            card: cardOf(marked),
+            // The card as the driver took it, and when they pressed: what
+            // recognises it if it comes back under a new id. See
+            // heldOwnCard. Not `dropoff` above, which a ⌖ press rewrites.
+            seenAs: Object.assign(cardSeen(marked, false), { tookAt: tookAt }),
+            // Where each of its ends came from, and when: the assembler's
+            // record (Assemble.cardFields), kept beside `dropoff` and
+            // `dropoffScanned` above, which it keeps in step.
+            fields: Assemble.cardFields(marked, cardAt),
+            // ...and the list's own fields (see MAX_HELD): which app, the
+            // press, the card's deadline. A scanner older than the offer
+            // line's `app` and `deliverBy` leaves them null.
+            app: typeof marked.app === 'string' ? marked.app : null,
+            tookAt: tookAt,
+            deliverBy: typeof marked.deliverBy === 'number' ? marked.deliverBy : null,
+            addOn: false,
+            of: null,
+            // ...and the card as it was offered, for the order's record
+            // when it leaves (offeredOf, orderDraft): the verdict and $/hr
+            // the panel showed, the card's own minutes, its places as
+            // printed and how often it was read. Nothing computes off it.
+            offered: offeredOf(marked)
           });
-          appendLines(dropRows.join(''), function (dropErr) {
-            if (dropErr) console.error('journal: could not record a replaced hold: '
-                                       + dropErr.message);
-          });
-          var replacedSaid = { at: dropNow, saidForMs: HELD_REPLACED_SAID_MS };
-          // A Took past MAX_HELD says WHICH order it put down, by its pay.
-          if (putDownPay !== null) replacedSaid.pay = putDownPay;
-          broadcast({ heldReplaced: replacedSaid });
-        }
-        var tookReply = { ok: true, note: note,
-                          replaced: replacedHold && replacedHold.length
-                            ? Object.assign({ at: Date.now(), saidForMs: HELD_REPLACED_SAID_MS },
-                                            putDownPay !== null ? { pay: putDownPay } : {})
-                            : null,
-                          holding: !!heldAfter,
-                          held: heldForPanel(heldAfter) };
-        // With carrying two on: every order, and the one this Took ADDED —
-        // the panel's Undo for it sends the untick this handler already
-        // takes (accepted: null), which puts that order down and no other.
-        // ...and with it in force by a trip (carryingTwo) — joined by this
-        // Took, or before it: the panel's list is then the one in the car,
-        // not the trip this Took replaced.
-        if (carryTwo() || joinedAtTook || carryingTwo(Date.now())) {
-          tookReply.orders = ordersForPanel(Date.now());
-          tookReply.added = addedHold && heldById(holdIdOf(addedHold), Date.now())
-            ? { holdId: holdIdOf(addedHold), id: addedHold.id,
-                pay: numOrNull(addedHold.pay), undoForMs: UNDO_ADDED_MS }
-            : null;
-        }
-        // The offers page is told what its press did to the car: put the order
-        // in it, recorded only (and why), or put it down. And every panel is
-        // told on the stream, as a reading tells it (`holding` with no
-        // `ready`): no panel made this press, so no reply reaches one.
-        if (note.kind === 'mark' && note.via === 'offers') {
-          var nowHeld = heldOrders(Date.now()).filter(function (h) {
+          // ...and, off DoorDash's card with two stores or more, every
+          // store in the card's order with its printed door (storesOf; the
+          // owner, 31 Oct: "the pins for the pickup and drop off could be
+          // captured and mapped"): each door asked for its pin as
+          // `pickupLine` is (pickupAsks), and the run drawn car -> each
+          // store -> the end (heldStoresOf, live.html), with the card's
+          // dropoff shape — how many customers, and the orders under one.
+          // Set only on such an order, so every other hold is the shape it
+          // was, key for key.
+          var tookStores = storesOf(marked);
+          if (tookStores) {
+            took.stores = tookStores;
+            took.dropoffs = countOf(marked.dropoffs, 1);
+            took.dropoffOrders = countOf(marked.dropoffOrders, 1);
+          }
+          // ...and which surface took it, for the offers page's alone.
+          if (offersHolds) took.tookOn = 'offers';
+          keepTookPress(took.id, tookAt);
+          // Placed by placeTook: replacing the order in the car, as the
+          // slot did, with carrying two off; added beside it with it on.
+          var placed = placeTook(took, marked, inCar, tookAt);
+          replacedHold = placed.replaced;
+          putDownPay = placed.putDownPay;
+          if (placed.added) addedHold = took;
+          // ...and the assembler told: its pool of planner pages is retried
+          // against this hold, where everything read before the Took is
+          // about the order before and is refused.
+          Assemble.took(assembly, assemblerHeld(Date.now()));
+          retryPool();
+        } else {
+          // Through holding() as well: taking the mark back off an order the
+          // rest of the rig has already forgotten should not depend on which
+          // of the two ways of asking this line happens to use.
+          var carried = heldOrders(Date.now()).filter(function (h) {
             return h.id === note.id;
-          })[0] || null;
-          tookReply.car = offersHolds ? { held: !!nowHeld, holdId: holdIdOf(nowHeld) }
-            : offersPutDown.length ? { putDown: true }
-            : fromOffers ? { held: false, why: fromOffers.why }
-            : null;
-          if (offersHolds || offersPutDown.length) {
-            var carSaid = { holding: heldForPanel(heldAfter), heldBy: 'offers' };
-            if (carryingTwo(Date.now())) carSaid.orders = ordersForPanel(Date.now());
-            broadcast(carSaid);
+          });
+          if (carried.length) {
+            setHeld(scanner.held.filter(function (h) { return carried.indexOf(h) === -1; }));
+            // No drop row is written for a Took taken back (it was not
+            // delivered, and AUDITS.md's pin log names it open), but the
+            // order did leave the car, and its record says how. The
+            // offers page's untick is putDown's `offers` instead, below.
+            if (note.via !== 'offers') orderRowsAlone(carried, 'untick', Date.now());
           }
         }
-        sendJson(res, 200, tookReply);
+      }
+      // ...and whether there is now an order in the car, because marking is
+      // the ONLY moment the panel can learn it in time to matter.
+      //
+      // The driver accepts on their phone, the card vanishes from the mount,
+      // they press "Took" here - and the destination is on the phone RIGHT
+      // NOW. But the panel only heard about a held order through a reading
+      // (see withStack, which attaches `holding` when `read.ready`), and
+      // there is no reading: the card is gone. So the two buttons that exist
+      // for this exact moment, Drop and the destination scan, stayed hidden
+      // until the NEXT offer card arrived - by which time the phone is
+      // showing that card and not the address.
+      //
+      // Answered off the same question as everywhere else, so a hold the
+      // server has already expired does not put a button back on the panel.
+      //
+      // ...and, beside the yes or no, the order as the stream describes it
+      // (heldForPanel), so Map view has the held end from this moment and
+      // not from the next reading. Until one arrived the page drew the
+      // accepted card's dropoff as that CARD's, and lost it with the card.
+      // The offers page's ✓ taken back (or a pass) on an order in the car is
+      // Drop for that order, `by: 'offers'` (offersTickHolds' header).
+      var offersPutDown = [];
+      if (note.kind === 'mark' && note.via === 'offers'
+          && (note.accepted === null || note.accepted === false)) {
+        offersPutDown = heldOrders(Date.now()).filter(function (h) { return h.id === note.id; });
+        if (offersPutDown.length) putDown(Date.now(), 'offers', function () {}, offersPutDown);
+      }
+      var heldAfter = holding(Date.now());
+      // The replaced order's drop row, the same shape putDown writes, and
+      // the panel told — every panel, through the stream, and this one in
+      // the reply too in case its stream is down. Best-effort like every
+      // annotation: the mark is already on disk and is the driver's fact.
+      // A row for EACH order put down: a trip replaced is every order of it
+      // (placeTook), an add-on's row saying so (asAddOnRow).
+      if (replacedHold && replacedHold.length) {
+        var dropNow = Date.now();
+        var dropRows = replacedHold.map(function (r) {
+          var dropRow = { v: 1, kind: 'drop', at: dropNow, id: r.id,
+                          seq: dropNow, acceptedAt: r.acceptedAt,
+                          by: 'replaced' };
+          // ...with two in the car at the press, as putDown says it.
+          if (carriedAtTook >= 2) dropRow.carried = carriedAtTook;
+          return JSON.stringify(asAddOnRow(withOutcome(dropRow, r), r)) + '\n'
+            // ...and its record (orderRow), ended by this Took.
+            + orderLine(orderRow(r, 'replaced', dropNow, { carried: carriedAtTook }));
+        });
+        appendLines(dropRows.join(''), function (dropErr) {
+          if (dropErr) console.error('journal: could not record a replaced hold: '
+                                     + dropErr.message);
+        });
+        var replacedSaid = { at: dropNow, saidForMs: HELD_REPLACED_SAID_MS };
+        // A Took past MAX_HELD says WHICH order it put down, by its pay.
+        if (putDownPay !== null) replacedSaid.pay = putDownPay;
+        broadcast({ heldReplaced: replacedSaid });
+      }
+      var tookReply = { ok: true, note: note,
+                        replaced: replacedHold && replacedHold.length
+                          ? Object.assign({ at: Date.now(), saidForMs: HELD_REPLACED_SAID_MS },
+                                          putDownPay !== null ? { pay: putDownPay } : {})
+                          : null,
+                        holding: !!heldAfter,
+                        held: heldForPanel(heldAfter) };
+      // With carrying two on: every order, and the one this Took ADDED —
+      // the panel's Undo for it sends the untick this handler already
+      // takes (accepted: null), which puts that order down and no other.
+      // ...and with it in force by a trip (carryingTwo) — joined by this
+      // Took, or before it: the panel's list is then the one in the car,
+      // not the trip this Took replaced.
+      if (carryTwo() || joinedAtTook || carryingTwo(Date.now())) {
+        tookReply.orders = ordersForPanel(Date.now());
+        tookReply.added = addedHold && heldById(holdIdOf(addedHold), Date.now())
+          ? { holdId: holdIdOf(addedHold), id: addedHold.id,
+              pay: numOrNull(addedHold.pay), undoForMs: UNDO_ADDED_MS }
+          : null;
+      }
+      // The offers page is told what its press did to the car: put the order
+      // in it, recorded only (and why), or put it down. And every panel is
+      // told on the stream, as a reading tells it (`holding` with no
+      // `ready`): no panel made this press, so no reply reaches one.
+      if (note.kind === 'mark' && note.via === 'offers') {
+        var nowHeld = heldOrders(Date.now()).filter(function (h) {
+          return h.id === note.id;
+        })[0] || null;
+        tookReply.car = offersHolds ? { held: !!nowHeld, holdId: holdIdOf(nowHeld) }
+          : offersPutDown.length ? { putDown: true }
+          : fromOffers ? { held: false, why: fromOffers.why }
+          : null;
+        if (offersHolds || offersPutDown.length) {
+          var carSaid = { holding: heldForPanel(heldAfter), heldBy: 'offers' };
+          if (carryingTwo(Date.now())) carSaid.orders = ordersForPanel(Date.now());
+          broadcast(carSaid);
+        }
+      }
+      sendJson(res, 200, tookReply);
+    });
+  });
+}
+
+/* The journal's doors, every one of which answers off the rows readJournal
+ * gives: the sync's three (ingest, notes, newest) and the pages' five (the
+ * journal and its CSV, the Trends tab, today's line, the shift).
+ *
+ * route() asks it from two places, and the two are not one by accident. The
+ * sync's doors are asked by the raw path, ingest a POST, ahead of the gate
+ * that refuses every method but GET and HEAD; the pages' are asked after it,
+ * by the path decoded, so /api/%6Aournal is the journal and
+ * /api/journal/%6Eewest is no door at all. Folding them into one call would
+ * move one set across that gate or that decode. `p` is whichever path the
+ * caller asked by. */
+function journalRoute(req, res, p) {
+  // Rows arriving from a scanner that is not this machine.
+  //
+  // The rig lives in a car behind cellular NAT, so nothing here can reach it —
+  // it has to push, and it pushes to whatever host is running this file with
+  // SCANNER=0 and JOURNAL pointed at the copy. That copy is the reason this
+  // exists: the journal is the one irreplaceable thing the rig produces, 5.7MB
+  // a week of driving (rpi/journal.py's WEEK_BYTES, where that is measured),
+  // and until now there was exactly one of it, on an SD card, in a car.
+  //
+  // Idempotent on purpose, and that is the whole design. Every row can say what
+  // makes it itself (see syncKey), so the same batch can arrive twice — or ten
+  // times — and only what this file has never seen gets appended. That removes
+  // the bookkeeping that normally breaks a sync: there is no stored offset to
+  // drift out of step, no resume logic, nothing to repair after a connection
+  // drops mid-upload. The sender can be crude and still be correct.
+  //
+  // Deliberately unauthenticated by default, because the deployment this was
+  // written for keeps the whole machine behind a VPN. SYNC_TOKEN turns on a
+  // check if that ever stops being true; unset, this costs one comparison.
+  if (req.method === 'POST' && p === '/api/journal/ingest') {
+    if (SYNC_TOKEN && req.headers['x-sync-token'] !== SYNC_TOKEN) {
+      return sendJson(res, 403, { ok: false, error: 'bad token' });
+    }
+    return readBody(req, MAX_SYNC_BODY, function (err, text) {
+      // Held from here, not from readJournal: the body is already in hand by
+      // now, so the lock covers the read-modify-write and nothing slower.
+      // Every path out of the handler below goes through `fail` or `finish`,
+      // and both release.
+      ingestLock(function (release) {
+      var fail = function (why, code) {
+        release();
+        sendJson(res, code || 400, { ok: false, error: why });
+      };
+      var finish = function (body) {
+        release();
+        send(res, 200, body,
+             { 'Content-Type': 'application/json; charset=utf-8' });
+      };
+      if (err) return fail(err.message);
+      readJournal(function (existing, readErr) {
+        // Without the rows already here there is no de-duplication, and
+        // appending anyway turns every re-send into a copy. Refusing is the
+        // only honest answer: the sender retries, and nothing is lost.
+        if (!existing) {
+          return fail('cannot read the journal to merge into it ('
+                      + (readErr && readErr.code || 'unknown') + ')', 500);
+        }
+        var seen = {};
+        existing.forEach(function (r) {
+          var k = syncKey(r);
+          if (k) seen[k] = true;
+        });
+        var fresh = [];
+        var malformed = 0;
+        text.split('\n').forEach(function (line) {
+          line = line.trim();
+          if (!line) return;
+          var row;
+          try { row = JSON.parse(line); } catch (e) { malformed++; return; }
+          var key = syncKey(row);
+          // Nothing that can be sent twice without being recognised can be
+          // stored, because there would be no way to avoid writing it again on
+          // the next upload.
+          if (!key) { malformed++; return; }
+          if (seen[key]) return;
+          seen[key] = true;
+          fresh.push(JSON.stringify(row));
+        });
+        if (!fresh.length) {
+          return finish(JSON.stringify({ ok: true, added: 0,
+                                         malformed: malformed,
+                                         have: existing.length }));
+        }
+        // Appended, like the scanner does it: O_APPEND, one write, so a reader
+        // part way through never sees half a row.
+        //
+        // The directory is made first, because the commonest way this fails is
+        // that nobody made it. JOURNAL is usually pointed somewhere outside the
+        // checkout — /var/lib/uberscan is the obvious choice — and setting the
+        // variable is the memorable half of that; mkdir is the half that gets
+        // forgotten, and the rig then gets HTTP 500 with the reason sitting in
+        // a log it cannot see.
+        withDirectory(JOURNAL_PATH, function (dirErr) {
+          if (dirErr) {
+            console.error('journal ingest: ' + dirErr.message);
+            return fail('could not create ' + path.dirname(JOURNAL_PATH)
+                        + ' (' + dirErr.code + ')', 500);
+          }
+          appendLines(fresh.join('\n') + '\n', function (writeErr) {
+          if (writeErr) {
+            console.error('journal ingest: ' + writeErr.message);
+            // The errno, because 'could not append' is not something anyone can
+            // act on and this is the only message that reaches the machine that
+            // needs to act. ENOENT is a directory nobody made; EACCES is a
+            // process that cannot write where it was pointed.
+            return fail('could not append (' + writeErr.code + ')', 500);
+          }
+          console.log('journal ingest: +' + fresh.length + ' row(s), '
+                      + (existing.length + fresh.length) + ' total');
+          finish(JSON.stringify({ ok: true, added: fresh.length,
+                                  malformed: malformed,
+                                  have: existing.length + fresh.length }));
+          });
+        });
+      }, failedRequest(req, res, release));
       });
     });
   }
+
+  // What the far end already has, so a sender knows where to start. Cheap
+  // enough to call every few minutes and the only thing the rig needs to ask.
+  // The driver's own tags, verbatim, for the rig to pull back from the copy.
+  //
+  // The sync ran one way. A tick made on the copy at home — the likelier
+  // place to review a week, on a monitor rather than an 800x480 panel — was
+  // written to the copy's journal and stayed there: the rig's offers page
+  // showed that week untagged and its advice ran without the ticks, and
+  // advise() says itself that tagging a handful of trips is worth more than
+  // another shift of scanning. This is the other direction. Raw rows, not
+  // the folded view /api/journal gives, because what is being copied is the
+  // record of what the driver did, and the rig folds it itself. Unauthenticated
+  // like /api/journal/newest: the same VPN, the same driver's own data.
+  if (req.method === 'GET' && p === '/api/journal/notes') {
+    var sinceNotes = clampNumber((url.parse(req.url, true).query || {}).since,
+                                 0, CLOCK_BELIEVABLE_UNTIL, 0);
+    return readJournal(function (rows, readErr) {
+      if (!rows) {
+        return sendJson(res, 200, {
+          ok: false, readable: false,
+          error: 'cannot read the journal (' + (readErr && readErr.code || 'unknown') + ')'
+        });
+      }
+      // The driver's tags, and the offers the driver made — typed on the
+      // keypad or read by the phone's own scanner — which are rows nothing
+      // but a browser wrote and so exist only where that browser was pointed.
+      // Made on the copy at home, they would otherwise stay there like a mark
+      // did.
+      var notes = rows.filter(function (r) {
+        return r && (r.kind === 'mark' || r.kind === 'rule'
+                     || r.typed === true || r.browser === true)
+          && (r.at || 0) >= sinceNotes;
+      });
+      sendJson(res, 200, { ok: true, notes: notes });
+    }, failedRequest(req, res));
+  }
+
+  if (req.method === 'GET' && p === '/api/journal/newest') {
+    return readJournal(function (rows, readErr) {
+      // Answering 0 here is not a small error: the sender treats it as "the
+      // far end has nothing", falls back to a thirty-day floor and re-sends a
+      // month of offers, every ten minutes, for as long as the fault lasts.
+      //
+      // But not a 500 either, because this endpoint is also how the sender
+      // works out what the far end can do — whether it understands `mkdir`,
+      // whether it is an old build at all — and a rig told nothing about a
+      // reachable machine goes on to blame it for being out of date. So it
+      // answers, says it cannot read, and simply does not offer a number.
+      if (!rows) {
+        return sendJson(res, 200, {
+          ok: false, readable: false,
+          error: 'cannot read the journal (' + (readErr && readErr.code || 'unknown') + ')',
+          can: SYNC_CAN
+        });
+      }
+      // The newest *offer*, not the newest row.
+      //
+      // The sender resumes from an hour before this, so whatever it means has
+      // to be "how far through the offers I am". Every row counted equally,
+      // and the driver's own tags are rows: ticking "I took this" on the copy
+      // machine stamped a row with the current time, the rig then resumed from
+      // an hour before *that*, and every offer older than an hour that had not
+      // yet been sent was skipped — permanently, because nothing ever looks
+      // further back. Tagging one offer here could quietly cost a day of them.
+      // ...and the same count over a window the sender names, which is what
+      // makes the reconciliation below an apples-to-apples one.
+      //
+      // The sender only ever ships the last `--days`, so the offers it holds
+      // from before that window are not a gap and must not be counted as one.
+      // It windows its own side; if this side answers with an all-time total,
+      // the comparison is a windowed count against an unwindowed one and the
+      // shortfall can never be seen. `since` is the sender's window, anchored
+      // to this copy's own newest row so both edges are the same instant.
+      var since = Number((url.parse(req.url, true).query || {}).since);
+      var wantWindow = isFinite(since) && since > 0;
+      // Worked out once per request rather than per row: it is a fact about
+      // this machine's clock, not about the row, and asking Date.now() forty
+      // thousand times inside a fold would also let the ceiling drift while
+      // the fold is running.
+      var ceiling = futureCeiling();
+      var newest = 0, offers = 0, offersSince = 0;
+      rows.forEach(function (r) {
+        if (r.kind) return;                       // a tag, not an offer
+        offers++;
+        /* A moment that never happened is not a position in the offers.
+         *
+         * This line compared `(r.at || 0)` and then assigned the RAW `r.at`,
+         * with no ceiling at either end. One row stamped 1e20 — a phone with a
+         * wrong clock, and journal-client.js takes `at` from the phone's own
+         * Date.now() — made this answer `newest: 1e20`. sync.py sets
+         * `floor = newest - 1h` from that, rows_since then keeps only rows
+         * below CLOCK_BELIEVABLE_AFTER, and every real offer from that moment
+         * on is skipped. For ever: nothing ever looks further back.
+         *
+         * And it is silent at every step. The shortfall check cannot see it —
+         * its own window is anchored to the same poisoned `newest`, so both
+         * sides count the one bad row and agree. The run exits 0, says
+         * "nothing new" (suppressed by --quiet in the installed unit) and
+         * refreshes the .synced stamp, so doctor.py reports a backup made
+         * minutes ago. The only copy of the one file that cannot be
+         * regenerated stops growing while both ends report success.
+         *
+         * Sanitised once and used for both answers, because a row that is not
+         * a moment is not inside the sender's window either — and counting it
+         * there would be the same disagreement one line down. Erring this way
+         * makes the far end look short and the sender re-send, which is the
+         * safe direction; the other way round is the one that loses rows. */
+        var at = (typeof r.at === 'number' && isFinite(r.at)
+                  && r.at <= ceiling) ? r.at : 0;
+        if (wantWindow && at >= since) offersSince++;
+        if (at > newest) newest = at;
+      });
+      // What this build can do, so the sender can tell "I am misconfigured"
+      // from "the far end is old" without a human having to compare error
+      // strings. A rig spent two rounds on that: the copy machine had not been
+      // updated, the only symptom was an error message missing a detail the new
+      // build adds, and nothing said so.
+      sendJson(res, 200, { ok: true, newest: newest, have: rows.length,
+                           // So the sender can notice it holds more
+                           // than this copy does and repair the gap
+                           // itself, rather than needing somebody to
+                           // think of running --all.
+                           offers: offers,
+                           // ...counted over the window the sender
+                           // asked about, when it asked. Absent
+                           // when it did not, and absent from older
+                           // builds, which is how the sender knows
+                           // to fall back to the whole-file
+                           // comparison rather than reading a
+                           // missing key as a copy holding nothing.
+                           offersSince: wantWindow ? offersSince : undefined,
+                           can: SYNC_CAN });
+    }, failedRequest(req, res));
+  }
+
+  // Everything the scanner has kept. The file itself is inside rpi/, which the
+  // static handler refuses to serve, and it stays that way — this returns the
+  // rows and nothing else, so the path is never taken from the request.
+  if (p === '/api/journal' || p === '/api/journal.csv') {
+    var q = url.parse(req.url, true).query || {};
+    var days = clampNumber(q.days, 0, 3650, 30);
+    var limit = clampNumber(q.limit, 0, 20000, 5000);
+    // The page can name an exact start instead of a span. It has to, for
+    // "today": a trailing 24 hours folds last night's shift into this morning's
+    // figures, and only the browser knows where the driver is and therefore
+    // when their day began.
+    var since = clampNumber(q.since, 0, CLOCK_BELIEVABLE_UNTIL, 0);
+    // ...and an end, for a reader that must page past `limit` (the places
+    // report, the reporting review's R2): only the offers LISTED stop before
+    // `until`; the window, its takes, records and every figure over it are
+    // the same as without it, so a second page is only older offers.
+    var until = clampNumber(q.until, 0, CLOCK_BELIEVABLE_UNTIL, 0);
+    var withHidden = q.hidden === '1';
+    return readJournal(function (rows, readErr, torn) {
+      // This one may degrade — a driver looking at the offers page is better
+      // served by the page than by a 500 — but not silently. An empty history
+      // and an unreadable one look identical otherwise, and the second is the
+      // one worth acting on.
+      var unreadable = rows ? null : (readErr && readErr.code || 'unknown');
+      rows = rows || [];
+      /* The window, worked out before the fold rather than after it.
+         It was computed forty lines below and used only to filter the fold's
+         OUTPUT, so a request for today folded the whole year and then threw
+         nearly all of it away. The figure is identical either way — rowsFor
+         keeps every row that can change an answer inside the window — but the
+         work is now proportional to the window the driver asked for. */
+      var floor = since || (days > 0 ? Date.now() - days * 86400000 : 0);
+      var offers = latestPerOffer(rows, floor);
+      // Both taken off the array before anything filters it. `filter` returns a
+      // new array and these ride on the old one as properties, so a line moved
+      // below the first filter would quietly become an empty list — which reads
+      // on the page as a shift where the rig was never asked, rather than as a
+      // reader that dropped them.
+      var seen = offers.seen || [];
+      var pairs = offers.pairs || [];
+      // The window first, then the count of what is hidden inside it.
+      //
+      // Counting before the filter meant the page said "3 offers are hidden and
+      // left out of everything here" while looking at today, where "here" is
+      // the window and the 3 were every hidden offer the journal has ever held.
+      // A number that does not describe what is on screen is worse than no
+      // number, because it is the one a driver checks their arithmetic against.
+      // Rows stamped before the rig had a clock, taken out of EVERY window and
+      // counted, rather than out of three windows and left in the fourth.
+      //
+      // A Pi has no real-time clock. It boots in 1970 and jumps when NTP
+      // arrives, and anything it read before then is on disk with a date in
+      // 1970. Those rows fell outside Today, 7 days and 30 days without a word
+      // said — and on All, where `floor` is zero, they came BACK: a phantom
+      // day headed "Thu, Jan 1" at the far end of the list, its offers counted
+      // in every figure on the page under a date nobody drove. shiftSummary
+      // already counts these for the driving screen; this is the same rule for
+      // the same rows, and the page says how many there are.
+      //
+      // Hidden ones are not counted, because shiftSummary does not count them
+      // either, and the two pages printed different figures for the same
+      // file: 2 here, 1 on the driving screen, over one hidden test card read
+      // before NTP arrived. windowOffers is that one rule now, for both.
+      var win = windowOffers(offers, floor);
+      var beforeClock = win.beforeClock;
+      var hidden = win.hidden;
+      offers = win.kept;
+      // Hidden rows are still on disk — nothing here deletes — but they are out
+      // of every figure and every export unless asked for by name. The test card
+      // a driver presents to check the rig is not an offer they were made, and
+      // leaving it in quietly drags the median toward whatever that card says.
+      if (!withHidden) offers = shownOffers(offers);
+      // The whole window, before the cap: the per-mile tables and the orders
+      // taken describe every offer in it, not the newest `limit` of them, and
+      // an order whose card fell under the cap was missing from `taken`.
+      var windowed = offers;
+      if (until) offers = offers.filter(function (r) { return (r.at || 0) < until; });
+      // How many there really are in this window, kept before the cap. Without
+      // it the page cannot tell a window of 5000 offers from a window of
+      // 60000 truncated to 5000 — and it was labelling the second one "All",
+      // computing the median and the $/hr ladder over an unannounced subset.
+      var total = offers.length;
+      if (limit && offers.length > limit) offers = offers.slice(-limit);
+      if (p === '/api/journal.csv') {
+        // A journal that could not be READ is refused here rather than
+        // downloaded as an empty spreadsheet.
+        //
+        // The branch above it exists for exactly this — "an empty history and
+        // an unreadable one look identical otherwise, and the second is the
+        // one worth acting on" — and the JSON reply carries `unreadable`,
+        // `torn` and `truncated` further down so the offers page can say all
+        // three. This branch returned before any of them, and toCsv([]) is a
+        // header line and nothing else: 200 OK, Content-Disposition,
+        // `uber-scan-offers.csv`, no rows. Indistinguishable from a quiet
+        // week, on the one artefact a driver saves and a backup script
+        // collects. README.md calls this "a CSV of everything".
+        //
+        // The state is not hypothetical: readJournal's own comment records a
+        // server running as a user that could append to the journal and not
+        // read it.
+        if (unreadable) {
+          return send(res, 503, 'the journal could not be read (' + unreadable
+                      + ')\n', { 'Content-Type': 'text/plain; charset=utf-8' });
+        }
+        // Lines that WERE written and are now unreadable, and rows the cap
+        // dropped. Neither can be a row in the file — a spreadsheet with an
+        // extra row in it is a spreadsheet with a wrong total — so they go in
+        // the headers, where curl -i and every HTTP client can see them and
+        // nothing that parses the CSV has to change.
+        var head = {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': 'attachment; filename="uber-scan-offers.csv"'
+        };
+        if (torn) head['X-Uber-Scan-Torn'] = String(torn);
+        if (total > offers.length) {
+          head['X-Uber-Scan-Truncated'] = offers.length + ' of ' + total;
+        }
+        // Gzipped for a browser off this machine that takes it (gzipFor):
+        // 8.6 MB of CSV for an invented 12,000-offer record is 1.1 MB at
+        // level 1, 38 ms of CPU on the container the suites run on.
+        return sendGzipped(req, res, 200, toCsv(offers), head, 1);
+      }
+      // What the rig watched go past, over the same window. Summed here rather
+      // than shipped row by row: there is one of these every couple of minutes
+      // of scanning and the page wants the total, not the series.
+      var watched = { saw: 0, kept: 0 };
+      seen.forEach(function (r) {
+        // The same clock rule as the offers, or on All — where `floor` is
+        // zero — the cards tallied before NTP set the clock were counted as
+        // watched while every offer from that stretch was set aside, and the
+        // fraction recorded read lower than it was.
+        if ((r.at || 0) < CLOCK_BELIEVABLE_AFTER) return;
+        if (floor && (r.at || 0) < floor) return;
+        watched.saw += r.saw || 0;
+        watched.kept += r.kept || 0;
+      });
+      // Row by row, unlike `seen`, and not capped by `limit`.
+      //
+      // There is one of these per offer read with a job already in the car —
+      // a handful in a shift, not the thousands the offer log holds — and each
+      // one is a decision the driver may want to check against what happened.
+      // A total would answer none of the questions worth asking of them.
+      //
+      // Newest first, because a shift is read from its end: the pairing a
+      // driver wants is nearly always the one they just made.
+      var taken = takenRuns(rows, floor, windowed);
+      // ...and each order's own record, for the offers page's "Order record"
+      // under its offer row and its CSV (orderRecords).
+      var records = orderRecords(rows, floor);
+      var window = pairs.filter(function (r) { return !floor || (r.at || 0) >= floor; })
+                        .sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
+      // Gzipped at level 1 for a browser off this machine (gzipFor), as
+      // /api/trends is: 4.7 MB for 30 days of an invented 12,000-offer
+      // record is 0.58 MB, 19 ms of CPU (11.3 MB for All: 1.37 MB, 43 ms).
+      sendGzipped(req, res, 200, JSON.stringify({ count: offers.length, total: total,
+                                      truncated: total > offers.length,
+                                      days: days, hidden: hidden,
+                                      watched: watched,
+                                      // Null unless the journal is there and
+                                      // could not be read, in which case the
+                                      // emptiness below is not a record of a
+                                      // quiet week.
+                                      unreadable: unreadable,
+                                      // Not a window figure: these rows have
+                                      // no date, so they are in no window,
+                                      // and the count is the same whichever
+                                      // range is asked for.
+                                      beforeClock: beforeClock,
+                                      // Lines in the file that would not parse
+                                      // at all. Different from `unreadable`,
+                                      // which is the whole file being
+                                      // unavailable: these are rows that were
+                                      // written and are now gone, and they
+                                      // cannot be got back. Reported for the
+                                      // same reason `beforeClock` is — a row
+                                      // missing from every figure with nothing
+                                      // saying so is the one failure this
+                                      // project keeps writing sections about.
+                                      torn: torn || 0,
+                                      pairs: window,
+                                      // What each order taken in the window
+                                      // really took, and the restaurants'
+                                      // waits (takenRuns, storeWaitsOut).
+                                      taken: taken,
+                                      // The order rows themselves, newest
+                                      // per order (orderRecords): the same
+                                      // rows this journal holds, through
+                                      // the same door and nothing else.
+                                      records: records,
+                                      waits: storeWaitsOut(),
+                                      // What $/mi to accept, read off the
+                                      // window: four descriptions, no rule
+                                      // (perMileSeen and its neighbours).
+                                      perMileSeen: perMileSeen(windowed),
+                                      cardVsReal: cardVsReal(taken),
+                                      realByPerMile: realByPerMile(taken),
+                                      refigured: refigured(windowed, taken),
+                                      // What to aim for: $/hr and $/mi by
+                                      // time of day, the replay's line, the
+                                      // towns (targetsOut). Over the offers
+                                      // listed, as the page's own replay is.
+                                      targets: targetsOut(offers, taken),
+                                      // The rig's "keepPlaces" as the
+                                      // scanner last said it (null where it
+                                      // has not: the copy at home), for the
+                                      // every-offer CSV, which leaves its
+                                      // GPS and place columns empty while it
+                                      // is off (trends.js offersCsv). A
+                                      // setting, not a place.
+                                      keepPlaces: typeof scanner.keepPlaces === 'boolean'
+                                        ? scanner.keepPlaces : null,
+                                      offers: offers }),
+                  { 'Content-Type': 'application/json; charset=utf-8' }, 1);
+    }, failedRequest(req, res));
+  }
+
+  // The offers page's Trends tab (trends.js; the owner, Nov 2026): every offer
+  // in the window as a few short columns, and the runs of scanning. See
+  // trendsOut for what is sent and why the cap is not applied.
+  if (p === '/api/trends') {
+    // Asked here rather than in lite/lite.js's list of shut doors, which
+    // another round was changing when this landed; the answer is lite's own
+    // shape (404, `lite: true`), so the page hides the tab exactly as it
+    // would on a door that list shut. Moving it into that list is one line.
+    if (LITE) {
+      return sendJson(res, 404, { ok: false, lite: true,
+                                  error: 'trends: not part of the lite edition' });
+    }
+    var tq2 = url.parse(req.url, true).query || {};
+    var tdays = clampNumber(tq2.days, 0, 3650, 30);
+    var tsince = clampNumber(tq2.since, 0, CLOCK_BELIEVABLE_UNTIL, 0);
+    return readJournal(function (rows, readErr) {
+      if (!rows) {
+        return sendJson(res, 503, { ok: false, unreadable: readErr && readErr.code || 'unknown' });
+      }
+      var tfloor = tsince || (tdays > 0 ? Date.now() - tdays * 86400000 : 0);
+      var tbody = JSON.stringify(trendsOut(rows, tfloor, tdays));
+      // Gzipped where the browser says it can take it (the reporting
+      // review's T9): the answer is seven columns of digits, 1.3 MB for a 3x
+      // record, and the phone on the rig's Wi-Fi or a VPN waited on it.
+      // Level 1: the columns compress about fivefold at the fastest level,
+      // and the Pi's CPU is the scarcer thing (lite never reaches here). Not
+      // for the Pi's own browser since the server review (gzipFor).
+      sendGzipped(req, res, 200, tbody, { 'Content-Type': 'application/json; charset=utf-8',
+                                          'Cache-Control': 'no-store' }, 1);
+    }, failedRequest(req, res));
+  }
+
+  // What the shift adds up to so far, for the one line of it the driving screen
+  // shows. The offers page works this out for itself from the rows it already
+  // has; the driving screen has no rows and must not grow a second copy of the
+  // rule for deciding which ones count, so the arithmetic happens here.
+  if (p === '/api/today') {
+    var tq = url.parse(req.url, true).query || {};
+    var sinceMs = parseInt(tq.since, 10);
+    // Required, and required to be believable. /api/journal can afford
+    // clampNumber's zero fallback because `days` independently defaults to 30;
+    // alone, a zero floor means the entire journal, which the caller would then
+    // put on a panel under the word "today". A window this endpoint cannot
+    // believe is an error, never a silent all-time figure.
+    //
+    // The browser names it, for the reason /api/journal takes it from the
+    // browser too: only the page knows where the driver is, and therefore when
+    // their day began. 4am, in their timezone, is journal.html's boundary and
+    // the one the page sends.
+    if (!isFinite(sinceMs) || sinceMs < CLOCK_BELIEVABLE_AFTER
+        || sinceMs > CLOCK_BELIEVABLE_UNTIL) {
+      return sendJson(res, 400, {
+        ok: false,
+        error: 'since must be an epoch-ms moment in this century'
+      });
+    }
+    return todaySummary(sinceMs, function (answer) {
+      sendJson(res, 200, answer);
+    }, failedRequest(req, res));
+  }
+
+  // Today's shift as the end-of-shift report has it, for shift.html: see
+  // shiftReported. Read-only, as the page is.
+  if (p === '/api/shift') {
+    var sq = url.parse(req.url, true).query || {};
+    var sday = typeof sq.day === 'string' && sq.day ? sq.day : driverDay(Date.now());
+    if (!/^\d{4}-\d\d-\d\d$/.test(sday)) {
+      return sendJson(res, 400, { ok: false, error: 'day must be YYYY-MM-DD' });
+    }
+    return shiftReported(sday, function (code, answer) {
+      sendJson(res, code, answer, { 'Cache-Control': 'no-store' });
+    });
+  }
+}
+
+function route(req, res) {
+  // The path as asked, worked out once for every door below that is asked
+  // by it; the GET doors after the gate ask the decoded `pathname`.
+  var p = req.url.split('?')[0];
+  // Noting what happened to an offer, which ones were taken and which to
+  // hide: see markRoute.
+  if (req.method === 'POST' && p === '/api/offers/mark') return markRoute(req, res);
 
   /* Put the order down. The driver has dropped it off and the next offer is a
    * standalone job again.
@@ -14468,7 +15020,7 @@ function route(req, res) {
    * It answers the same either way. Pressing "delivered" with nothing in the
    * car is not an error a driver needs told about; it is the state they wanted,
    * and there is no offer to name, so nothing is written. */
-  if (req.method === 'POST' && req.url.split('?')[0] === '/api/delivered') {
+  if (req.method === 'POST' && p === '/api/delivered') {
     // holding(), not the raw slot: "there was an order to put down" has to mean
     // the same thing here as it does on the panel, or the driver is told they
     // put down a job the rig stopped counting an hour ago.
@@ -14569,7 +15121,7 @@ function route(req, res) {
    * could not be written, the Undo still open. Answered as Drop is, with the
    * order in the car (`holding`, `held`, and `orders` with two), and every
    * panel told on the stream, `heldBy: 'undo'`. */
-  if (req.method === 'POST' && req.url.split('?')[0] === '/api/drop-undo') {
+  if (req.method === 'POST' && p === '/api/drop-undo') {
     return readJsonBody(req, function (err, body) {
       var now = Date.now();
       var u = dropUndo;
@@ -14608,7 +15160,7 @@ function route(req, res) {
    * and said on the stream as any filed address is. Refused, filing nothing,
    * when the chooser it names has closed (CHOOSER_MS) or been replaced, or the
    * row is not one of its own. 'neither' files nothing and closes it. */
-  if (req.method === 'POST' && req.url.split('?')[0] === '/api/choose') {
+  if (req.method === 'POST' && p === '/api/choose') {
     return readJsonBody(req, function (err, body) {
       var now = Date.now();
       var c = choosing;
@@ -14656,7 +15208,7 @@ function route(req, res) {
    * in the answer's name by MV.hasDoor). Anything else is refused with a
    * reason and changes nothing: a pin for a previous order, a street, a town.
    * See gpsArrival for what the pin is used for. */
-  if (req.method === 'POST' && req.url.split('?')[0] === '/api/held-end') {
+  if (req.method === 'POST' && p === '/api/held-end') {
     return readBody(req, 4096, function (err, text) {
       var body = null;
       try { body = err ? null : JSON.parse(text); } catch (e) { body = null; }
@@ -14709,7 +15261,7 @@ function route(req, res) {
    * Map view need not be opened for the guard to hold; the first valid pin
    * for a text wins, the page's or the server's (keepPickupPin), and the
    * page's says no `by`. */
-  if (req.method === 'POST' && req.url.split('?')[0] === '/api/held-pickup') {
+  if (req.method === 'POST' && p === '/api/held-pickup') {
     return readBody(req, 1024, function (err, text) {
       var body = null;
       try { body = err ? null : JSON.parse(text); } catch (e) { body = null; }
@@ -14743,7 +15295,7 @@ function route(req, res) {
   // identically either way. The answer comes back up the scanner's own stdout
   // as a `dropoff` line, which is why this returns as soon as the ask is
   // written rather than waiting for one.
-  if (req.method === 'POST' && req.url.split('?')[0] === '/api/dropoff') {
+  if (req.method === 'POST' && p === '/api/dropoff') {
     // A press asks the question again — and no longer forgets the planner
     // the order in the car keeps (the owner, 24 Oct: "Would there be a way to
     // have the scan button also merge?"). It did (forgetPlanner), so the
@@ -14762,113 +15314,11 @@ function route(req, res) {
     });
   }
 
-  // Rows arriving from a scanner that is not this machine.
-  //
-  // The rig lives in a car behind cellular NAT, so nothing here can reach it —
-  // it has to push, and it pushes to whatever host is running this file with
-  // SCANNER=0 and JOURNAL pointed at the copy. That copy is the reason this
-  // exists: the journal is the one irreplaceable thing the rig produces, 5.7MB
-  // a week of driving (rpi/journal.py's WEEK_BYTES, where that is measured),
-  // and until now there was exactly one of it, on an SD card, in a car.
-  //
-  // Idempotent on purpose, and that is the whole design. Every row can say what
-  // makes it itself (see syncKey), so the same batch can arrive twice — or ten
-  // times — and only what this file has never seen gets appended. That removes
-  // the bookkeeping that normally breaks a sync: there is no stored offset to
-  // drift out of step, no resume logic, nothing to repair after a connection
-  // drops mid-upload. The sender can be crude and still be correct.
-  //
-  // Deliberately unauthenticated by default, because the deployment this was
-  // written for keeps the whole machine behind a VPN. SYNC_TOKEN turns on a
-  // check if that ever stops being true; unset, this costs one comparison.
-  if (req.method === 'POST' && req.url.split('?')[0] === '/api/journal/ingest') {
-    if (SYNC_TOKEN && req.headers['x-sync-token'] !== SYNC_TOKEN) {
-      return sendJson(res, 403, { ok: false, error: 'bad token' });
-    }
-    return readBody(req, MAX_SYNC_BODY, function (err, text) {
-      // Held from here, not from readJournal: the body is already in hand by
-      // now, so the lock covers the read-modify-write and nothing slower.
-      // Every path out of the handler below goes through `fail` or `finish`,
-      // and both release.
-      ingestLock(function (release) {
-      var fail = function (why, code) {
-        release();
-        sendJson(res, code || 400, { ok: false, error: why });
-      };
-      var finish = function (body) {
-        release();
-        send(res, 200, body,
-             { 'Content-Type': 'application/json; charset=utf-8' });
-      };
-      if (err) return fail(err.message);
-      readJournal(function (existing, readErr) {
-        // Without the rows already here there is no de-duplication, and
-        // appending anyway turns every re-send into a copy. Refusing is the
-        // only honest answer: the sender retries, and nothing is lost.
-        if (!existing) {
-          return fail('cannot read the journal to merge into it ('
-                      + (readErr && readErr.code || 'unknown') + ')', 500);
-        }
-        var seen = {};
-        existing.forEach(function (r) {
-          var k = syncKey(r);
-          if (k) seen[k] = true;
-        });
-        var fresh = [];
-        var malformed = 0;
-        text.split('\n').forEach(function (line) {
-          line = line.trim();
-          if (!line) return;
-          var row;
-          try { row = JSON.parse(line); } catch (e) { malformed++; return; }
-          var key = syncKey(row);
-          // Nothing that can be sent twice without being recognised can be
-          // stored, because there would be no way to avoid writing it again on
-          // the next upload.
-          if (!key) { malformed++; return; }
-          if (seen[key]) return;
-          seen[key] = true;
-          fresh.push(JSON.stringify(row));
-        });
-        if (!fresh.length) {
-          return finish(JSON.stringify({ ok: true, added: 0,
-                                         malformed: malformed,
-                                         have: existing.length }));
-        }
-        // Appended, like the scanner does it: O_APPEND, one write, so a reader
-        // part way through never sees half a row.
-        //
-        // The directory is made first, because the commonest way this fails is
-        // that nobody made it. JOURNAL is usually pointed somewhere outside the
-        // checkout — /var/lib/uberscan is the obvious choice — and setting the
-        // variable is the memorable half of that; mkdir is the half that gets
-        // forgotten, and the rig then gets HTTP 500 with the reason sitting in
-        // a log it cannot see.
-        withDirectory(JOURNAL_PATH, function (dirErr) {
-          if (dirErr) {
-            console.error('journal ingest: ' + dirErr.message);
-            return fail('could not create ' + path.dirname(JOURNAL_PATH)
-                        + ' (' + dirErr.code + ')', 500);
-          }
-          appendLines(fresh.join('\n') + '\n', function (writeErr) {
-          if (writeErr) {
-            console.error('journal ingest: ' + writeErr.message);
-            // The errno, because 'could not append' is not something anyone can
-            // act on and this is the only message that reaches the machine that
-            // needs to act. ENOENT is a directory nobody made; EACCES is a
-            // process that cannot write where it was pointed.
-            return fail('could not append (' + writeErr.code + ')', 500);
-          }
-          console.log('journal ingest: +' + fresh.length + ' row(s), '
-                      + (existing.length + fresh.length) + ' total');
-          finish(JSON.stringify({ ok: true, added: fresh.length,
-                                  malformed: malformed,
-                                  have: existing.length + fresh.length }));
-          });
-        });
-      }, failedRequest(req, res, release));
-      });
-    });
+  // The journal's sync doors, ingest and what the far end has, ahead of the
+  // GET-only gate below as they always were: see journalRoute.
+  if ((req.method === 'POST' && p === '/api/journal/ingest')
+      || (req.method === 'GET' && (p === '/api/journal/notes' || p === '/api/journal/newest'))) {
+    return journalRoute(req, res, p);
   }
 
   // The rig's calibration, kept beside the offers.
@@ -14902,15 +15352,15 @@ function route(req, res) {
    * driver points the page at — the NUC, if that is where they do map checks.
    */
   // The NucBox's search and router, relayed — see nbxRoute.
-  if (req.method === 'GET' && /^\/api\/nbx(\/|$)/.test(req.url.split('?')[0])) {
-    return nbxRoute(req, res);
+  if (req.method === 'GET' && /^\/api\/nbx(\/|$)/.test(p)) {
+    return nbxRoute(req, res, p);
   }
   // ...and the street index, on the machine that has it — see streetsRoute.
-  if (req.method === 'GET' && /^\/api\/streets(\/|$)/.test(req.url.split('?')[0])) {
-    return streetsRoute(req, res);
+  if (req.method === 'GET' && /^\/api\/streets(\/|$)/.test(p)) {
+    return streetsRoute(req, res, p);
   }
 
-  if (req.url.split('?')[0] === '/api/places') {
+  if (p === '/api/places') {
     var placesPath = path.join(path.dirname(JOURNAL_PATH), 'places.json');
     var placesReply = function (code, body) {
       sendJson(res, code, body);
@@ -15081,7 +15531,7 @@ function route(req, res) {
   // Stored beside the journal rather than over this machine's own config: the
   // host keeping the copy is not a scanner and must not be turned into one by a
   // backup landing on it.
-  if (req.method === 'POST' && req.url.split('?')[0] === '/api/config/backup') {
+  if (req.method === 'POST' && p === '/api/config/backup') {
     if (SYNC_TOKEN && req.headers['x-sync-token'] !== SYNC_TOKEN) {
       return sendJson(res, 403, { ok: false, error: 'bad token' });
     }
@@ -15151,141 +15601,6 @@ function route(req, res) {
     });
   }
 
-  // What the far end already has, so a sender knows where to start. Cheap
-  // enough to call every few minutes and the only thing the rig needs to ask.
-  // The driver's own tags, verbatim, for the rig to pull back from the copy.
-  //
-  // The sync ran one way. A tick made on the copy at home — the likelier
-  // place to review a week, on a monitor rather than an 800x480 panel — was
-  // written to the copy's journal and stayed there: the rig's offers page
-  // showed that week untagged and its advice ran without the ticks, and
-  // advise() says itself that tagging a handful of trips is worth more than
-  // another shift of scanning. This is the other direction. Raw rows, not
-  // the folded view /api/journal gives, because what is being copied is the
-  // record of what the driver did, and the rig folds it itself. Unauthenticated
-  // like /api/journal/newest: the same VPN, the same driver's own data.
-  if (req.method === 'GET' && req.url.split('?')[0] === '/api/journal/notes') {
-    var sinceNotes = clampNumber((url.parse(req.url, true).query || {}).since,
-                                 0, CLOCK_BELIEVABLE_UNTIL, 0);
-    return readJournal(function (rows, readErr) {
-      if (!rows) {
-        return sendJson(res, 200, {
-          ok: false, readable: false,
-          error: 'cannot read the journal (' + (readErr && readErr.code || 'unknown') + ')'
-        });
-      }
-      // The driver's tags, and the offers the driver made — typed on the
-      // keypad or read by the phone's own scanner — which are rows nothing
-      // but a browser wrote and so exist only where that browser was pointed.
-      // Made on the copy at home, they would otherwise stay there like a mark
-      // did.
-      var notes = rows.filter(function (r) {
-        return r && (r.kind === 'mark' || r.kind === 'rule'
-                     || r.typed === true || r.browser === true)
-          && (r.at || 0) >= sinceNotes;
-      });
-      sendJson(res, 200, { ok: true, notes: notes });
-    }, failedRequest(req, res));
-  }
-
-  if (req.method === 'GET' && req.url.split('?')[0] === '/api/journal/newest') {
-    return readJournal(function (rows, readErr) {
-      // Answering 0 here is not a small error: the sender treats it as "the
-      // far end has nothing", falls back to a thirty-day floor and re-sends a
-      // month of offers, every ten minutes, for as long as the fault lasts.
-      //
-      // But not a 500 either, because this endpoint is also how the sender
-      // works out what the far end can do — whether it understands `mkdir`,
-      // whether it is an old build at all — and a rig told nothing about a
-      // reachable machine goes on to blame it for being out of date. So it
-      // answers, says it cannot read, and simply does not offer a number.
-      if (!rows) {
-        return sendJson(res, 200, {
-          ok: false, readable: false,
-          error: 'cannot read the journal (' + (readErr && readErr.code || 'unknown') + ')',
-          can: SYNC_CAN
-        });
-      }
-      // The newest *offer*, not the newest row.
-      //
-      // The sender resumes from an hour before this, so whatever it means has
-      // to be "how far through the offers I am". Every row counted equally,
-      // and the driver's own tags are rows: ticking "I took this" on the copy
-      // machine stamped a row with the current time, the rig then resumed from
-      // an hour before *that*, and every offer older than an hour that had not
-      // yet been sent was skipped — permanently, because nothing ever looks
-      // further back. Tagging one offer here could quietly cost a day of them.
-      // ...and the same count over a window the sender names, which is what
-      // makes the reconciliation below an apples-to-apples one.
-      //
-      // The sender only ever ships the last `--days`, so the offers it holds
-      // from before that window are not a gap and must not be counted as one.
-      // It windows its own side; if this side answers with an all-time total,
-      // the comparison is a windowed count against an unwindowed one and the
-      // shortfall can never be seen. `since` is the sender's window, anchored
-      // to this copy's own newest row so both edges are the same instant.
-      var since = Number((url.parse(req.url, true).query || {}).since);
-      var wantWindow = isFinite(since) && since > 0;
-      // Worked out once per request rather than per row: it is a fact about
-      // this machine's clock, not about the row, and asking Date.now() forty
-      // thousand times inside a fold would also let the ceiling drift while
-      // the fold is running.
-      var ceiling = futureCeiling();
-      var newest = 0, offers = 0, offersSince = 0;
-      rows.forEach(function (r) {
-        if (r.kind) return;                       // a tag, not an offer
-        offers++;
-        /* A moment that never happened is not a position in the offers.
-         *
-         * This line compared `(r.at || 0)` and then assigned the RAW `r.at`,
-         * with no ceiling at either end. One row stamped 1e20 — a phone with a
-         * wrong clock, and journal-client.js takes `at` from the phone's own
-         * Date.now() — made this answer `newest: 1e20`. sync.py sets
-         * `floor = newest - 1h` from that, rows_since then keeps only rows
-         * below CLOCK_BELIEVABLE_AFTER, and every real offer from that moment
-         * on is skipped. For ever: nothing ever looks further back.
-         *
-         * And it is silent at every step. The shortfall check cannot see it —
-         * its own window is anchored to the same poisoned `newest`, so both
-         * sides count the one bad row and agree. The run exits 0, says
-         * "nothing new" (suppressed by --quiet in the installed unit) and
-         * refreshes the .synced stamp, so doctor.py reports a backup made
-         * minutes ago. The only copy of the one file that cannot be
-         * regenerated stops growing while both ends report success.
-         *
-         * Sanitised once and used for both answers, because a row that is not
-         * a moment is not inside the sender's window either — and counting it
-         * there would be the same disagreement one line down. Erring this way
-         * makes the far end look short and the sender re-send, which is the
-         * safe direction; the other way round is the one that loses rows. */
-        var at = (typeof r.at === 'number' && isFinite(r.at)
-                  && r.at <= ceiling) ? r.at : 0;
-        if (wantWindow && at >= since) offersSince++;
-        if (at > newest) newest = at;
-      });
-      // What this build can do, so the sender can tell "I am misconfigured"
-      // from "the far end is old" without a human having to compare error
-      // strings. A rig spent two rounds on that: the copy machine had not been
-      // updated, the only symptom was an error message missing a detail the new
-      // build adds, and nothing said so.
-      sendJson(res, 200, { ok: true, newest: newest, have: rows.length,
-                           // So the sender can notice it holds more
-                           // than this copy does and repair the gap
-                           // itself, rather than needing somebody to
-                           // think of running --all.
-                           offers: offers,
-                           // ...counted over the window the sender
-                           // asked about, when it asked. Absent
-                           // when it did not, and absent from older
-                           // builds, which is how the sender knows
-                           // to fall back to the whole-file
-                           // comparison rather than reading a
-                           // missing key as a copy holding nothing.
-                           offersSince: wantWindow ? offersSince : undefined,
-                           can: SYNC_CAN });
-    }, failedRequest(req, res));
-  }
-
   /* The driver's cost per mile — ONE key, and deliberately not "the settings".
    *
    * Every verdict the rig prints is net of it, and it was the one number in
@@ -15327,7 +15642,7 @@ function route(req, res) {
    * shift. The panel's existing "after $0.30/mi costs" on every reading is how
    * the driver sees it take effect.
    */
-  if (req.url.split('?')[0] === '/api/settings'
+  if (p === '/api/settings'
       && (req.method === 'GET' || req.method === 'POST')) {
     var settingsReply = function (code, body) {
       sendJson(res, code, body);
@@ -15422,7 +15737,7 @@ function route(req, res) {
   // Fractions of the frame, never pixels: what they drew on is a 480px JPEG of
   // a 2328px sensor frame, and corners measured against one size and read
   // against another are refused on every check forever, silently.
-  if (req.method === 'POST' && req.url.split('?')[0] === '/api/crop') {
+  if (req.method === 'POST' && p === '/api/crop') {
     return readJsonBody(req, function (err, body) {
       var bad = function (why) {
         sendJson(res, 400, { ok: false, error: why });
@@ -15460,7 +15775,7 @@ function route(req, res) {
   // Map view's latest settled walk, from live.html, for a 📷 Snap's
   // mapwalk.json (EXPERIMENTAL; see keepMapWalk). Memory only, newest only,
   // no file written; at most MAPWALK_MAX bytes.
-  if (req.method === 'POST' && req.url.split('?')[0] === '/api/mapwalk') {
+  if (req.method === 'POST' && p === '/api/mapwalk') {
     return readBody(req, MAPWALK_MAX, function (err, text) {
       if (err) return sendJson(res, err.message === 'too big' ? 413 : 400,
                                { ok: false, error: err.message });
@@ -15474,7 +15789,7 @@ function route(req, res) {
   // taken by anything that prefetches links. Answers once every part has
   // either landed or given its reason, so the reply is the whole account of
   // the press rather than a promise about it.
-  if (req.method === 'POST' && req.url.split('?')[0] === '/api/snap') {
+  if (req.method === 'POST' && p === '/api/snap') {
     return takeSnap(function (err, record) {
       if (err) {
         var why = err.code === 'NOTHING'
@@ -15489,7 +15804,7 @@ function route(req, res) {
 
   // ...and a note on one, from snaps.html: {snap: <folder>, note: <text>}.
   // See keepSnapNote.
-  if (req.method === 'POST' && req.url.split('?')[0] === '/api/snap/note') {
+  if (req.method === 'POST' && p === '/api/snap/note') {
     return readJsonBody(req, function (err, body) {
       var answer = function (status, reply) {
         sendJson(res, status, reply);
@@ -15506,7 +15821,7 @@ function route(req, res) {
   // refused, and the file is written to a part name and renamed. Here, among
   // the doors that take a POST, ahead of the GET-only gate below. Lite shuts
   // this door in lite/lite.js before it is reached.
-  if (req.url.split('?')[0] === '/api/specialdays' && (req.method === 'GET' || req.method === 'POST')) {
+  if (p === '/api/specialdays' && (req.method === 'GET' || req.method === 'POST')) {
     var spReply = function (code, body) {
       sendJson(res, code, body, { 'Cache-Control': 'no-store' });
     };
@@ -15549,10 +15864,10 @@ function route(req, res) {
 
   // Earnings screenshots, every method: see earningsRoute (the owner, 7 Nov:
   // "compare what uber actually paid compared to the expected pay").
-  if (/^\/api\/earnings(\/|$)/.test(req.url.split('?')[0])) return earningsRoute(req, res);
+  if (/^\/api\/earnings(\/|$)/.test(p)) return earningsRoute(req, res, p);
   // Uber's acceptance rate and the line that keeps the goal, for the offers
   // page's Gold card: see goldRoute (the owner, 15 Nov 2026).
-  if (/^\/api\/gold(\/|$)/.test(req.url.split('?')[0])) return goldRoute(req, res);
+  if (/^\/api\/gold(\/|$)/.test(p)) return goldRoute(req, res, p);
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return send(res, 405, 'method not allowed', { 'Content-Type': 'text/plain' });
@@ -15772,294 +16087,11 @@ function route(req, res) {
     return;
   }
 
-  // Everything the scanner has kept. The file itself is inside rpi/, which the
-  // static handler refuses to serve, and it stays that way — this returns the
-  // rows and nothing else, so the path is never taken from the request.
-  if (pathname === '/api/journal' || pathname === '/api/journal.csv') {
-    var q = url.parse(req.url, true).query || {};
-    var days = clampNumber(q.days, 0, 3650, 30);
-    var limit = clampNumber(q.limit, 0, 20000, 5000);
-    // The page can name an exact start instead of a span. It has to, for
-    // "today": a trailing 24 hours folds last night's shift into this morning's
-    // figures, and only the browser knows where the driver is and therefore
-    // when their day began.
-    var since = clampNumber(q.since, 0, CLOCK_BELIEVABLE_UNTIL, 0);
-    // ...and an end, for a reader that must page past `limit` (the places
-    // report, the reporting review's R2): only the offers LISTED stop before
-    // `until`; the window, its takes, records and every figure over it are
-    // the same as without it, so a second page is only older offers.
-    var until = clampNumber(q.until, 0, CLOCK_BELIEVABLE_UNTIL, 0);
-    var withHidden = q.hidden === '1';
-    return readJournal(function (rows, readErr, torn) {
-      // This one may degrade — a driver looking at the offers page is better
-      // served by the page than by a 500 — but not silently. An empty history
-      // and an unreadable one look identical otherwise, and the second is the
-      // one worth acting on.
-      var unreadable = rows ? null : (readErr && readErr.code || 'unknown');
-      rows = rows || [];
-      /* The window, worked out before the fold rather than after it.
-         It was computed forty lines below and used only to filter the fold's
-         OUTPUT, so a request for today folded the whole year and then threw
-         nearly all of it away. The figure is identical either way — rowsFor
-         keeps every row that can change an answer inside the window — but the
-         work is now proportional to the window the driver asked for. */
-      var floor = since || (days > 0 ? Date.now() - days * 86400000 : 0);
-      var offers = latestPerOffer(rows, floor);
-      // Both taken off the array before anything filters it. `filter` returns a
-      // new array and these ride on the old one as properties, so a line moved
-      // below the first filter would quietly become an empty list — which reads
-      // on the page as a shift where the rig was never asked, rather than as a
-      // reader that dropped them.
-      var seen = offers.seen || [];
-      var pairs = offers.pairs || [];
-      // The window first, then the count of what is hidden inside it.
-      //
-      // Counting before the filter meant the page said "3 offers are hidden and
-      // left out of everything here" while looking at today, where "here" is
-      // the window and the 3 were every hidden offer the journal has ever held.
-      // A number that does not describe what is on screen is worse than no
-      // number, because it is the one a driver checks their arithmetic against.
-      // Rows stamped before the rig had a clock, taken out of EVERY window and
-      // counted, rather than out of three windows and left in the fourth.
-      //
-      // A Pi has no real-time clock. It boots in 1970 and jumps when NTP
-      // arrives, and anything it read before then is on disk with a date in
-      // 1970. Those rows fell outside Today, 7 days and 30 days without a word
-      // said — and on All, where `floor` is zero, they came BACK: a phantom
-      // day headed "Thu, Jan 1" at the far end of the list, its offers counted
-      // in every figure on the page under a date nobody drove. shiftSummary
-      // already counts these for the driving screen; this is the same rule for
-      // the same rows, and the page says how many there are.
-      //
-      // Hidden ones are not counted, because shiftSummary does not count them
-      // either, and the two pages printed different figures for the same
-      // file: 2 here, 1 on the driving screen, over one hidden test card read
-      // before NTP arrived. windowOffers is that one rule now, for both.
-      var win = windowOffers(offers, floor);
-      var beforeClock = win.beforeClock;
-      var hidden = win.hidden;
-      offers = win.kept;
-      // Hidden rows are still on disk — nothing here deletes — but they are out
-      // of every figure and every export unless asked for by name. The test card
-      // a driver presents to check the rig is not an offer they were made, and
-      // leaving it in quietly drags the median toward whatever that card says.
-      if (!withHidden) offers = shownOffers(offers);
-      // The whole window, before the cap: the per-mile tables and the orders
-      // taken describe every offer in it, not the newest `limit` of them, and
-      // an order whose card fell under the cap was missing from `taken`.
-      var windowed = offers;
-      if (until) offers = offers.filter(function (r) { return (r.at || 0) < until; });
-      // How many there really are in this window, kept before the cap. Without
-      // it the page cannot tell a window of 5000 offers from a window of
-      // 60000 truncated to 5000 — and it was labelling the second one "All",
-      // computing the median and the $/hr ladder over an unannounced subset.
-      var total = offers.length;
-      if (limit && offers.length > limit) offers = offers.slice(-limit);
-      if (pathname === '/api/journal.csv') {
-        // A journal that could not be READ is refused here rather than
-        // downloaded as an empty spreadsheet.
-        //
-        // The branch above it exists for exactly this — "an empty history and
-        // an unreadable one look identical otherwise, and the second is the
-        // one worth acting on" — and the JSON reply carries `unreadable`,
-        // `torn` and `truncated` further down so the offers page can say all
-        // three. This branch returned before any of them, and toCsv([]) is a
-        // header line and nothing else: 200 OK, Content-Disposition,
-        // `uber-scan-offers.csv`, no rows. Indistinguishable from a quiet
-        // week, on the one artefact a driver saves and a backup script
-        // collects. README.md calls this "a CSV of everything".
-        //
-        // The state is not hypothetical: readJournal's own comment records a
-        // server running as a user that could append to the journal and not
-        // read it.
-        if (unreadable) {
-          return send(res, 503, 'the journal could not be read (' + unreadable
-                      + ')\n', { 'Content-Type': 'text/plain; charset=utf-8' });
-        }
-        // Lines that WERE written and are now unreadable, and rows the cap
-        // dropped. Neither can be a row in the file — a spreadsheet with an
-        // extra row in it is a spreadsheet with a wrong total — so they go in
-        // the headers, where curl -i and every HTTP client can see them and
-        // nothing that parses the CSV has to change.
-        var head = {
-          'Content-Type': 'text/csv; charset=utf-8',
-          'Content-Disposition': 'attachment; filename="uber-scan-offers.csv"'
-        };
-        if (torn) head['X-Uber-Scan-Torn'] = String(torn);
-        if (total > offers.length) {
-          head['X-Uber-Scan-Truncated'] = offers.length + ' of ' + total;
-        }
-        // Gzipped for a browser off this machine that takes it (gzipFor):
-        // 8.6 MB of CSV for an invented 12,000-offer record is 1.1 MB at
-        // level 1, 38 ms of CPU on the container the suites run on.
-        return sendGzipped(req, res, 200, toCsv(offers), head, 1);
-      }
-      // What the rig watched go past, over the same window. Summed here rather
-      // than shipped row by row: there is one of these every couple of minutes
-      // of scanning and the page wants the total, not the series.
-      var watched = { saw: 0, kept: 0 };
-      seen.forEach(function (r) {
-        // The same clock rule as the offers, or on All — where `floor` is
-        // zero — the cards tallied before NTP set the clock were counted as
-        // watched while every offer from that stretch was set aside, and the
-        // fraction recorded read lower than it was.
-        if ((r.at || 0) < CLOCK_BELIEVABLE_AFTER) return;
-        if (floor && (r.at || 0) < floor) return;
-        watched.saw += r.saw || 0;
-        watched.kept += r.kept || 0;
-      });
-      // Row by row, unlike `seen`, and not capped by `limit`.
-      //
-      // There is one of these per offer read with a job already in the car —
-      // a handful in a shift, not the thousands the offer log holds — and each
-      // one is a decision the driver may want to check against what happened.
-      // A total would answer none of the questions worth asking of them.
-      //
-      // Newest first, because a shift is read from its end: the pairing a
-      // driver wants is nearly always the one they just made.
-      var taken = takenRuns(rows, floor, windowed);
-      // ...and each order's own record, for the offers page's "Order record"
-      // under its offer row and its CSV (orderRecords).
-      var records = orderRecords(rows, floor);
-      var window = pairs.filter(function (r) { return !floor || (r.at || 0) >= floor; })
-                        .sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
-      // Gzipped at level 1 for a browser off this machine (gzipFor), as
-      // /api/trends is: 4.7 MB for 30 days of an invented 12,000-offer
-      // record is 0.58 MB, 19 ms of CPU (11.3 MB for All: 1.37 MB, 43 ms).
-      sendGzipped(req, res, 200, JSON.stringify({ count: offers.length, total: total,
-                                      truncated: total > offers.length,
-                                      days: days, hidden: hidden,
-                                      watched: watched,
-                                      // Null unless the journal is there and
-                                      // could not be read, in which case the
-                                      // emptiness below is not a record of a
-                                      // quiet week.
-                                      unreadable: unreadable,
-                                      // Not a window figure: these rows have
-                                      // no date, so they are in no window,
-                                      // and the count is the same whichever
-                                      // range is asked for.
-                                      beforeClock: beforeClock,
-                                      // Lines in the file that would not parse
-                                      // at all. Different from `unreadable`,
-                                      // which is the whole file being
-                                      // unavailable: these are rows that were
-                                      // written and are now gone, and they
-                                      // cannot be got back. Reported for the
-                                      // same reason `beforeClock` is — a row
-                                      // missing from every figure with nothing
-                                      // saying so is the one failure this
-                                      // project keeps writing sections about.
-                                      torn: torn || 0,
-                                      pairs: window,
-                                      // What each order taken in the window
-                                      // really took, and the restaurants'
-                                      // waits (takenRuns, storeWaitsOut).
-                                      taken: taken,
-                                      // The order rows themselves, newest
-                                      // per order (orderRecords): the same
-                                      // rows this journal holds, through
-                                      // the same door and nothing else.
-                                      records: records,
-                                      waits: storeWaitsOut(),
-                                      // What $/mi to accept, read off the
-                                      // window: four descriptions, no rule
-                                      // (perMileSeen and its neighbours).
-                                      perMileSeen: perMileSeen(windowed),
-                                      cardVsReal: cardVsReal(taken),
-                                      realByPerMile: realByPerMile(taken),
-                                      refigured: refigured(windowed, taken),
-                                      // What to aim for: $/hr and $/mi by
-                                      // time of day, the replay's line, the
-                                      // towns (targetsOut). Over the offers
-                                      // listed, as the page's own replay is.
-                                      targets: targetsOut(offers, taken),
-                                      // The rig's "keepPlaces" as the
-                                      // scanner last said it (null where it
-                                      // has not: the copy at home), for the
-                                      // every-offer CSV, which leaves its
-                                      // GPS and place columns empty while it
-                                      // is off (trends.js offersCsv). A
-                                      // setting, not a place.
-                                      keepPlaces: typeof scanner.keepPlaces === 'boolean'
-                                        ? scanner.keepPlaces : null,
-                                      offers: offers }),
-                  { 'Content-Type': 'application/json; charset=utf-8' }, 1);
-    }, failedRequest(req, res));
-  }
-
-  // The offers page's Trends tab (trends.js; the owner, Nov 2026): every offer
-  // in the window as a few short columns, and the runs of scanning. See
-  // trendsOut for what is sent and why the cap is not applied.
-  if (pathname === '/api/trends') {
-    // Asked here rather than in lite/lite.js's list of shut doors, which
-    // another round was changing when this landed; the answer is lite's own
-    // shape (404, `lite: true`), so the page hides the tab exactly as it
-    // would on a door that list shut. Moving it into that list is one line.
-    if (LITE) {
-      return sendJson(res, 404, { ok: false, lite: true,
-                                  error: 'trends: not part of the lite edition' });
-    }
-    var tq2 = url.parse(req.url, true).query || {};
-    var tdays = clampNumber(tq2.days, 0, 3650, 30);
-    var tsince = clampNumber(tq2.since, 0, CLOCK_BELIEVABLE_UNTIL, 0);
-    return readJournal(function (rows, readErr) {
-      if (!rows) {
-        return sendJson(res, 503, { ok: false, unreadable: readErr && readErr.code || 'unknown' });
-      }
-      var tfloor = tsince || (tdays > 0 ? Date.now() - tdays * 86400000 : 0);
-      var tbody = JSON.stringify(trendsOut(rows, tfloor, tdays));
-      // Gzipped where the browser says it can take it (the reporting
-      // review's T9): the answer is seven columns of digits, 1.3 MB for a 3x
-      // record, and the phone on the rig's Wi-Fi or a VPN waited on it.
-      // Level 1: the columns compress about fivefold at the fastest level,
-      // and the Pi's CPU is the scarcer thing (lite never reaches here). Not
-      // for the Pi's own browser since the server review (gzipFor).
-      sendGzipped(req, res, 200, tbody, { 'Content-Type': 'application/json; charset=utf-8',
-                                          'Cache-Control': 'no-store' }, 1);
-    }, failedRequest(req, res));
-  }
-
-  // What the shift adds up to so far, for the one line of it the driving screen
-  // shows. The offers page works this out for itself from the rows it already
-  // has; the driving screen has no rows and must not grow a second copy of the
-  // rule for deciding which ones count, so the arithmetic happens here.
-  if (pathname === '/api/today') {
-    var tq = url.parse(req.url, true).query || {};
-    var sinceMs = parseInt(tq.since, 10);
-    // Required, and required to be believable. /api/journal can afford
-    // clampNumber's zero fallback because `days` independently defaults to 30;
-    // alone, a zero floor means the entire journal, which the caller would then
-    // put on a panel under the word "today". A window this endpoint cannot
-    // believe is an error, never a silent all-time figure.
-    //
-    // The browser names it, for the reason /api/journal takes it from the
-    // browser too: only the page knows where the driver is, and therefore when
-    // their day began. 4am, in their timezone, is journal.html's boundary and
-    // the one the page sends.
-    if (!isFinite(sinceMs) || sinceMs < CLOCK_BELIEVABLE_AFTER
-        || sinceMs > CLOCK_BELIEVABLE_UNTIL) {
-      return sendJson(res, 400, {
-        ok: false,
-        error: 'since must be an epoch-ms moment in this century'
-      });
-    }
-    return todaySummary(sinceMs, function (answer) {
-      sendJson(res, 200, answer);
-    }, failedRequest(req, res));
-  }
-
-  // Today's shift as the end-of-shift report has it, for shift.html: see
-  // shiftReported. Read-only, as the page is.
-  if (pathname === '/api/shift') {
-    var sq = url.parse(req.url, true).query || {};
-    var sday = typeof sq.day === 'string' && sq.day ? sq.day : driverDay(Date.now());
-    if (!/^\d{4}-\d\d-\d\d$/.test(sday)) {
-      return sendJson(res, 400, { ok: false, error: 'day must be YYYY-MM-DD' });
-    }
-    return shiftReported(sday, function (code, answer) {
-      sendJson(res, code, answer, { 'Cache-Control': 'no-store' });
-    });
+  // The journal, its CSV, the Trends tab, today's line and the shift: see
+  // journalRoute. Off the decoded path, after the gate, as they always were.
+  if (pathname === '/api/journal' || pathname === '/api/journal.csv' || pathname === '/api/trends'
+      || pathname === '/api/today' || pathname === '/api/shift') {
+    return journalRoute(req, res, pathname);
   }
 
   // The places report (tools/places_report.js), the owner's of 25 Oct: "make
@@ -16685,8 +16717,7 @@ function earningsFile(parses, alsoDays, pick, now, done) {
 /* The earnings route, every method. One lock over all of it ('earnings'):
  * a read of a picture, the filing after it, a pick, a delete — each sees the
  * last one finished. */
-function earningsRoute(req, res) {
-  var pathname = req.url.split('?')[0];
+function earningsRoute(req, res, pathname) {
   var q = url.parse(req.url, true).query || {};
   var answer = function (code, body) { send(res, code, JSON.stringify(body), EARNINGS_JSON); };
 
@@ -17092,8 +17123,7 @@ function goldAnswer(rows, now) {
            tesseract: !!earningsTesseract() };
 }
 
-function goldRoute(req, res) {
-  var pathname = req.url.split('?')[0];
+function goldRoute(req, res, pathname) {
   var answer = function (code, body) { send(res, code, JSON.stringify(body), EARNINGS_JSON); };
 
   if (pathname === '/api/gold' && (req.method === 'GET' || req.method === 'HEAD')) {
