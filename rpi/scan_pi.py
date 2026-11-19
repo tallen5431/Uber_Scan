@@ -5788,7 +5788,17 @@ def main():
     # ...and one read at a time means no rescue read started ahead on a
     # spare core either (PL._SPARE_WORKERS): what --no-parallel is for is a
     # rig reading one thing at once.
-    PL.spare_cores(pair_reads)
+    #
+    # Nor on the lite edition. The two spare threads hold an engine each,
+    # ~25 MB between them (PL.MAX_ENGINES), for links that may be thrown
+    # away, on the board with the least memory and the fewest spare cycles.
+    # Nothing a reading says changes: a link started ahead is the same read
+    # on the same crop as the one the chain makes in place (PL._SPARE_WORKERS,
+    # "THE ANSWER IS THE ONE THE CHAIN GAVE"), so lite reads the same card to
+    # the same figures, one link after another. Off before the first read,
+    # so the pool, which starts on its first offer, is never started.
+    spares = pair_reads and not lite
+    PL.spare_cores(spares)
 
     # Everything that decides what gets read, in one place, once. A log without
     # this is a log where every question starts with "what was it set to?".
@@ -5984,6 +5994,9 @@ def main():
     # ...and, for the richer snap (EXPERIMENTAL), the last reads and the newest
     # full-resolution frame: a reference to the sensor array a read or the
     # phone view already made, never a copy. See ReadLog and answer_snap.
+    # Never kept on the lite edition: a reference is still the whole ~12 MB
+    # array held alive between reads, for an experimental snap lite does not
+    # offer, where otherwise it is freed when the read is done.
     read_log = ReadLog()
     full_frame = {'frame': None, 'at': None, 'source': None}
     # The accumulator episode whose payout a card found above the drawn card
@@ -7701,7 +7714,7 @@ def main():
                     # work that may be thrown away is heat for nothing on a
                     # Pi the firmware is slowing. The offer's own reads are
                     # untouched — the chain reads in place, as it did.
-                    if pair_reads and PL.spare_cores(not pi.guard.on):
+                    if spares and PL.spare_cores(not pi.guard.on):
                         log('rescue reads %s' % ('one after another while the Pi is hot'
                                                  if pi.guard.on else
                                                  'started ahead on the spare cores again'))
@@ -8289,7 +8302,8 @@ def main():
                     # which is exactly what OpenCV expects. The name is the odd
                     # one out.
                     frame, preview_scale = request.make_array('main'), None
-                    full_frame = {'frame': frame, 'at': time.time(), 'source': 'sensor'}
+                    if not lite:
+                        full_frame = {'frame': frame, 'at': time.time(), 'source': 'sensor'}
                 else:
                     # Copied, because `luma` is a view onto the request's own
                     # buffer and the request is released a few lines below —

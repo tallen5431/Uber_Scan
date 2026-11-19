@@ -131,6 +131,38 @@ ok_('...and keeps no map bands under it', re.search(
 ok_('...and reads the card box on the backstop\'s longer clock under it, not never',
     'IDLE_READ_LITE_S if lite else IDLE_READ_S' in _sp
     and not re.search(r'IDLE_READ[A-Z_]* = None', _sp))
+# ...and starts neither of the rescue's two spare threads under it, ~25 MB of
+# engines for links that may be thrown away (pipeline._SPARE_WORKERS), while
+# the full rig keeps them on: the switch, every call that moves it, and the
+# heat guard that turns them back on when the Pi cools all go through one
+# name that is false under lite.
+ok_('...starts no spare-core reads under it, and the full rig keeps them',
+    re.search(r'\n\s*spares = pair_reads and not lite\n\s*PL\.spare_cores\(spares\)\n', _sp))
+eq('...and every call that moves the spare cores asks that name first',
+   (len(re.findall(r'PL\.spare_cores\(', _sp)),
+    len(re.findall(r'PL\.spare_cores\(spares\)|if spares and PL\.spare_cores\(', _sp))), (2, 2))
+# ...and keeps no full-resolution frame between reads under it: ~12 MB held
+# alive only for the experimental richer snap.
+eq('...keeps no full frame between reads under it, and the full rig does',
+   (len(re.findall(r"full_frame = \{'frame': frame", _sp)),
+    len(re.findall(r"if not lite:\n\s*full_frame = \{'frame': frame", _sp))), (1, 1))
+# The spare switch itself, both ways, on the reader's own pool: off, a link
+# asked for is read in place (None) and no spare thread is ever started; on,
+# it is taken by a spare thread. The answer is the chain's either way
+# (pipeline._taken reads it in place when nothing was started ahead).
+import threading                                                # noqa: E402
+import pipeline as PL                                           # noqa: E402
+PL.spare_cores(False)
+_off = PL._ahead(lambda: 7)
+eq('with the spares off a link is read in place, with no spare thread started',
+   (_off, [t.name for t in threading.enumerate() if t.name.startswith('spare_')],
+    PL._taken(_off, lambda: 7)), (None, [], 7))
+PL.spare_cores(True)
+_on = PL._ahead(lambda: 7)
+eq('...and on, a spare thread takes it and gives the same answer',
+   (_on is not None, PL._taken(_on, lambda: 7),
+    len([t for t in threading.enumerate() if t.name.startswith('spare_')])),
+   (True, 7, PL._SPARE_WORKERS))
 # What it must NOT gate: the reader, the verdict, speech, the journal. If any
 # of those names ever sits beside `lite` the switch has reached the money.
 for _keep in ('Reader(', 'emit(', 'speak', 'JR.', 'OP.rate', 'unsure_payout'):
