@@ -12804,6 +12804,16 @@ function send(res, status, body, headers) {
   res.end(body);
 }
 
+// Every JSON answer, said once. Fifty-four handlers spelled this out whole —
+// the stringify and the same Content-Type literal — and a copy that dropped the
+// charset, or put a header before it, would have been one route answering
+// differently from its neighbours with nothing to say so. `extra` rides after
+// the type, as the copies that added a Cache-Control had it.
+function sendJson(res, status, obj, extra) {
+  send(res, status, JSON.stringify(obj),
+       Object.assign({ 'Content-Type': 'application/json; charset=utf-8' }, extra || {}));
+}
+
 // Anything thrown while routing becomes a 500 for that one request instead of
 // the end of the process. This server is the scanner's parent — when it dies
 // the child's next stdout write gets EPIPE and the camera side goes down with
@@ -13725,7 +13735,7 @@ function nbxLine(g) {
 
 function nbxRoute(req, res) {
   var reply = function (code, body) {
-    send(res, code, JSON.stringify(body), { 'Content-Type': 'application/json; charset=utf-8' });
+    sendJson(res, code, body);
   };
   var p = req.url.split('?')[0];
   if (p === '/api/nbx') {
@@ -13932,7 +13942,7 @@ if (STREETS_FILE) {
 
 function streetsRoute(req, res) {
   var reply = function (code, body) {
-    send(res, code, JSON.stringify(body), { 'Content-Type': 'application/json; charset=utf-8' });
+    sendJson(res, code, body);
   };
   var p = req.url.split('?')[0];
   if (p === '/api/streets') {
@@ -13975,8 +13985,7 @@ function route(req, res) {
   // collect.
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/offers/mark') {
     return readJsonBody(req, function (err, body) {
-      if (err || !body) return send(res, 400, JSON.stringify({ ok: false, error: 'bad body' }),
-                                    { 'Content-Type': 'application/json; charset=utf-8' });
+      if (err || !body) return sendJson(res, 400, { ok: false, error: 'bad body' });
       var note = { v: 1, at: Date.now() };
       if (typeof body.id === 'string' && body.id.length && body.id.length < 80) {
         note.kind = 'mark';
@@ -13989,12 +13998,10 @@ function route(req, res) {
           miles: numOrNull(body.match.miles)
         };
         if (note.match.pay === null || note.match.minutes === null) {
-          return send(res, 400, JSON.stringify({ ok: false, error: 'a rule needs a pay and a time' }),
-                      { 'Content-Type': 'application/json; charset=utf-8' });
+          return sendJson(res, 400, { ok: false, error: 'a rule needs a pay and a time' });
         }
       } else {
-        return send(res, 400, JSON.stringify({ ok: false, error: 'no offer named' }),
-                    { 'Content-Type': 'application/json; charset=utf-8' });
+        return sendJson(res, 400, { ok: false, error: 'no offer named' });
       }
       // Two answers and a way of taking either back.
       //
@@ -14019,15 +14026,13 @@ function route(req, res) {
       }
       if (typeof body.hidden === 'boolean') note.hidden = body.hidden;
       if (note.accepted === undefined && note.hidden === undefined) {
-        return send(res, 400, JSON.stringify({ ok: false, error: 'nothing to note' }),
-                    { 'Content-Type': 'application/json; charset=utf-8' });
+        return sendJson(res, 400, { ok: false, error: 'nothing to note' });
       }
       // Which surface the press came from: one of MARK_VIA or absent, and
       // anything else refused here, before the append.
       if (body.via !== undefined) {
         if (MARK_VIA.indexOf(body.via) === -1) {
-          return send(res, 400, JSON.stringify({ ok: false, error: 'unknown via' }),
-                      { 'Content-Type': 'application/json; charset=utf-8' });
+          return sendJson(res, 400, { ok: false, error: 'unknown via' });
         }
         note.via = body.via;
       }
@@ -14059,8 +14064,7 @@ function route(req, res) {
         }
       }
       appendLines(JSON.stringify(note) + '\n', function (writeErr) {
-        if (writeErr) return send(res, 500, JSON.stringify({ ok: false, error: writeErr.message }),
-                                  { 'Content-Type': 'application/json; charset=utf-8' });
+        if (writeErr) return sendJson(res, 500, { ok: false, error: writeErr.message });
         // Remember it against the offer the driving screen is holding, so a
         // reload does not forget. The button's state was page-local: mark an
         // offer, reload the panel, and it offered to mark it again — while the
@@ -14402,8 +14406,7 @@ function route(req, res) {
             broadcast(carSaid);
           }
         }
-        send(res, 200, JSON.stringify(tookReply),
-             { 'Content-Type': 'application/json; charset=utf-8' });
+        sendJson(res, 200, tookReply);
       });
     });
   }
@@ -14505,7 +14508,6 @@ function route(req, res) {
       // the reply then says what is left, though one add-on left alone is no
       // longer a trip of two.
       var twoAtPress = carryingTwo(now);
-      var json = { 'Content-Type': 'application/json; charset=utf-8' };
       var answer = function (was, extra) {
         var reply = { ok: true, wasHolding: was };
         if (carryTwo() || twoAtPress) {
@@ -14514,7 +14516,7 @@ function route(req, res) {
           reply.held = heldForPanel(left);
           reply.orders = ordersForPanel(Date.now());
         }
-        send(res, 200, JSON.stringify(Object.assign(reply, extra || {})), json);
+        sendJson(res, 200, Object.assign(reply, extra || {}));
       };
       // Every press that puts something down offers to take it back (↶ Undo,
       // offerDropUndo): the car as it was just before, and `undo` on the
@@ -14569,11 +14571,10 @@ function route(req, res) {
    * panel told on the stream, `heldBy: 'undo'`. */
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/drop-undo') {
     return readJsonBody(req, function (err, body) {
-      var json = { 'Content-Type': 'application/json; charset=utf-8' };
       var now = Date.now();
       var u = dropUndo;
       var refuse = function (code, why) {
-        send(res, code, JSON.stringify({ ok: false, error: why }), json);
+        sendJson(res, code, { ok: false, error: why });
       };
       if (err || !body || !u || body.id !== u.id) return refuse(409, 'nothing to undo');
       if (now >= u.until) { dropUndo = null; return refuse(409, 'too late'); }
@@ -14596,7 +14597,7 @@ function route(req, res) {
           reply.orders = said.orders = ordersForPanel(Date.now());
         }
         broadcast(said);
-        send(res, 200, JSON.stringify(reply), json);
+        sendJson(res, 200, reply);
       });
     });
   }
@@ -14609,28 +14610,27 @@ function route(req, res) {
    * row is not one of its own. 'neither' files nothing and closes it. */
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/choose') {
     return readJsonBody(req, function (err, body) {
-      var json = { 'Content-Type': 'application/json; charset=utf-8' };
       var now = Date.now();
       var c = choosing;
       if (err || !body || !c || body.id !== c.id || now > c.until) {
-        return send(res, 409, JSON.stringify({ ok: false, error: 'closed' }), json);
+        return sendJson(res, 409, { ok: false, error: 'closed' });
       }
       var said = { dropoff: c.d, at: now };
       if (body.pick === 'neither') {
         choosing = null;
         broadcast({ chooser: null });
-        return send(res, 200, JSON.stringify({ ok: true, filed: null }), json);
+        return sendJson(res, 200, { ok: true, filed: null });
       }
       if (body.pick === 'card') {
         if (!c.card || !scanner.offer || scanner.offer.id !== c.card) {
-          return send(res, 409, JSON.stringify({ ok: false, error: 'not one of its rows' }), json);
+          return sendJson(res, 409, { ok: false, error: 'not one of its rows' });
         }
         choosing = null;
         dropoffArrived(said, { order: null, cue: 'chooser' });
       } else {
         var order = c.among.indexOf(body.pick) !== -1 ? heldById(body.pick, now) : null;
         if (!order) {
-          return send(res, 409, JSON.stringify({ ok: false, error: 'not one of its rows' }), json);
+          return sendJson(res, 409, { ok: false, error: 'not one of its rows' });
         }
         choosing = null;
         dropoffArrived(said, { order: order, cue: 'chooser' });
@@ -14642,7 +14642,7 @@ function route(req, res) {
       // dropoff, rule 5) filed nothing, and the reply says so; the stream has
       // just said why.
       var filed = said.dropoff && !said.dropoff.refused ? body.pick : null;
-      send(res, 200, JSON.stringify({ ok: true, filed: filed }), json);
+      sendJson(res, 200, { ok: true, filed: filed });
     });
   }
 
@@ -14658,11 +14658,10 @@ function route(req, res) {
    * See gpsArrival for what the pin is used for. */
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/held-end') {
     return readBody(req, 4096, function (err, text) {
-      var json = { 'Content-Type': 'application/json; charset=utf-8' };
       var body = null;
       try { body = err ? null : JSON.parse(text); } catch (e) { body = null; }
       if (!body || typeof body !== 'object') {
-        return send(res, 400, JSON.stringify({ ok: false, error: 'not JSON' }), json);
+        return sendJson(res, 400, { ok: false, error: 'not JSON' });
       }
       // The order the pin names, among those in the car: with more than one,
       // a pin for one is not refused for not being the first.
@@ -14677,7 +14676,7 @@ function route(req, res) {
       else if (typeof body.lat !== 'number' || typeof body.lon !== 'number'
                || !isFinite(body.lat) || !isFinite(body.lon)
                || Math.abs(body.lat) > 90 || Math.abs(body.lon) > 180) why = 'no position';
-      if (why) return send(res, 409, JSON.stringify({ ok: false, error: why }), json);
+      if (why) return sendJson(res, 409, { ok: false, error: why });
       // The first valid pin for this dropoff wins — the server's own search
       // (searchHeldEnd) or an earlier post — and a later one is a no-op, so an
       // arrival already counted is never reset by a second opinion.
@@ -14695,7 +14694,7 @@ function route(req, res) {
         resetArrival(holdIdOf(h));
         saveHold(h);
       }
-      send(res, 200, JSON.stringify({ ok: true }), json);
+      sendJson(res, 200, { ok: true });
     });
   }
 
@@ -14712,11 +14711,10 @@ function route(req, res) {
    * page's says no `by`. */
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/held-pickup') {
     return readBody(req, 1024, function (err, text) {
-      var json = { 'Content-Type': 'application/json; charset=utf-8' };
       var body = null;
       try { body = err ? null : JSON.parse(text); } catch (e) { body = null; }
       if (!body || typeof body !== 'object') {
-        return send(res, 400, JSON.stringify({ ok: false, error: 'not JSON' }), json);
+        return sendJson(res, 400, { ok: false, error: 'not JSON' });
       }
       var h = heldById(body.holdId, Date.now());
       var why = null;
@@ -14725,12 +14723,12 @@ function route(req, res) {
       else if (typeof body.lat !== 'number' || typeof body.lon !== 'number'
                || !isFinite(body.lat) || !isFinite(body.lon)
                || Math.abs(body.lat) > 90 || Math.abs(body.lon) > 180) why = 'no position';
-      if (why) return send(res, 409, JSON.stringify({ ok: false, error: why }), json);
+      if (why) return sendJson(res, 409, { ok: false, error: why });
       // The one path this server's own search keeps a pickup by too, guard
       // and all (keepPickupPin).
       keepPickupPin(h, { lat: body.lat, lon: body.lon },
                     typeof body.q === 'string' ? body.q : null, null);
-      send(res, 200, JSON.stringify({ ok: true }), json);
+      sendJson(res, 200, { ok: true });
     });
   }
 
@@ -14755,14 +14753,12 @@ function route(req, res) {
     // the panel keeps the held stops through the press too (live.html's
     // dest button), so a reload and the live panel show the same stops.
     return fs.writeFile(DROPOFF_PATH, '', function (err) {
-      if (err) return send(res, 500, JSON.stringify({ ok: false, error: err.message }),
-                           { 'Content-Type': 'application/json; charset=utf-8' });
+      if (err) return sendJson(res, 500, { ok: false, error: err.message });
       // ...and the same question the same way. This is what the page uses to
       // tell the driver whether the address it is about to read has a job to go
       // onto; answered off the raw slot it would promise one that no longer
       // exists, and the address would land somewhere nothing reads.
-      send(res, 200, JSON.stringify({ ok: true, holding: !!holding(Date.now()) }),
-           { 'Content-Type': 'application/json; charset=utf-8' });
+      sendJson(res, 200, { ok: true, holding: !!holding(Date.now()) });
     });
   }
 
@@ -14787,8 +14783,7 @@ function route(req, res) {
   // check if that ever stops being true; unset, this costs one comparison.
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/journal/ingest') {
     if (SYNC_TOKEN && req.headers['x-sync-token'] !== SYNC_TOKEN) {
-      return send(res, 403, JSON.stringify({ ok: false, error: 'bad token' }),
-                  { 'Content-Type': 'application/json; charset=utf-8' });
+      return sendJson(res, 403, { ok: false, error: 'bad token' });
     }
     return readBody(req, MAX_SYNC_BODY, function (err, text) {
       // Held from here, not from readJournal: the body is already in hand by
@@ -14798,8 +14793,7 @@ function route(req, res) {
       ingestLock(function (release) {
       var fail = function (why, code) {
         release();
-        send(res, code || 400, JSON.stringify({ ok: false, error: why }),
-             { 'Content-Type': 'application/json; charset=utf-8' });
+        sendJson(res, code || 400, { ok: false, error: why });
       };
       var finish = function (body) {
         release();
@@ -14919,8 +14913,7 @@ function route(req, res) {
   if (req.url.split('?')[0] === '/api/places') {
     var placesPath = path.join(path.dirname(JOURNAL_PATH), 'places.json');
     var placesReply = function (code, body) {
-      send(res, code, JSON.stringify(body),
-           { 'Content-Type': 'application/json; charset=utf-8' });
+      sendJson(res, code, body);
     };
     if (req.method === 'GET') {
       return fs.readFile(placesPath, 'utf8', function (readErr, text) {
@@ -15090,13 +15083,11 @@ function route(req, res) {
   // backup landing on it.
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/config/backup') {
     if (SYNC_TOKEN && req.headers['x-sync-token'] !== SYNC_TOKEN) {
-      return send(res, 403, JSON.stringify({ ok: false, error: 'bad token' }),
-                  { 'Content-Type': 'application/json; charset=utf-8' });
+      return sendJson(res, 403, { ok: false, error: 'bad token' });
     }
     return readBody(req, MAX_BODY * 16, function (err, text) {
       var reply = function (code, body) {
-        send(res, code, JSON.stringify(body),
-             { 'Content-Type': 'application/json; charset=utf-8' });
+        sendJson(res, code, body);
       };
       if (err) return reply(400, { ok: false, error: err.message });
       var parsed;
@@ -15178,10 +15169,10 @@ function route(req, res) {
                                  0, CLOCK_BELIEVABLE_UNTIL, 0);
     return readJournal(function (rows, readErr) {
       if (!rows) {
-        return send(res, 200, JSON.stringify({
+        return sendJson(res, 200, {
           ok: false, readable: false,
           error: 'cannot read the journal (' + (readErr && readErr.code || 'unknown') + ')'
-        }), { 'Content-Type': 'application/json; charset=utf-8' });
+        });
       }
       // The driver's tags, and the offers the driver made — typed on the
       // keypad or read by the phone's own scanner — which are rows nothing
@@ -15193,8 +15184,7 @@ function route(req, res) {
                      || r.typed === true || r.browser === true)
           && (r.at || 0) >= sinceNotes;
       });
-      send(res, 200, JSON.stringify({ ok: true, notes: notes }),
-           { 'Content-Type': 'application/json; charset=utf-8' });
+      sendJson(res, 200, { ok: true, notes: notes });
     }, failedRequest(req, res));
   }
 
@@ -15210,11 +15200,11 @@ function route(req, res) {
       // reachable machine goes on to blame it for being out of date. So it
       // answers, says it cannot read, and simply does not offer a number.
       if (!rows) {
-        return send(res, 200, JSON.stringify({
+        return sendJson(res, 200, {
           ok: false, readable: false,
           error: 'cannot read the journal (' + (readErr && readErr.code || 'unknown') + ')',
           can: SYNC_CAN
-        }), { 'Content-Type': 'application/json; charset=utf-8' });
+        });
       }
       // The newest *offer*, not the newest row.
       //
@@ -15278,22 +15268,21 @@ function route(req, res) {
       // strings. A rig spent two rounds on that: the copy machine had not been
       // updated, the only symptom was an error message missing a detail the new
       // build adds, and nothing said so.
-      send(res, 200, JSON.stringify({ ok: true, newest: newest, have: rows.length,
-                                      // So the sender can notice it holds more
-                                      // than this copy does and repair the gap
-                                      // itself, rather than needing somebody to
-                                      // think of running --all.
-                                      offers: offers,
-                                      // ...counted over the window the sender
-                                      // asked about, when it asked. Absent
-                                      // when it did not, and absent from older
-                                      // builds, which is how the sender knows
-                                      // to fall back to the whole-file
-                                      // comparison rather than reading a
-                                      // missing key as a copy holding nothing.
-                                      offersSince: wantWindow ? offersSince : undefined,
-                                      can: SYNC_CAN }),
-           { 'Content-Type': 'application/json; charset=utf-8' });
+      sendJson(res, 200, { ok: true, newest: newest, have: rows.length,
+                           // So the sender can notice it holds more
+                           // than this copy does and repair the gap
+                           // itself, rather than needing somebody to
+                           // think of running --all.
+                           offers: offers,
+                           // ...counted over the window the sender
+                           // asked about, when it asked. Absent
+                           // when it did not, and absent from older
+                           // builds, which is how the sender knows
+                           // to fall back to the whole-file
+                           // comparison rather than reading a
+                           // missing key as a copy holding nothing.
+                           offersSince: wantWindow ? offersSince : undefined,
+                           can: SYNC_CAN });
     }, failedRequest(req, res));
   }
 
@@ -15341,8 +15330,7 @@ function route(req, res) {
   if (req.url.split('?')[0] === '/api/settings'
       && (req.method === 'GET' || req.method === 'POST')) {
     var settingsReply = function (code, body) {
-      send(res, code, JSON.stringify(body),
-           { 'Content-Type': 'application/json; charset=utf-8' });
+      sendJson(res, code, body);
     };
     // A request written and not yet taken, so a panel opened in between can
     // say the change is on its way rather than that it did not happen.
@@ -15437,8 +15425,7 @@ function route(req, res) {
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/crop') {
     return readJsonBody(req, function (err, body) {
       var bad = function (why) {
-        send(res, 400, JSON.stringify({ ok: false, error: why }),
-             { 'Content-Type': 'application/json; charset=utf-8' });
+        sendJson(res, 400, { ok: false, error: why });
       };
       if (err || !body) return bad('bad body');
       var quad = cropQuad(body);
@@ -15457,16 +15444,14 @@ function route(req, res) {
       var tmp = partName(CROP_PATH);
       var failed = function (err) {
         fs.unlink(tmp, function () {});     // never leave a .part behind
-        send(res, 500, JSON.stringify({ ok: false, error: 'could not save the box' }),
-             { 'Content-Type': 'application/json; charset=utf-8' });
+        sendJson(res, 500, { ok: false, error: 'could not save the box' });
         console.error('crop box: ' + err.message);
       };
       fs.writeFile(tmp, JSON.stringify({ quad: quad, card: card }), function (writeErr) {
         if (writeErr) return failed(writeErr);
         fs.rename(tmp, CROP_PATH, function (renameErr) {
           if (renameErr) return failed(renameErr);
-          send(res, 200, JSON.stringify({ ok: true, quad: quad, card: card }),
-               { 'Content-Type': 'application/json; charset=utf-8' });
+          sendJson(res, 200, { ok: true, quad: quad, card: card });
         });
       });
     });
@@ -15477,12 +15462,11 @@ function route(req, res) {
   // no file written; at most MAPWALK_MAX bytes.
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/mapwalk') {
     return readBody(req, MAPWALK_MAX, function (err, text) {
-      var json = { 'Content-Type': 'application/json; charset=utf-8' };
-      if (err) return send(res, err.message === 'too big' ? 413 : 400,
-                           JSON.stringify({ ok: false, error: err.message }), json);
+      if (err) return sendJson(res, err.message === 'too big' ? 413 : 400,
+                               { ok: false, error: err.message });
       var why = keepMapWalk(text, Date.now());
-      if (why) return send(res, 400, JSON.stringify({ ok: false, error: why }), json);
-      send(res, 200, JSON.stringify({ ok: true }), json);
+      if (why) return sendJson(res, 400, { ok: false, error: why });
+      sendJson(res, 200, { ok: true });
     });
   }
 
@@ -15497,11 +15481,9 @@ function route(req, res) {
           ? 'nothing could be kept: ' + err.message
           : 'could not make a folder for it in ' + SNAPS_DIR + ': ' + (err.code || err.message);
         console.error('snap: ' + why);
-        return send(res, 500, JSON.stringify({ ok: false, error: why }),
-                    { 'Content-Type': 'application/json; charset=utf-8' });
+        return sendJson(res, 500, { ok: false, error: why });
       }
-      send(res, 200, JSON.stringify(Object.assign({ ok: true }, record)),
-           { 'Content-Type': 'application/json; charset=utf-8' });
+      sendJson(res, 200, Object.assign({ ok: true }, record));
     });
   }
 
@@ -15510,7 +15492,7 @@ function route(req, res) {
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/snap/note') {
     return readJsonBody(req, function (err, body) {
       var answer = function (status, reply) {
-        send(res, status, JSON.stringify(reply), { 'Content-Type': 'application/json; charset=utf-8' });
+        sendJson(res, status, reply);
       };
       if (err || !body) return answer(400, { ok: false, error: 'bad body' });
       keepSnapNote(body, answer);
@@ -15526,8 +15508,7 @@ function route(req, res) {
   // this door in lite/lite.js before it is reached.
   if (req.url.split('?')[0] === '/api/specialdays' && (req.method === 'GET' || req.method === 'POST')) {
     var spReply = function (code, body) {
-      send(res, code, JSON.stringify(body), { 'Content-Type': 'application/json; charset=utf-8',
-                                             'Cache-Control': 'no-store' });
+      sendJson(res, code, body, { 'Cache-Control': 'no-store' });
     };
     if (req.method === 'GET') return spReply(200, { ok: true, days: specialDaysList() });
     return readJsonBody(req, function (err, body) {
@@ -15603,14 +15584,13 @@ function route(req, res) {
   }
 
   if (pathname === '/api/status') {
-    return send(res, 200, JSON.stringify(statusNow()),
-                { 'Content-Type': 'application/json; charset=utf-8' });
+    return sendJson(res, 200, statusNow());
   }
 
   // The snaps, for snaps.html and for anybody fetching them off the rig.
   if (pathname === '/api/snaps') {
     var shelf = describeSnaps();
-    return send(res, 200, JSON.stringify({
+    return sendJson(res, 200, {
       ok: true,
       // Where they are on the rig, so they can be copied off it some other way.
       where: SNAPS_DIR,
@@ -15624,7 +15604,7 @@ function route(req, res) {
       noteMax: SNAP_NOTE_MAX,
       unreadable: shelf.unreadable,
       snaps: shelf.snaps
-    }), { 'Content-Type': 'application/json; charset=utf-8' });
+    });
   }
 
   // One or several snaps as one .html: /api/snaps/bundle?snap=<folder>&snap=…
@@ -16017,17 +15997,15 @@ function route(req, res) {
     // shape (404, `lite: true`), so the page hides the tab exactly as it
     // would on a door that list shut. Moving it into that list is one line.
     if (LITE) {
-      return send(res, 404, JSON.stringify({ ok: false, lite: true,
-                                             error: 'trends: not part of the lite edition' }),
-                  { 'Content-Type': 'application/json; charset=utf-8' });
+      return sendJson(res, 404, { ok: false, lite: true,
+                                  error: 'trends: not part of the lite edition' });
     }
     var tq2 = url.parse(req.url, true).query || {};
     var tdays = clampNumber(tq2.days, 0, 3650, 30);
     var tsince = clampNumber(tq2.since, 0, CLOCK_BELIEVABLE_UNTIL, 0);
     return readJournal(function (rows, readErr) {
       if (!rows) {
-        return send(res, 503, JSON.stringify({ ok: false, unreadable: readErr && readErr.code || 'unknown' }),
-                    { 'Content-Type': 'application/json; charset=utf-8' });
+        return sendJson(res, 503, { ok: false, unreadable: readErr && readErr.code || 'unknown' });
       }
       var tfloor = tsince || (tdays > 0 ? Date.now() - tdays * 86400000 : 0);
       var tbody = JSON.stringify(trendsOut(rows, tfloor, tdays));
@@ -16061,14 +16039,13 @@ function route(req, res) {
     // the one the page sends.
     if (!isFinite(sinceMs) || sinceMs < CLOCK_BELIEVABLE_AFTER
         || sinceMs > CLOCK_BELIEVABLE_UNTIL) {
-      return send(res, 400, JSON.stringify({
+      return sendJson(res, 400, {
         ok: false,
         error: 'since must be an epoch-ms moment in this century'
-      }), { 'Content-Type': 'application/json; charset=utf-8' });
+      });
     }
     return todaySummary(sinceMs, function (answer) {
-      send(res, 200, JSON.stringify(answer),
-           { 'Content-Type': 'application/json; charset=utf-8' });
+      sendJson(res, 200, answer);
     }, failedRequest(req, res));
   }
 
@@ -16078,12 +16055,10 @@ function route(req, res) {
     var sq = url.parse(req.url, true).query || {};
     var sday = typeof sq.day === 'string' && sq.day ? sq.day : driverDay(Date.now());
     if (!/^\d{4}-\d\d-\d\d$/.test(sday)) {
-      return send(res, 400, JSON.stringify({ ok: false, error: 'day must be YYYY-MM-DD' }),
-                  { 'Content-Type': 'application/json; charset=utf-8' });
+      return sendJson(res, 400, { ok: false, error: 'day must be YYYY-MM-DD' });
     }
     return shiftReported(sday, function (code, answer) {
-      send(res, code, JSON.stringify(answer),
-           { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      sendJson(res, code, answer, { 'Cache-Control': 'no-store' });
     });
   }
 
@@ -16190,8 +16165,7 @@ function servePlaces(req, res, pathname) {
  * is a link. Kept to this one function so it touches no other route. */
 function placesLink(res) {
   function answer(href, from) {
-    send(res, 200, JSON.stringify({ ok: true, href: href, from: from }),
-         { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    sendJson(res, 200, { ok: true, href: href, from: from }, { 'Cache-Control': 'no-store' });
   }
   // The report's own page on another machine: its base made safe, then
   // /places/ and the tab the link is for. null for anything that is not an
