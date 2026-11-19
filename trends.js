@@ -2162,15 +2162,64 @@
     return { points: out, of: pts.length, labels: labels };
   }
 
-  /* --- CSV ------------------------------------------------------------------- */
+  /* --- CSV -------------------------------------------------------------------
+   *
+   * For a spreadsheet, and Excel in particular (the owner, Nov 2026: "could the
+   * CSV output be improved so the dates and times are also Excel friendly for
+   * making charts?"). Every CSV the offers page makes keeps to the same rules:
+   *   - the page puts BOM in front of the text it saves, or Excel opens a
+   *     UTF-8 file in the local code page and the "–" in a label comes out
+   *     as three letters of noise;
+   *   - a missing value is an empty cell, never "null" or "NaN", which Excel
+   *     takes for text and a chart then plots as zero or refuses;
+   *   - a date is 'YYYY-MM-DD' and a moment 'YYYY-MM-DD HH:MM:SS' on the
+   *     driver's clock, the two shapes Excel turns into a date or a
+   *     date-time unasked; a week is the date of its Monday;
+   *   - columns are only ever appended, so a sheet built on last month's file
+   *     still finds its columns where it left them;
+   *   - text a spreadsheet would run as a formula is defused (safeCell). */
+  var BOM = '\ufeff';
+
+  /* A text cell a spreadsheet would read as a formula, led with an apostrophe
+   * (the usual CSV-injection rule: a leading = + - @, tab or carriage
+   * return). Card text can start that way — a misread row of the card's
+   * icons comes back as "-" or "=", Uber's add-on line reads "+ 1 order",
+   * and a store can name itself "@Home Kitchen" — and a pickup that opens as
+   * =HYPERLINK(...) would be a live link the driver never wrote. A plain
+   * number keeps its sign: -3.50 is a figure (paid less the card), not a
+   * formula. The order records CSV in journal.html keeps the same rule. */
+  var FORMULA_LEAD = /^[=+\-@\t\r]/;
+  var PLAIN_NUMBER = /^[-+]?(\d+\.?\d*|\.\d+)$/;
+  function safeCell(s) {
+    return FORMULA_LEAD.test(s) && !PLAIN_NUMBER.test(s) ? "'" + s : s;
+  }
 
   function cell(v) {
     if (v === null || v === undefined) return '';
-    var s = String(v);
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    if (typeof v === 'number' && !isFinite(v)) return '';
+    var s = typeof v === 'number' ? String(v) : safeCell(String(v));
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
+  function csvText(lines) { return lines.map(function (l) { return l.map(cell).join(','); }).join('\n') + '\n'; }
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function dateKey(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+  // Local 'YYYY-MM-DD HH:MM:SS', the end-of-shift report's own stamp (and
+  // journal.html's stampOf): the shape Excel reads as a date-time.
+  function stampOf(ms) {
+    var d = new Date(ms);
+    return dateKey(d) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+  }
+  // '16:00-17:00' for clock hour 16: a label that sorts as it reads, beside
+  // the bare hour a chart's axis wants.
+  function hourLabel(h) { return pad2(h) + ':00-' + pad2((h + 1) % 24) + ':00'; }
+
   // `cut`: the ruler the good column was counted against, printed beside it,
   // so a CSV opened next month still says what "good" meant in it.
+  // Appended (the Excel round, Nov 2026): week_start, the Monday of the
+  // driver week, as a date on both tables, and the driver day's weekday on
+  // the daily one, so a pivot by week or weekday needs no formula. The first
+  // column keeps its name (week_of is already that Monday): sheets read it.
   function csvPeriods(list, goods, by, cut) {
     var gBy = Object.create(null);
     (goods || []).forEach(function (g) { gBy[g.key] = g; });
@@ -2178,7 +2227,7 @@
     METRICS.forEach(function (m) { ['p25', 'p50', 'p75', 'p90'].forEach(function (k) { head.push(m + '_' + k); }); });
     head = head.concat(['uber_offers', 'doordash_offers', 'app_unknown', 'uber_median_per_hour',
                         'doordash_median_per_hour', 'good', 'good_from_per_hour', 'hours_online', 'good_per_online_hour',
-                        'suspect', 'corrected', 'pay_unread', 'boost_known', 'boost_yes']);
+                        'suspect', 'corrected', 'pay_unread', 'boost_known', 'boost_yes', 'week_start', 'weekday']);
     var lines = [head];
     list.forEach(function (e) {
       var row = [e.key, e.n, e.counted];
@@ -2190,17 +2239,122 @@
                         e.apps.doordash.perHour, g.good !== undefined ? g.good : e.good, cut, g.hours, g.rate,
                         e.quality.suspect,
                         e.quality.corrected, e.quality.unread, e.boost ? e.boost.known : '',
-                        e.boost ? e.boost.yes : '']);
+                        e.boost ? e.boost.yes : '',
+                        by === 'week' ? e.key : weekKeyOf(e.key),
+                        by === 'week' ? '' : WEEKDAYS[dateOfKey(e.key).getDay()]]);
       lines.push(row);
     });
-    return lines.map(function (l) { return l.map(cell).join(','); }).join('\n') + '\n';
+    return csvText(lines);
   }
+  // `hours` is the day choice (all, weekday, weekend) and `hour` the clock
+  // hour, a bare integer 0-23; hour_label appended for a category axis.
   function csvHourly(list, label) {
-    var lines = [['hours', 'hour', 'offers', 'counted', 'days', 'p25', 'p50', 'p75', 'p90', 'enough']];
+    var lines = [['hours', 'hour', 'offers', 'counted', 'days', 'p25', 'p50', 'p75', 'p90', 'enough', 'hour_label']];
     list.forEach(function (e) {
-      lines.push([label || 'all', e.hour, e.offers, e.n, e.days, e.p25, e.p50, e.p75, e.p90, e.enough ? 'yes' : 'no']);
+      lines.push([label || 'all', e.hour, e.offers, e.n, e.days, e.p25, e.p50, e.p75, e.p90, e.enough ? 'yes' : 'no',
+                  hourLabel(e.hour)]);
     });
-    return lines.map(function (l) { return l.map(cell).join(','); }).join('\n') + '\n';
+    return csvText(lines);
+  }
+
+  /* EVERY OFFER, ONE ROW EACH (the owner, Nov 2026: "the CSV download does
+   * not seem to include the GPS data", and the dates Excel-friendly). Made in
+   * the owner's browser on a press, from the /api/journal offers of the range
+   * pressed (fetched uncapped where the page's own copy was cut): nothing new
+   * is sent anywhere, and /api/trends still carries no position. One row per
+   * offer id, the newest copy (distinct, the fold's rule), oldest first.
+   *
+   * THE CLOCK. `datetime` is when the card appeared (seenAt: the fold's
+   * firstAt), local; `date`, `time`, `weekday` and `hour` are that moment's
+   * calendar; `driver_day` is the 4am-to-4am day it belongs to (dayKeyOf, the
+   * page's and the report's: 1am Saturday is Friday night), with its weekday,
+   * and `week_start` that driver day's Monday. The night the clocks go back
+   * (1 Nov 2026) the two 1:30ams print alike, as the wall clock read; both
+   * belong to the driver day before.
+   *
+   * WHAT THE PAGE KNOWS, AND NO MORE. `panel_said` is the verdict the panel
+   * printed in the car (the row's own state); `driver_marked` is the driver's
+   * own word only — taken for a ✓, passed for a Passed — and EMPTY otherwise:
+   * a card nobody answered for is not a take (Settled, silence is never read
+   * as an accept). `during_job` is yes where Advice.busy put the card inside
+   * a ticked job or the rig recorded a pairing for it (the page's own
+   * marks), else empty.
+   *
+   * GOOD is this range's own ruler, trends.js's: the card's $/hr in the top
+   * CSV_TOP% of the range's money rows (ruler), the cut the Trends tab draws
+   * at its default, so the column is named for what it is
+   * (good_top20_of_range) and the cut goes back to the page to print. Empty on
+   * a row the money does not count (pay unread, suspect).
+   *
+   * GPS is the car's own fix on the card (journal.py fix_fields): lat and lon
+   * to six places, the gate's yes or no, its error in metres and its age in
+   * seconds, wherever the row carries a coordinate — a fix the gate refused
+   * is written with gps_ok "no", for a sheet to filter — and empty where it
+   * carries none (no receiver, no fix, or a row written under keepPlaces
+   * off, which keeps no position). `keepPlaces` false, as the server reports
+   * the rig's setting now, empties the GPS and place columns on every row, as
+   * the order records CSV empties a record kept with places off
+   * (recordPlaces): the driver chose not to keep where he was, so the export
+   * does not either. The columns stay, so the sheet's shape does not move
+   * with the setting. Pickup and dropoff are the row's own, as printed. */
+  var CSV_TOP = 20;
+  var OFFER_COLUMNS = ['datetime', 'date', 'time', 'weekday', 'hour', 'driver_day', 'driver_weekday', 'week_start',
+                       'app', 'pay', 'boost', 'card_minutes', 'card_miles', 'per_hour', 'per_mile',
+                       'panel_said', 'driver_marked', 'during_job', 'good_top' + CSV_TOP + '_of_range',
+                       'counted', 'suspect', 'doubt', 'pay_reread', 'pay_unread',
+                       'lat', 'lon', 'gps_ok', 'gps_err_m', 'gps_age_s', 'pickup', 'dropoff', 'offer_id'];
+  var SAID = { go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' };
+  function fixed(v, places) { return num(v) === null ? null : Number(v.toFixed(places)); }
+  function yn(b) { return b ? 'yes' : 'no'; }
+  function offersCsv(offers, opts) {
+    opts = opts || {};
+    var busy = opts.busy || {}, paired = opts.paired || {};
+    var noPlaces = opts.keepPlaces === false;
+    var list = distinct(offers);
+    var rule = ruler(readRows(rowsOf(list)), CSV_TOP);
+    var lines = [OFFER_COLUMNS.slice()];
+    var gps = 0;
+    list.map(function (o) { return { o: o, t: seenAt(o) }; })
+      .sort(function (a, b) { return (a.t === null ? Infinity : a.t) - (b.t === null ? Infinity : b.t); })
+      .forEach(function (x) {
+        var o = x.o, t = x.t;
+        // The row as the ruler read it (packed to the cent, the money rule
+        // applied), so "good" here counts exactly what the Trends tab counts.
+        var r = t === null ? null : readRows(rowsOf([o]))[0];
+        var when = t === null ? null : new Date(t);
+        var day = t === null ? null : dayKeyOf(t);
+        var hasFix = !noPlaces && num(o.lat) !== null && num(o.lon) !== null;
+        if (hasFix) gps += 1;
+        var pay = o.payUnread === true ? null : num(o.pay);
+        var boost = !Object.prototype.hasOwnProperty.call(o, 'boost') || o.boost === null ? null
+          : typeof o.boost === 'number' ? o.boost : yn(!!o.boost);
+        var c = o.corrected && typeof o.corrected === 'object' ? o.corrected : null;
+        // Counted as the page counts (trustworthy, with a rate): the rows
+        // every money figure, and the ruler, are over.
+        var ok = !!(r && r.ok && r.perHour !== null);
+        lines.push([
+          when ? stampOf(t) : null, when ? dateKey(when) : null,
+          when ? pad2(when.getHours()) + ':' + pad2(when.getMinutes()) : null,
+          when ? WEEKDAYS[when.getDay()] : null, when ? when.getHours() : null,
+          day, day ? WEEKDAYS[dateOfKey(day).getDay()] : null, day ? weekKeyOf(day) : null,
+          o.app === 'uber' || o.app === 'doordash' ? o.app : null,
+          fixed(pay, 2), boost, fixed(o.minutes, 1), fixed(o.miles, 1), fixed(o.perHour, 2),
+          pay !== null && num(o.miles) !== null && o.miles >= 0.1 ? fixed(pay / o.miles, 2) : null,
+          SAID[o.state] || null,
+          o.accepted === true ? 'taken' : o.accepted === false ? 'passed' : null,
+          typeof o.id === 'string' && (busy[o.id] || paired[o.id]) ? 'yes' : null,
+          ok && rule.cut !== null ? yn(isGood(r, rule.cut)) : null,
+          yn(ok), yn(!!o.suspect), typeof o.doubt === 'string' ? o.doubt : null,
+          yn(!!(c && typeof c.to === 'number')), yn(o.payUnread === true),
+          hasFix ? fixed(o.lat, 6) : null, hasFix ? fixed(o.lon, 6) : null,
+          hasFix ? yn(o.gpsOk === true) : null, hasFix ? fixed(o.gpsErr, 1) : null,
+          hasFix ? fixed(o.gpsAge, 1) : null,
+          noPlaces || typeof o.pickup !== 'string' ? null : o.pickup,
+          noPlaces || typeof o.dropoff !== 'string' ? null : o.dropoff,
+          typeof o.id === 'string' ? o.id : null
+        ]);
+      });
+    return { text: csvText(lines), rows: lines.length - 1, gps: gps, cut: rule.cut, top: CSV_TOP };
   }
 
   return {
@@ -2223,6 +2377,8 @@
     onlinePieces: onlinePieces, hoursByCell: hoursByCell, cellDetail: cellDetail,
     periods: periods, hoursBy: hoursBy, onlineHoursBy: onlineHoursBy, goodPerHour: goodPerHour, hourly: hourly, monthsOf: monthsOf,
     grid: grid, calendar: calendar, fit3: fit3, rateFit: rateFit, rateCard: rateCard,
-    compare: compare, scatter: scatter, csvPeriods: csvPeriods, csvHourly: csvHourly
+    compare: compare, scatter: scatter, csvPeriods: csvPeriods, csvHourly: csvHourly,
+    BOM: BOM, safeCell: safeCell, hourLabel: hourLabel, offersCsv: offersCsv, OFFER_COLUMNS: OFFER_COLUMNS,
+    CSV_TOP: CSV_TOP
   };
 }));

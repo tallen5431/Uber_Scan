@@ -262,12 +262,15 @@ function outingOf(at) {
 /* The 2-mile cell a point is in, as { id, s, w, n, e, lat, lon }. Rows of
  * GRID_MI/69 degrees of latitude; each row's columns as wide as GRID_MI at
  * that row's middle, so a cell is about square wherever it is. */
-function cellOf(at) {
+function cellOf(at) { return gridCell(at, GRID_MI); }
+// ...and the same squares at any size (the Offers around you tab's
+// quarter-mile bins), so there is one grid rule.
+function gridCell(at, mi) {
   if (!at || !isFinite(at.lat) || !isFinite(at.lon)) return null;
-  var dLat = GRID_MI / 69.0;
+  var dLat = mi / 69.0;
   var i = Math.floor(at.lat / dLat);
   var mid = (i + 0.5) * dLat;
-  var dLon = GRID_MI / (69.0 * Math.max(0.2, Math.cos(mid * Math.PI / 180)));
+  var dLon = mi / (69.0 * Math.max(0.2, Math.cos(mid * Math.PI / 180)));
   var j = Math.floor(at.lon / dLon);
   return { id: i + ':' + j, s: round5(i * dLat), n: round5((i + 1) * dLat),
            w: round5(j * dLon), e: round5((j + 1) * dLon),
@@ -1464,6 +1467,168 @@ function whenWhere(offers, waiting, rulers) {
            tops: WW_TOPS, top: WW_TOP, cuts: cuts, offers: rates.length,
            phi: { town: phi.town.map(round2), cell: phi.cell.map(round2), line: phi.line.map(round2) },
            cards: line.length, minHours: WW_MIN_HOURS, minDays: WW_MIN_DAYS, conf: WW_CONF, slots: slots };
+}
+
+/* --- offers around you: where the car was when each offer came up ---------
+ *
+ * The owner (Nov 2026): "I am also very curious what the relationship
+ * between my GPS location and the offers observed looks like." The Waited
+ * and When & where tabs answer it as tables of areas; this draws it: the
+ * car's own gated fix on every card that came with no order in the car (the
+ * Waited tab's line, waitingLine, word for word), one dot per offer,
+ * coloured good or not against the fixed ruler — When & where's cutoffs,
+ * the top 10/20/30/50% of every counted offer in the range, worked out once
+ * and held across every slot — with that tab's Day and Hours pickers. Never
+ * a pin, never DoorDash's map label (approximate drawing only, Settled):
+ * the car's own fix or nothing. Read only: no verdict, target, panel or
+ * accept line reads it, and it is on the NucBox's report, never the rig.
+ *
+ * WHY DOTS AND NOT A COLOURED GRID. A grid coloured by its share of good
+ * offers is the heat map AUDITS.md refuted: a fixed band edge read off a
+ * dozen offers takes the wrong colour a fifth of the time with no effect at
+ * all. A dot is one offer and its colour is that offer's own fact (its $/hr
+ * against one dollar cutoff), so no estimate is coloured and none can be
+ * miscoloured; the eye does the pooling and the rings chart below says
+ * what the pooling is worth, with its interval. Dense places are handled by
+ * position, not by a bin colour: each dot is drawn at its quarter-mile
+ * bin's centre, spread on a sunflower inside the bin, so a busy car park
+ * reads as a disc of dots whose mix of colours is the mix of offers.
+ *
+ * WHY QUARTER-MILE BINS, AND ONLY ON TWO SHIFT DAYS. A raw fix to six
+ * places is a door: a card that came just after a drop puts the car at a
+ * customer's house, and the report writes no dropoff's position anywhere.
+ * So a dot carries only its bin (AROUND_BIN_MI, about 400 m a side, a few
+ * dozen houses in a suburb), and a bin is drawn only where the car was seen
+ * there on AROUND_BIN_DAYS separate shift days (the report's own two-day
+ * rule): a place waited in again, not a door passed once. The cards that
+ * fall in a one-day bin are counted on the page, never drawn.
+ *
+ * GOING ONLINE AT HOME NEVER DRAWS HOME. Two rules, both chosen, not
+ * measured (homeOf):
+ *   - each driver day's STARTING STAY: every card before the car's fix
+ *     first lies more than HOME_MI from that day's first fix. Whatever the
+ *     day began at is left out until the car has left it;
+ *   - a USUAL START: a day's first fix within HOME_MI of another day's
+ *     first fix. Every card within HOME_MI of a usual start is left out, on
+ *     any day, so a break at home mid-shift is not drawn either.
+ * HOME_MI is 0.3 mi, the report's own PLACE_APPROX_MI (candidates that
+ * close are one place): about six times the GPS gate's worst error (50 m),
+ * so parking on the other side of the street is still home, and small
+ * enough that a restaurant row a street over survives. The cost is real
+ * and said on the page: a day begun at a restaurant cluster loses that
+ * first stay, and a usual start that is a car park, not a house, is never
+ * drawn. The counts left out are on the page. The When & where, Waited and
+ * Busy tables do not apply this yet (AUDITS.md, Open).
+ *
+ * THE CHARTS BESIDE IT need no map: (a) the share of offers that were good
+ * by distance from the driver's most-used waiting area — the 2-mile cell
+ * with the most credited waiting hours among the dots drawn (so never the
+ * home cell), rings of AROUND_RING_MI from its centre, a Wilson interval on
+ * each share, figures at DESC_MIN_N offers; (b) good offers per hour waited
+ * by area for the slot picked, which is When & where's own slot table
+ * (R.whenwhere.slots), drawn and not worked out again; (c) the share good
+ * by the card's own drive to the pickup (toPickupMiles: the approach leg
+ * offer-parser.js splits off where the card prints it, mostly Uber's "x min
+ * (y mi) away"), every counted offer, no GPS needed. All three are
+ * descriptive: no test ranks them and no rule is drawn from them — no $/mi
+ * or distance rule, no floor.
+ *
+ * The data are columns, the dots' bin, rate, driver weekday, driver-day
+ * hour and ring, so 5,000 dots are about 90 kB; no id, time, text, door or
+ * raw coordinate of a card. */
+var AROUND_BIN_MI = 0.25;
+var AROUND_BIN_DAYS = MIN_OUTINGS;
+var HOME_MI = PLACE_APPROX_MI;
+var AROUND_RING_MI = 1;
+var AROUND_RINGS = 10;   // the last ring holds 10 mi and beyond
+var PICKUP_BANDS = [[0, 1, 'under 1 mi'], [1, 2, '1–2 mi'], [2, 3, '2–3 mi'], [3, 5, '3–5 mi'],
+                    [5, Infinity, '5 mi or more']];
+
+function round4(v) { return Math.round(v * 1e4) / 1e4; }
+
+/* Which cards' fixes are home, by the two rules above: a Map of the offer
+ * row to 'start' or 'usual', and the counts. Every row with a gated fix is
+ * read, an order in the car or not: a card on the way to a pickup is the car
+ * moving, which is what ends a starting stay. */
+function homeOf(offers) {
+  var line = timelineOf(offers || []).map(function (t) { return { at: t.at, o: t.o, fix: MV.fixOf(t.o) }; })
+    .filter(function (x) { return x.fix; });
+  var byDay = groupBy(line, function (x) { return outingOf(x.at); });
+  var why = new Map(), starts = [];
+  Object.keys(byDay).sort().forEach(function (d) {
+    var list = byDay[d], first = list[0].fix;
+    starts.push(first);
+    for (var i = 0; i < list.length; i++) {
+      if (MV.crowMiles(first, list[i].fix) > HOME_MI) break;
+      why.set(list[i].o, 'start');
+    }
+  });
+  var usual = starts.filter(function (s, i) {
+    return starts.some(function (t, j) { return j !== i && MV.crowMiles(s, t) <= HOME_MI; });
+  });
+  if (usual.length) {
+    line.forEach(function (x) {
+      if (why.has(x.o)) return;
+      if (usual.some(function (u) { return MV.crowMiles(u, x.fix) <= HOME_MI; })) why.set(x.o, 'usual');
+    });
+  }
+  return { why: why, days: starts.length, usualDays: usual.length };
+}
+
+function aroundYou(offers, waiting, ww) {
+  var home = homeOf(offers);
+  var left = { start: 0, usual: 0, oneDay: 0, noFix: 0 };
+  var pts = [];
+  (waiting || []).forEach(function (w) {
+    if (!w.fix) { left.noFix += 1; return; }
+    var hw = home.why.get(w.o);
+    if (hw) { left[hw] += 1; return; }
+    var s = wwSlotOf(w.at);
+    if (!s) return;
+    pts.push({ bin: gridCell(w.fix, AROUND_BIN_MI), cell: cellOf(w.fix), mins: w.credit, rate: w.o.perHour,
+               d: s.day, h: s.hour, outing: outingOf(w.at) });
+  });
+  var binDays = Object.create(null);
+  pts.forEach(function (p) { (binDays[p.bin.id] = binDays[p.bin.id] || Object.create(null))[p.outing] = true; });
+  var kept = pts.filter(function (p) { return Object.keys(binDays[p.bin.id]).length >= AROUND_BIN_DAYS; });
+  left.oneDay = pts.length - kept.length;
+  // The most-used waiting area: the 2-mile cell with the most credited
+  // minutes among the dots drawn; ties to the lower id, so a re-run agrees.
+  var mins = Object.create(null), boxes = Object.create(null);
+  kept.forEach(function (p) { mins[p.cell.id] = (mins[p.cell.id] || 0) + p.mins; boxes[p.cell.id] = p.cell; });
+  var topCell = Object.keys(mins).sort(function (a, b) { return mins[b] - mins[a] || (a < b ? -1 : 1); })[0];
+  var centre = topCell ? boxes[topCell] : null;
+  var binIdx = Object.create(null), bins = [];
+  var dots = { b: [], r: [], d: [], h: [], g: [] };
+  kept.forEach(function (p) {
+    if (!(p.bin.id in binIdx)) { binIdx[p.bin.id] = bins.length; bins.push([round4(p.bin.lat), round4(p.bin.lon)]); }
+    dots.b.push(binIdx[p.bin.id]);
+    dots.r.push(round2(p.rate));
+    dots.d.push(p.d);
+    dots.h.push(p.h);
+    // Measured from the bin's centre, the only position the dot keeps.
+    var mi = centre ? MV.crowMiles({ lat: p.bin.lat, lon: p.bin.lon }, centre) : null;
+    dots.g.push(mi === null ? null : Math.min(AROUND_RINGS, Math.floor(mi / AROUND_RING_MI)));
+  });
+  // The card's own drive to the pickup, every counted offer, no GPS needed.
+  var pick = { b: [], r: [], d: [], h: [] };
+  (offers || []).forEach(function (o) {
+    if (!counted(o) || typeof o.toPickupMiles !== 'number' || !isFinite(o.toPickupMiles) || o.toPickupMiles < 0) return;
+    var s = wwSlotOf(seenAt(o));
+    if (!s) return;
+    for (var i = 0; i < PICKUP_BANDS.length; i++) {
+      if (o.toPickupMiles >= PICKUP_BANDS[i][0] && o.toPickupMiles < PICKUP_BANDS[i][1]) break;
+    }
+    pick.b.push(i); pick.r.push(round2(o.perHour)); pick.d.push(s.day); pick.h.push(s.hour);
+  });
+  return { binMi: AROUND_BIN_MI, binDays: AROUND_BIN_DAYS, homeMi: HOME_MI, ringMi: AROUND_RING_MI,
+           // When & where's blocks as driver-day hours, for the Hours picker.
+           blockHours: WW_BLOCKS.map(function (bk) { return [bk[0], bk[1]]; }),
+           rings: AROUND_RINGS, cards: (waiting || []).length, bins: bins, dots: dots, left: left,
+           homeDays: home.days, usualDays: home.usualDays,
+           centre: centre ? { cell: topCell, lat: centre.lat, lon: centre.lon,
+                              hours: Math.round(mins[topCell] / 6) / 10 } : null,
+           pickup: { bands: PICKUP_BANDS.map(function (p) { return p[2]; }), b: pick.b, r: pick.r, d: pick.d, h: pick.h } };
 }
 
 /* --- after a drop, the next offer of any kind ------------------------------
@@ -2926,6 +3091,8 @@ function analyse(offers, taken, placed, dropAt, opts) {
   // When & where: the same line, by the driver's weekday and block.
   var rulers = reportRulers(offers);
   var whenwhere = whenWhere(offers, waiting, rulers);
+  // Offers around you: the same line drawn as dots, home left out (aroundYou).
+  var around = aroundYou(offers, waiting, whenwhere);
   var tookRuns = (taken || []).filter(function (t) { return t && typeof t.tookAt === 'number'; });
   // Spells parked with no order in the car (main reads them off the GPS
   // log): each to its 2-mile cell and, where the NucBox named one, the town
@@ -3124,6 +3291,7 @@ function analyse(offers, taken, placed, dropAt, opts) {
             streets: opts.streetsSaid || null, road: opts.roadSaid || null },
     targets: targets,
     whenwhere: whenwhere,
+    around: around,
     strategy: strategy,
     places: grouped.places,
     restNames: names.labels,
@@ -3534,6 +3702,7 @@ function html(r) {
   SEC.strategy = STRATEGY_SECTION(r);
   SEC.best = BEST_SECTION(r);
   SEC.whenwhere = WHENWHERE_SECTION(r);
+  SEC.around = AROUND_SECTION(r);
   SEC.places = '<section data-tab="places"><h2>Places — a store at a location</h2><p class="note">A place is a pin at door, '
     + 'corner or name level, or an approximate placement where it is that store\'s: within ' + PLACE_SAME_MI
     + ' mi of a door or name pin of the same store, or its own candidates no more than ' + r.best.placeApproxMi
@@ -4251,6 +4420,7 @@ var GROUPS = [
     ['ppm', '$/mi', 'Pay over the card\'s miles per area — for reading, not a rule.', true]]],
   ['where', 'Where & when', [
     ['whenwhere', 'When & where', 'Which area gave the most good offers per hour waited, on the day and hours you pick.', false],
+    ['around', 'Offers around you', 'Where the car was when each offer came up, good or not, home left out (the map needs the internet).', false],
     ['places', 'Places', 'Pinned pickups ranked against the same hours elsewhere.', true],
     ['restaurants', 'Restaurants', 'Pay by the name on the card, placed or not.', true],
     ['map', 'Map', 'The places and the 2-mile grid on a map (needs the internet).', true],
@@ -4425,6 +4595,75 @@ function WHENWHERE_SECTION(r) {
     + '</section>\n';
 }
 
+/* The Offers around you tab (aroundYou). The pickers are When & where's —
+ * the same choices, the same driver day and blocks and hours, the same
+ * cutoffs — with their own ids, so each tab keeps its own pick. What is
+ * left out, and why, is written here, so a page with no script (or no
+ * internet for the map) still says it. */
+function AROUND_SECTION(r) {
+  var a = r.around, w = r.whenwhere, ti = w.tops.indexOf(w.top), L0 = a.left;
+  function opt(v, text, on, name) {
+    return '<option value="' + esc(v) + '"' + (on ? ' selected' : '') + (name ? ' data-name="' + esc(name) + '"' : '')
+      + '>' + esc(text) + '</option>';
+  }
+  var drawn = a.dots.b.length;
+  return '<section data-tab="around"><h2>Offers around you — where the car was when each offer came up</h2>'
+    + '<p class="exp">Experimental, descriptive. <b>Offered, not earned</b>: offers are dispatched near the car, so '
+    + 'this shows the offers that came where you already wait, not what a place you never tried would send. '
+    + 'Nothing here is a rule, and nothing on the rig reads it.</p>'
+    + '<p class="note">One dot per offer that came with no order in the car (the Waited tab\'s line: '
+    + a.cards + ' cards), at the car\'s own GPS fix the gate passed — never a pin, never DoorDash\'s map label. '
+    + '<span class="k up">●</span> good: its $/hr at or over the cutoff picked, the same dollars in every slot '
+    + '(<b id="aCut">' + (w.cuts[ti] === null ? 'no offers yet' : 'top ' + w.top + '%: ≥ ' + money(w.cuts[ti]) + '/hr')
+    + '</b>); <span class="k grey">●</span> the rest. Each dot sits in its ' + a.binMi + '-mile square, spread inside '
+    + 'it, so a busy spot is a disc of dots whose colours are its offers: a dot is one offer, never an area\'s '
+    + 'average, so no square is coloured by a share. A square is drawn only where the car was on ' + a.binDays
+    + ' shift days or more, so a door passed once (a drop) is never a dot. <b>Home is left out</b>: each day\'s '
+    + 'starting stay (every card before the car first moves more than ' + a.homeMi + ' mi from where the day began) '
+    + 'and every card within ' + a.homeMi + ' mi of a place two or more days began at — so going online at home '
+    + 'never draws home. That also leaves out a day begun at a restaurant until the car leaves it. Left out: '
+    + L0.start + ' cards in a starting stay, ' + L0.usual + ' near a usual start (' + a.usualDays + ' of '
+    + a.homeDays + ' days began at one), ' + L0.oneDay + ' in a square seen on one day only, ' + L0.noFix
+    + ' with no fix the gate passed. ' + drawn + ' dots drawn.</p>'
+    + '<div class="bar" id="aBar">'
+    + '<label>Day <select id="aDay">' + w.dayOpts.map(function (o) {
+      return opt(o, wwDayName(o), o === 'any', wwDayName(o));
+    }).join('') + '</select></label>'
+    + '<label>Hours <select id="aBlock">' + w.blockOpts.map(function (o) {
+      var nm = o === 'any' ? 'Any time' : w.blocks[Number(o)];
+      return opt(o, nm, o === 'any', nm);
+    }).join('')
+    + '<optgroup label="One hour">' + w.hourOpts.map(function (o, i) {
+      return opt(o, w.hours[i], false, w.hours[i]);
+    }).join('') + '</optgroup></select></label>'
+    + '<label>Good <select id="aTop">' + w.tops.map(function (t, i) {
+      return opt(String(i), 'top ' + t + '%' + (w.cuts[i] === null ? '' : ' (≥ ' + money(w.cuts[i]) + '/hr)'), i === ti);
+    }).join('') + '</select></label></div>'
+    + '<p class="lead" id="aSays"></p>'
+    + '<div id="aMap" class="amap" role="img" aria-label="Where the car was when each offer came up"></div>'
+    + '<p class="note" id="aMapNote"></p>'
+    + '<h3>Good offers by distance from your most-used waiting area</h3>'
+    + '<p class="note">' + (a.centre ? 'Rings of ' + a.ringMi + ' mile from the centre of the ' + r.gridMi
+      + '-mile cell where the car waited longest among the dots drawn (' + a.centre.hours + ' h credited, the home '
+      + 'stays already out), measured from each dot\'s square. The share of each ring\'s offers that were good, '
+      + 'with its 95% Wilson interval; a ring under ' + r.descMinN + ' offers gives its n only. The last ring is '
+      + a.rings + ' mi and beyond.' : 'No dot to measure from yet.') + '</p>'
+    + '<div id="aRings" class="hbars"></div>'
+    + '<h3>Good offers per hour waited, by area, for the slot picked</h3>'
+    + '<p class="note">When &amp; where\'s own table for the same day and hours, drawn: good offers per hour waited '
+    + 'there, its 99% interval as the whisker, coloured only where that tab marks it (wholly above or below the '
+    + 'slot\'s own rate). Ranked at ' + w.minHours + ' h on ' + w.minDays + ' shift days. That table counts every '
+    + 'waiting card, so home is not left out of it yet (AUDITS.md, Open).</p>'
+    + '<div id="aAreas" class="hbars"></div>'
+    + '<h3>Good offers by the card\'s own drive to the pickup</h3>'
+    + '<p class="note">Needs no GPS: the miles to the pickup the card itself printed ("x min (y mi) away", the leg '
+    + 'offer-parser.js splits off where the card prints it — mostly Uber\'s), over every counted offer in the slot, '
+    + 'an order in the car or not. The share good at the cutoff picked (95% Wilson) and the median $/hr; a band '
+    + 'under ' + r.descMinN + ' offers gives its n only. To read, not a distance rule.</p>'
+    + '<div id="aPickup" class="hbars"></div>'
+    + '</section>\n';
+}
+
 /* The Best offers tab: plain lines first, then where good offers turn up
  * per hour of waiting and what working an area paid, then the share tests,
  * then the descriptive tables. */
@@ -4541,6 +4780,24 @@ function METHOD(r) {
     + 'against every slot together. A card\'s credit counts in the hour its card came up in, though up to '
     + r.waited.creditMaxMin + ' min of it may run into the next. <b>Offered, not earned</b>, and descriptive: it never feeds the '
     + 'rig, a verdict, the target or the accept line, and the line is not tuned to an hour or a weekday.</li>'
+    + '<li><b>Offers around you</b>: the same line as When &amp; where (no order in the car, the car\'s own gated '
+    + 'fix), one dot per offer, coloured by its own $/hr against When &amp; where\'s fixed cutoff for the top share '
+    + 'picked, with that tab\'s Day and Hours choices. <b>Dots, not a coloured grid</b>: a dot is one offer\'s own '
+    + 'fact, so nothing estimated is coloured (AUDITS.md\'s heat-map entry measured a band-coloured grid '
+    + 'miscolouring a fifth of its cells at a dozen offers). Each dot keeps only its ' + r.around.binMi + '-mile '
+    + 'square (gridCell, the 2-mile grid\'s rule at a quarter mile) and is drawn on a sunflower inside it; a square '
+    + 'is drawn only where the car was on ' + r.around.binDays + ' shift days or more, so a door passed once after a '
+    + 'drop is never a dot (chosen, the report\'s own two-day rule). <b>Home</b> (chosen, not measured): each driver '
+    + 'day\'s starting stay — every card before the car\'s fix first lies more than ' + r.around.homeMi + ' mi from '
+    + 'that day\'s first fix — and every card within ' + r.around.homeMi + ' mi of a first fix two or more days share, '
+    + 'on any day, are left out; ' + r.around.homeMi + ' mi is the report\'s distance for one place, about six times the '
+    + 'GPS gate\'s worst error. <b>Rings</b>: whole miles from the centre of the ' + r.gridMi + '-mile cell with the '
+    + 'most credited waiting hours among the dots drawn, measured from each dot\'s square; the share good with '
+    + 'Wilson\'s 95% interval at ' + r.descMinN + ' offers. <b>Areas</b>: When &amp; where\'s own slot table, drawn, '
+    + 'home not left out of it (AUDITS.md, Open). <b>Drive to the pickup</b>: the card\'s own toPickupMiles '
+    + '(offer-parser.js\'s split of the approach leg, where the card prints one), every counted offer, no GPS: '
+    + 'the share good and the median $/hr per band (' + r.around.pickup.bands.join(', ') + '). Descriptive, like '
+    + 'everything here: no distance or $/mi rule, no floor, and nothing reaches the rig.</li>'
     + '</ul>';
 }
 
@@ -4663,6 +4920,21 @@ var PAGE_CSS = [
   '.wwstrip button.thin{background:transparent;color:var(--muted);font-style:italic}',
   '.wwstrip button.none{background:transparent;color:var(--muted);border-style:dashed}',
   '.wwstrip button.in{box-shadow:inset 0 -3px 0 var(--ink2)}.wwstrip button.on{outline:2px solid var(--ink);outline-offset:1px}',
+  // Offers around you: the map (or the dots on a blank square without the
+  // internet), and the three bar charts as rows, a phone's width each.
+  '.amap{height:460px;border-radius:8px;border:1px solid var(--grid);background:var(--surface);overflow:hidden}',
+  '.amap svg{display:block;width:100%;height:100%}',
+  '.hbars{display:grid;gap:4px;margin:6px 0 10px;font-size:13px;font-variant-numeric:tabular-nums}',
+  '.hb{display:grid;grid-template-columns:minmax(84px,30%) minmax(0,1fr) auto;gap:8px;align-items:center}',
+  '.hb .nm{overflow-wrap:anywhere}.hb .fig{text-align:right;color:var(--ink2);white-space:nowrap;font-size:12px}',
+  '.hb .track{position:relative;height:16px;background:var(--grid);border-radius:3px}',
+  '.hb .fill{position:absolute;left:0;top:0;bottom:0;background:var(--grey);border-radius:3px}',
+  '.hb .fill.up{background:var(--up)}.hb .fill.down{background:var(--down)}',
+  '.hb .wh{position:absolute;top:7px;height:2px;background:var(--ink)}',
+  '.hb.thinrow .nm,.hb.thinrow .fig{color:var(--muted);font-style:italic}',
+  // On a phone the figures go under the bar: beside it they pushed the page sideways.
+  '@media (max-width:640px){.hb{grid-template-columns:minmax(70px,32%) minmax(0,1fr)}',
+  '.hb .fig{grid-column:2;text-align:left;white-space:normal}}',
 ].join('\n');
 
 /* The page's script: it switches between views computed above and draws them.
@@ -5136,6 +5408,12 @@ var PAGE_JS = String(function page() {
       drawMap(R.views[sel.value]);
       if (map) map.invalidateSize();
     }
+    // Drawn when first shown (a Leaflet map made in a hidden section has no
+    // size), and again on each pick.
+    if (id === 'around') {
+      drawAround();
+      if (aMap) { aMap.invalidateSize(); drawAround(); }
+    }
   }
   // A new tab starts at its top: a press from far down a long table would
   // otherwise open the next tab somewhere in its middle.
@@ -5345,6 +5623,195 @@ var PAGE_JS = String(function page() {
   ['wwDay', 'wwBlock', 'wwTop', 'wwUnit'].forEach(function (id) {
     var e0 = document.getElementById(id);
     if (e0) e0.addEventListener('change', drawWW);
+  });
+  /* Offers around you (aroundYou): the dots of the slot picked, coloured by
+     the cutoff picked, on the Map tab's own Leaflet and tiles — or, with no
+     internet, on a blank square — and three bar charts. This tab is the
+     page's one exception to "computes no statistic of its own": the counts
+     by ring and band over the slot picked, a median, and Wilson's interval
+     on each share (the report's own wilson()), because the dots are already
+     here and every slot of them worked out beforehand would be most of the
+     file. The rings, the bands and the cutoffs are the server's. */
+  function wilsonP(k, n) {
+    if (!n) return null;
+    var z = 1.96, p = k / n, dd = 1 + z * z / n;
+    var mid = (p + z * z / (2 * n)) / dd, half = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / dd;
+    return [Math.max(0, mid - half), Math.min(1, mid + half)];
+  }
+  function aPick(d, b, day, h) {
+    var A0 = R.around;
+    if (d === 'wkday' && !(day >= 1 && day <= 5)) return false;
+    if (d === 'wkend' && !(day === 0 || day === 6)) return false;
+    if (/^\d$/.test(d) && Number(d) !== day) return false;
+    if (b === 'any') return true;
+    if (b[0] === 'h') return Number(b.slice(1)) === h;
+    var bl = A0.blockHours[Number(b)];
+    return h >= bl[0] && h < bl[1];
+  }
+  function hbRow(name, frac, cls, fig, whisk, thin) {
+    return '<div class="hb' + (thin ? ' thinrow' : '') + '"><span class="nm">' + esc(name) + '</span><span class="track">'
+      + (frac === null ? '' : '<span class="fill' + (cls ? ' ' + cls : '') + '" style="width:'
+         + Math.max(0, Math.min(100, frac * 100)).toFixed(1) + '%"></span>')
+      + (whisk ? '<span class="wh" style="left:' + (whisk[0] * 100).toFixed(1) + '%;width:'
+         + Math.max(0.5, (whisk[1] - whisk[0]) * 100).toFixed(1) + '%"></span>' : '')
+      + '</span><span class="fig">' + fig + '</span></div>';
+  }
+  var aMap = null, aLayer = null;
+  // Each dot of a square at a point of a sunflower inside it, in miles from
+  // the square's centre: spread by geography, so it scales with the zoom.
+  function spread(list, binMi) {
+    var out = [], n = list.length;
+    list.forEach(function (x, j) {
+      var rr = 0.42 * binMi * Math.sqrt((j + 0.5) / n), th = j * 2.399963;
+      out.push({ x: x, dy: rr * Math.cos(th), dx: rr * Math.sin(th) });
+    });
+    return out;
+  }
+  function drawAround() {
+    var A0 = R.around, W = R.whenwhere, el = document.getElementById('aMap');
+    if (!A0 || !el) return;
+    var d = document.getElementById('aDay').value, b = document.getElementById('aBlock').value;
+    var ti = Number(document.getElementById('aTop').value), cut = W.cuts[ti];
+    document.getElementById('aCut').textContent = cut === null ? 'no offers yet'
+      : 'top ' + W.tops[ti] + '%: ≥ ' + m(cut) + '/hr';
+    var D = A0.dots, byBin = {}, shown = 0, good = 0;
+    for (var i = 0; i < D.b.length; i++) {
+      if (!aPick(d, b, D.d[i], D.h[i])) continue;
+      var g = cut !== null && D.r[i] >= cut;
+      (byBin[D.b[i]] = byBin[D.b[i]] || []).push(g);
+      shown += 1; if (g) good += 1;
+    }
+    var said = '<b>' + esc(wwName('aDay') + ', ' + wwName('aBlock').toLowerCase()) + '</b>';
+    document.getElementById('aSays').innerHTML = said + ': ' + shown + ' offers drawn, ' + good + ' good'
+      + (shown ? ' (' + Math.round(good / shown * 100) + '%)' : '') + (cut === null ? '' : ' at ≥ ' + m(cut) + '/hr') + '.';
+    var pts = [];
+    Object.keys(byBin).forEach(function (k) {
+      var c = A0.bins[Number(k)];
+      spread(byBin[k], A0.binMi).forEach(function (p) {
+        pts.push({ lat: c[0] + p.dy / 69, lon: c[1] + p.dx / (69 * Math.cos(c[0] * Math.PI / 180)), good: p.x });
+      });
+    });
+    var up = col('--up'), grey = col('--grey');
+    var note = document.getElementById('aMapNote');
+    if (typeof L !== 'undefined') {
+      if (!aMap) {
+        aMap = L.map('aMap', { preferCanvas: true });
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(aMap);
+      }
+      if (aLayer) aLayer.remove();
+      aLayer = L.layerGroup().addTo(aMap);
+      if (A0.centre) {
+        for (var rg = 1; rg <= Math.min(A0.rings, 5); rg++) {
+          L.circle([A0.centre.lat, A0.centre.lon], { radius: rg * A0.ringMi * 1609.34, color: col('--axis'), weight: 1,
+            dashArray: '4 4', fill: false, interactive: false }).addTo(aLayer);
+        }
+      }
+      pts.forEach(function (p) {
+        L.circleMarker([p.lat, p.lon], { radius: 3, stroke: false, fillColor: p.good ? up : grey, fillOpacity: 0.85 })
+          .addTo(aLayer);
+      });
+      if (pts.length) aMap.fitBounds(pts.map(function (p) { return [p.lat, p.lon]; }), { padding: [20, 20], maxZoom: 15 });
+      else if (A0.centre) aMap.setView([A0.centre.lat, A0.centre.lon], 12);
+      else aMap.setView([0, 0], 2);
+      note.textContent = 'Dashed rings: 1 to 5 miles from the most-used waiting area, as in the chart below.';
+    } else {
+      // No Leaflet (no internet): the same dots on a blank square, north up,
+      // a mile to scale, and the rings — no street under them.
+      var Wd = el.clientWidth || 600, Hd = el.clientHeight || 460;
+      var lats = pts.map(function (p) { return p.lat; }), lons = pts.map(function (p) { return p.lon; });
+      if (A0.centre) { lats.push(A0.centre.lat); lons.push(A0.centre.lon); }
+      if (!lats.length) { el.innerHTML = '<p class="note" style="padding:12px">No dot in this slot.</p>'; }
+      else {
+        var la0 = Math.min.apply(null, lats), la1 = Math.max.apply(null, lats);
+        var lo0 = Math.min.apply(null, lons), lo1 = Math.max.apply(null, lons);
+        var kx = Math.cos((la0 + la1) / 2 * Math.PI / 180);
+        var spanX = Math.max((lo1 - lo0) * kx, 0.01), spanY = Math.max(la1 - la0, 0.01);
+        var sc = Math.min((Wd - 40) / spanX, (Hd - 40) / spanY);
+        var ox = (Wd - spanX * sc) / 2, oy = (Hd - spanY * sc) / 2;
+        var X = function (lon) { return ox + (lon - lo0) * kx * sc; };
+        var Y = function (lat) { return Hd - oy - (lat - la0) * sc; };
+        var mile = sc / 69;
+        var svg = '<svg viewBox="0 0 ' + Wd + ' ' + Hd + '" aria-hidden="true">';
+        if (A0.centre) {
+          for (var rr2 = 1; rr2 <= Math.min(A0.rings, 5); rr2++) {
+            svg += '<circle cx="' + X(A0.centre.lon).toFixed(1) + '" cy="' + Y(A0.centre.lat).toFixed(1) + '" r="'
+              + (rr2 * A0.ringMi * mile).toFixed(1) + '" fill="none" stroke="' + col('--axis') + '" stroke-dasharray="4 4"/>';
+          }
+        }
+        pts.forEach(function (p) {
+          svg += '<circle cx="' + X(p.lon).toFixed(1) + '" cy="' + Y(p.lat).toFixed(1) + '" r="2.6" fill="'
+            + (p.good ? up : grey) + '" fill-opacity="0.85"/>';
+        });
+        svg += '<line x1="16" x2="' + (16 + mile).toFixed(1) + '" y1="' + (Hd - 14) + '" y2="' + (Hd - 14)
+          + '" stroke="' + col('--ink2') + '" stroke-width="2"/><text x="16" y="' + (Hd - 20) + '" fill="'
+          + col('--ink2') + '" font-size="12">1 mi</text></svg>';
+        el.innerHTML = svg;
+      }
+      note.textContent = 'The map needs the internet for Leaflet and its tiles: the dots are drawn on a blank '
+        + 'square, north up, with a mile to scale and dashed rings 1 to 5 miles from the most-used waiting area.';
+    }
+    // (a) the share good by ring.
+    var nR = [], kR = [];
+    for (var j = 0; j < D.b.length; j++) {
+      if (D.g[j] === null || !aPick(d, b, D.d[j], D.h[j])) continue;
+      nR[D.g[j]] = (nR[D.g[j]] || 0) + 1;
+      if (cut !== null && D.r[j] >= cut) kR[D.g[j]] = (kR[D.g[j]] || 0) + 1;
+    }
+    var rings = '';
+    for (var q = 0; q <= A0.rings; q++) {
+      var n = nR[q] || 0, k = kR[q] || 0;
+      if (!n) continue;
+      var nm = q === A0.rings ? A0.rings * A0.ringMi + ' mi or more' : q * A0.ringMi + '–' + (q + 1) * A0.ringMi + ' mi';
+      if (n < R.descMinN) { rings += hbRow(nm, null, '', n + ' offers — too few', null, true); continue; }
+      var w0 = wilsonP(k, n);
+      rings += hbRow(nm, k / n, 'up', pc(k / n) + ' good [' + pc(w0[0]) + ', ' + pc(w0[1]) + '] · n ' + n, w0, false);
+    }
+    document.getElementById('aRings').innerHTML = rings || '<p class="note">No dot in this slot.</p>';
+    // (b) When & where's slot table, drawn.
+    var slot = W.slots[d + '|' + b], areas = '';
+    if (slot) {
+      var unit = slot.town.ranked.length ? 'town' : 'cell', u = slot[unit];
+      var rows = u.ranked.slice().sort(function (x, y) { return y.r[ti] - x.r[ti] || y.h - x.h; });
+      var top = Math.max.apply(null, [0.1].concat(rows.map(function (s0) { return s0.hi[ti]; })));
+      rows.forEach(function (s0) {
+        var mk = s0.mk[ti];
+        areas += hbRow(unit === 'cell' ? label('grid', s0.a) : s0.a, s0.r[ti] / top, mk === 'above' ? 'up' : mk === 'below' ? 'down' : '',
+                       rt(s0.r[ti]) + ' good/hr [' + rt(s0.lo[ti]) + '–' + rt(s0.hi[ti]) + '] · ' + s0.h.toFixed(1) + ' h',
+                       [s0.lo[ti] / top, s0.hi[ti] / top], false);
+      });
+      if (!rows.length) areas = '<p class="note">No area has ' + W.minHours + ' h waited on ' + W.minDays
+        + ' shift days in this slot yet.</p>';
+      if (u.thin.length) areas += '<p class="note">Too little time there yet: ' + u.thin.length + ' '
+        + (unit === 'cell' ? 'cell' : 'town') + (u.thin.length === 1 ? '' : 's') + ' (see When &amp; where).</p>';
+    } else {
+      areas = '<p class="note">No waiting on record in this slot.</p>';
+    }
+    document.getElementById('aAreas').innerHTML = areas;
+    // (c) the card's own drive to the pickup.
+    var P0 = A0.pickup, byB = {};
+    for (var e = 0; e < P0.b.length; e++) {
+      if (!aPick(d, b, P0.d[e], P0.h[e])) continue;
+      (byB[P0.b[e]] = byB[P0.b[e]] || []).push(P0.r[e]);
+    }
+    var bands = '';
+    P0.bands.forEach(function (nm2, bi) {
+      var v = byB[bi] || [];
+      if (!v.length) return;
+      if (v.length < R.descMinN) { bands += hbRow(nm2, null, '', v.length + ' offers — too few', null, true); return; }
+      var kk = cut === null ? 0 : v.filter(function (x) { return x >= cut; }).length;
+      var s1 = v.slice().sort(function (x, y) { return x - y; });
+      var med = s1.length % 2 ? s1[(s1.length - 1) / 2] : (s1[s1.length / 2 - 1] + s1[s1.length / 2]) / 2;
+      var w1 = wilsonP(kk, v.length);
+      bands += hbRow(nm2, kk / v.length, 'up', pc(kk / v.length) + ' good [' + pc(w1[0]) + ', ' + pc(w1[1]) + '] · median '
+                     + m(med) + '/hr · n ' + v.length, w1, false);
+    });
+    document.getElementById('aPickup').innerHTML = bands
+      || '<p class="note">No card in this slot printed its drive to the pickup.</p>';
+  }
+  ['aDay', 'aBlock', 'aTop'].forEach(function (id) {
+    var e0 = document.getElementById(id);
+    if (e0) e0.addEventListener('change', drawAround);
   });
   coverageTable();
   levelsTable();
@@ -6010,6 +6477,8 @@ module.exports = {
   GROUPS: GROUPS, TABS: TABS, blockChart: blockChart, fold: fold,
   bootCIPlain: bootCIPlain, loadJournal: loadJournal, JOURNAL_PAGE: JOURNAL_PAGE,
   whenWhere: whenWhere, reportRulers: reportRulers, wwSlotOf: wwSlotOf, poissonCI: poissonCI, WW_BLOCKS: WW_BLOCKS, WW_TOPS: WW_TOPS,
+  aroundYou: aroundYou, homeOf: homeOf, gridCell: gridCell, HOME_MI: HOME_MI, AROUND_BIN_MI: AROUND_BIN_MI,
+  AROUND_BIN_DAYS: AROUND_BIN_DAYS, AROUND_RINGS: AROUND_RINGS, PICKUP_BANDS: PICKUP_BANDS,
   WW_TOP: WW_TOP, WW_MIN_HOURS: WW_MIN_HOURS, WW_MIN_DAYS: WW_MIN_DAYS, WW_CONF: WW_CONF,
 };
 

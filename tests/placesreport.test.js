@@ -1456,8 +1456,10 @@ function nbx() {
      }));
   eq('the groups, in order, each tab in exactly one', [P.GROUPS.map(function (g) { return g[1]; }),
      P.TABS.map(function (t) { return t[0]; }).sort()],
-     // ...and the Waited tab (the Trends round, Nov 2026), and When & where (18 Nov), in Where & when.
-     [['Overview', 'What to take', 'Where & when', 'Record'], ['overview', 'waited', 'whenwhere'].concat(OLD_TABS).sort()]);
+     // ...and the Waited tab (the Trends round, Nov 2026), When & where (18 Nov) and Offers
+     // around you (19 Nov), in Where & when.
+     [['Overview', 'What to take', 'Where & when', 'Record'],
+      ['overview', 'waited', 'whenwhere', 'around'].concat(OLD_TABS).sort()]);
   ok('...What to take holds Strategy and Targets; Where & when the places, map, towns, grid and restaurants; Record Best offers',
      ['strategy', 'targets'].every(function (t) { return groupOfTab(t) === 'take'; })
      && ['places', 'map', 'towns', 'grid', 'restaurants'].every(function (t) { return groupOfTab(t) === 'where'; })
@@ -2384,6 +2386,138 @@ function nbx() {
   ok('[R2] ...and the page says so at its head, not only on stdout',
      /id="capped"><b>Not the whole journal:<\/b> the server sent 20 of 45 offers/.test(P.html(capRep))
      && P.html(repSW).indexOf('id="capped"') < 0);
+
+  /* --- offers around you: dots where the car was, home left out (19 Nov 2026) ---
+   *
+   * Invented, round the open-water point. Three Fridays (13, 20, 27 March)
+   * each begin with twenty minutes at HOME (ten cards), then an hour in area
+   * A (the centre of a 2-mile cell; half the cards at $40, half at $15),
+   * then half an hour in B, about five miles north (all $15). On the 20th
+   * the car goes home again at 9pm for five cards. Saturday the 14th begins
+   * in A itself (its starting stay, so left out too) and ends with five
+   * cards at C, a spot seen that one day only. No order is ever in the car. */
+  var aCellBox = P.cellOf(off(0, 0));
+  var AA = { lat: aCellBox.lat, lon: aCellBox.lon }, BB = off(0.072, 0), CC = off(0.03, -0.03);
+  var HOME = off(-0.05, -0.05);
+  var aRows = [];
+  function aCard(id, t, where, rate, extra) {
+    var o = waitCard(id, t, where, rate);
+    Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
+    return o;
+  }
+  [13, 20, 27].forEach(function (dd) {
+    for (var q = 0; q < 10; q++) aRows.push(aCard('ah' + dd + '-' + q, at(dd, 18, q * 2), HOME, 15));
+    for (var q2 = 0; q2 < 30; q2++) {
+      aRows.push(aCard('aa' + dd + '-' + q2, at(dd, 18, 30 + q2 * 2), AA, q2 % 2 ? 40 : 15,
+                       { toPickupMiles: q2 % 2 ? 0.6 : 4.2 }));
+    }
+    for (var q3 = 0; q3 < 15; q3++) aRows.push(aCard('ab' + dd + '-' + q3, at(dd, 19, 30 + q3 * 2), BB, 15));
+  });
+  for (var q4 = 0; q4 < 5; q4++) aRows.push(aCard('ahh' + q4, at(20, 21, q4 * 2), HOME, 15));
+  for (var q5 = 0; q5 < 10; q5++) aRows.push(aCard('as' + q5, at(14, 12, q5 * 2), AA, 40));
+  for (var q6 = 0; q6 < 5; q6++) aRows.push(aCard('ac' + q6, at(14, 12, 40 + q6 * 2), CC, 40));
+  var homeA = P.homeOf(aRows);
+  function whyOf(prefix) {
+    var out = {};
+    aRows.forEach(function (o) { if (o.id.indexOf(prefix) === 0) { var w = homeA.why.get(o) || 'kept'; out[w] = (out[w] || 0) + 1; } });
+    return out;
+  }
+  eq('[around] home: each day\'s starting stay is left out until the car first moves over ' + P.HOME_MI + ' mi',
+     [whyOf('ah1'), whyOf('ah2'), whyOf('aa'), whyOf('ab')], [{ start: 10 }, { start: 20 }, { kept: 90 }, { kept: 45 }]);
+  eq('[around] ...a day begun in A loses that first stay too (said on the page), and the place it moved on to is kept here',
+     [whyOf('as'), whyOf('ac')], [{ start: 10 }, { kept: 5 }]);
+  eq('[around] ...and a usual start (three days began within ' + P.HOME_MI + ' mi of each other) is left out on any day, '
+     + 'so a break at home mid-shift is not drawn', [whyOf('ahh'), homeA.days, homeA.usualDays], [{ usual: 5 }, 4, 3]);
+  var repA = P.analyse(aRows, [], [], function () { return null; }, { now: 0, cellTown: wTown });
+  var AR = repA.around;
+  eq('[around] left out: 40 in a starting stay, 5 near a usual start, 5 in a square seen one day only; 135 dots drawn',
+     [AR.left.start, AR.left.usual, AR.left.oneDay, AR.left.noFix, AR.dots.b.length, AR.cards], [40, 5, 5, 0, 135, 185]);
+  var nearHome = AR.bins.filter(function (bn) { return MV.crowMiles({ lat: bn[0], lon: bn[1] }, HOME) < 1; });
+  eq('[around] going online at home never draws home: no square within a mile of it', nearHome.length, 0);
+  eq('[around] the dots keep only their quarter-mile square, to four places, never the fix',
+     [AR.bins.length, AR.bins.every(function (bn) { return bn.every(function (v) { return Math.round(v * 1e4) / 1e4 === v; }); }),
+      AR.bins.some(function (bn) { return bn[0] === AA.lat || bn[0] === BB.lat; })], [2, true, false]);
+  eq('[around] the most-used waiting area is A\'s cell (most credited hours among the dots), never home\'s',
+     [AR.centre.cell, AR.centre.cell === P.cellOf(HOME).id], [aCellBox.id, false]);
+  var ringsOf = {};
+  AR.dots.b.forEach(function (bi, i) { ringsOf[bi] = AR.dots.g[i]; });
+  var bRing = Math.floor(MV.crowMiles({ lat: AR.bins[AR.dots.b[AR.dots.b.length - 1]][0],
+                                       lon: AR.bins[AR.dots.b[AR.dots.b.length - 1]][1] }, AR.centre));
+  eq('[around] rings: A\'s dots in the first mile, B\'s in whole miles from A\'s centre (' + bRing + ')',
+     Object.keys(ringsOf).map(function (k) { return ringsOf[k]; }).sort(), [0, bRing].sort());
+  // Banding: the dots carry their own $/hr; the page colours each against
+  // When & where's cutoff, the same dollars as that tab.
+  var cut20 = repA.whenwhere.cuts[1];
+  var goodDots = AR.dots.r.filter(function (v) { return v >= cut20; }).length;
+  eq('[around] banding: When & where\'s fixed cutoff (top 20% ≥ $' + cut20 + '), and 45 of the 135 dots over it '
+     + '(A\'s $40 cards; B\'s $15 are not)', [cut20, goodDots], [40, 45]);
+  eq('[around] ...each dot\'s slot is When & where\'s: the driver weekday (5 Friday) and the driver-day hour',
+     [AR.dots.d.every(function (v) { return v === 5; }), AR.dots.h.slice(0, 1), AR.blockHours.length], [true, [14], 6]);
+  eq('[around] the drive to the pickup, the card\'s own figure, every counted offer (no GPS needed): under 1 mi and 3–5 mi',
+     [AR.pickup.b.filter(function (v) { return v === 0; }).length, AR.pickup.b.filter(function (v) { return v === 3; }).length,
+      AR.pickup.bands.length], [45, 45, 5]);
+  var aJson = JSON.stringify(AR);
+  ok('[privacy] the tab\'s data hold no id, time, text, door, pickup or dropoff of a card',
+     !/"(id|at|text|dropoff|firstAt)"/.test(aJson) && !/"pickup":"/.test(aJson) && !/"a[hbcs]\d/.test(aJson));
+  var aPage = P.html(repA), aSec = SECTION_OF(aPage, 'around');
+  ok('[around] the tab sits after When & where in Where & when, with When & where\'s Day, Hours (blocks and single '
+     + 'hours) and Good pickers', P.GROUPS[2][2][1][0] === 'around' && P.GROUPS[2][2][1][3] === false
+     && /id="aDay"/.test(aSec) && /id="aTop"/.test(aSec) && /<optgroup label="One hour">/.test(aSec)
+     && (aSec.match(/<option value="h\d+"/g) || []).length === 24);
+  ok('[around] the page says home is left out, offered not earned, dots not a coloured grid, and what was left out',
+     /Home is left out/.test(aSec) && /never draws home/.test(aSec) && /Offered, not earned/.test(aSec)
+     && /40 cards in a starting stay, 5 near a usual start/.test(aSec) && /never an area\\'s average|never an area's average/.test(aSec));
+  ok('[around] the Method tab says how the dots, home, rings and the pickup chart are measured',
+     /<b>Offers around you<\/b>/.test(SECTION_OF(aPage, 'method')) && /starting stay/.test(SECTION_OF(aPage, 'method')));
+
+  // ...and drawn, offline: no Leaflet, so the dots on a blank square, coloured
+  // by the cutoff picked; the charts beside them need no map.
+  await (async function aroundBrowser() {
+    var pw = null;
+    try { pw = require('playwright'); } catch (e) { pw = null; }
+    if (!pw) { console.log('(the Offers around you browser checks skipped: no playwright)'); return; }
+    var b = null;
+    try { b = await pw.chromium.launch(); } catch (e) { b = null; }
+    if (!b) { console.log('(the Offers around you browser checks skipped: no chromium)'); return; }
+    var dir = fs.mkdtempSync(path.join(os.tmpdir(), 'places-around-'));
+    var file = path.join(dir, 'index.html');
+    fs.writeFileSync(file, aPage);
+    var errs = [];
+    try {
+      var pg = await b.newPage({ viewport: { width: 390, height: 900 } });
+      pg.on('pageerror', function (e) { errs.push(String(e)); });
+      await pg.route(/^https?:\/\//, function (rt) { rt.abort(); });
+      await pg.goto('file://' + file + '#around');
+      function look() {
+        return pg.evaluate(function () {
+          var de = document.documentElement;
+          var dots = Array.prototype.slice.call(document.querySelectorAll('#aMap svg circle[r="2.6"]'));
+          var up = getComputedStyle(de).getPropertyValue('--up').trim();
+          return { n: dots.length, up: dots.filter(function (c) { return c.getAttribute('fill') === up; }).length,
+                   rings: Array.prototype.map.call(document.querySelectorAll('#aRings .hb .nm'), function (x) { return x.textContent; }),
+                   pickup: document.querySelectorAll('#aPickup .hb').length,
+                   note: document.getElementById('aMapNote').textContent,
+                   sideways: de.scrollWidth > de.clientWidth };
+        });
+      }
+      var g20 = await look();
+      await pg.selectOption('#aTop', '3');
+      var g50 = await look();
+      await pg.selectOption('#aDay', '6');
+      var sat = await look();
+      eq('[around browser] offline: 135 dots on a blank square, 45 coloured good at top 20% ($40)',
+         [g20.n, g20.up, /blank/.test(g20.note)], [135, 45, true]);
+      eq('[around browser] ...at top 50% ($15 is the cutoff) every dot is good', [g50.n, g50.up], [135, 135]);
+      eq('[around browser] ...a Saturday has nothing drawn: its one day\'s cards were its starting stay and a one-day square',
+         sat.n, 0);
+      ok('[around browser] the rings chart and the pickup chart are drawn, with no page-wide sideways scroll at 390px',
+         g20.rings.length === 2 && g20.pickup === 2 && !g20.sideways);
+      eq('[around browser] ...and no script error', errs, []);
+    } finally {
+      await b.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }());
 
   console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
                    : '\nAll ' + pass + ' places-report checks passed');
