@@ -412,400 +412,7 @@ function startScanner() {
     buffered += chunk.toString();
     var lines = buffered.split('\n');
     buffered = lines.pop();          // keep the partial line for next time
-    lines.forEach(function (line) {
-      line = line.trim();
-      if (!line) return;
-      var read;
-      try {
-        read = JSON.parse(line);
-      } catch (e) {
-        console.log('scanner: ' + line);   // not JSON, so it is a log line
-        return;
-      }
-      if (!read || typeof read !== 'object') {
-        console.log('scanner: ' + line);   // JSON, but no message: a log line too
-        return;
-      }
-      // ...and a message this process then fails on is ITS fault, said as one
-      // with the stack that names where. One try round both used to log a
-      // throw anywhere below as `scanner: <the line>`, the shape of a
-      // library's chatter on the scanner's stdout: a planner line whose stops
-      // held a null was printed as if the scanner had said it, with nothing
-      // pointing at this file.
-      try {
-        read.at = Date.now();
-        // Every address this line reports, searched on the NucBox while an
-        // order is held, a few a minute at most (warmEarly).
-        warmEarly(read, read.at);
-        // A sighting (rpi/scan_pi.py, emit_sighting): what a whole-screen or
-        // planner read saw, typed by its screen. Counted by that type for
-        // /api/status, and — Stage 3 — handed to the assembler, which is now
-        // where a Trip Planner's one dropoff comes from: off one page as the
-        // scanner used to decide it, or off several pages stitched. What it
-        // offers goes through the one dropoff path below (dropoffArrived),
-        // exactly as a dropoff line from the scanner does, and is said to the
-        // panel as one. The sighting itself is still not broadcast and writes
-        // no row: its stops are names and front doors, and the stream is
-        // somewhere they have not been before. See countSighting.
-        if (read.sighting) {
-          countSighting(read.sighting);
-          // ...and whether the record may hold places, the scanner's word for
-          // keepPlaces (an order's record follows it: orderKeepsPlaces).
-          if (typeof read.sighting.keep === 'boolean') scanner.keepPlaces = read.sighting.keep;
-          var sightedNow = Date.now();
-          // The orders in the car, as the assembler takes them: one is the
-          // order (Stage 3, unchanged), two only while carrying two is on.
-          var assembled = Assemble.sighting(assembly, assemblerHeld(sightedNow),
-                                            read.sighting, sightedNow);
-          assembled.candidates.forEach(function (c) {
-            var said = { dropoff: c, at: Date.now() };
-            dropoffArrived(said);
-            if (said.dropoff) broadcast(said);
-          });
-          // ...and what waited for a cue asked again: this sighting may be it.
-          retryPool();
-          return;
-        }
-        // DoorDash's place popup (rpi/scan_pi.py, emit_popup): an address the
-        // driver tapped a stop on the card being screened to show. Filed onto
-        // that card or nowhere, by the assembler; never onto the order in the
-        // car. See popupArrived.
-        if (read.popup) {
-          popupArrived(read.popup, Date.now());
-          return;
-        }
-        // DoorDash's pickup screen (rpi/scan_pi.py, emit_pickup_seen): the
-        // store's door, onto the one DoorDash order in the car as its pickup,
-        // or nowhere. See pickupSeenArrived.
-        if (read.pickupSeen) {
-          pickupSeenArrived(read.pickupSeen, Date.now());
-          return;
-        }
-        // The delivery app's own screen from after a delivery (rpi/scan_pi.py,
-        // emit_delivered): a put-down, or the Drop chooser, for an order of
-        // that app in the car. See deliveredArrived.
-        if (read.delivered) {
-          deliveredArrived(read.delivered, Date.now());
-          return;
-        }
-        if (read.phase) {
-          scanner.phase = read.phase;
-          scanner.status = read;
-          if (read.message) console.log('scanner[' + read.phase + ']: ' + read.message);
-        }
-        // Setup messages carry no rate, so they must not overwrite the last read.
-        if (read.ready !== undefined) scanner.last = read;
-        // The cost per mile the scan loop is using, said when it starts and
-        // whenever the driver changes it. See /api/settings.
-        if (read.settings && typeof read.settings.costPerMile === 'number') {
-          scanner.costPerMile = read.settings.costPerMile;
-        }
-        // Which offer is on the record, so the driving screen can offer to mark
-        // it as taken. Held here as well as pushed, because a tab opened after
-        // the card has gone — which is the normal case, the driver accepts on
-        // the phone and the card disappears — would otherwise have nothing to
-        // mark. Cleared by nothing: the last offer stays markable until the
-        // next one replaces it.
-        if (read.offer && typeof read.offer.id === 'string') {
-          // The same card read again — a fuller reading of it, or the scanner
-          // resuming it after a restart — replaces what is on record and
-          // keeps the mark; a different card starts afresh, and is the one
-          // moment the pairing below is written. Before this every restart
-          // mid-card wrote a second pair row for the same id.
-          var sameCard = scanner.offer && scanner.offer.id === read.offer.id;
-          if (sameCard && scanner.offer.accepted !== undefined) {
-            read.offer.accepted = scanner.offer.accepted;
-          }
-          // ...and the destination read off the PHONE, for the same reason.
-          //
-          // A later reading is a better reading of the CARD. It says nothing
-          // about what the phone answered when the driver asked it, and this
-          // assignment replaces the slot object wholesale — so without this the
-          // press was thrown away by the next reading of the card it belonged
-          // to, which arrives within seconds because every card here is read
-          // repeatedly as the reading improves.
-          //
-          // What made that a wrong ADDRESS rather than a lost one: the guard
-          // below is `wasAsked || !scanner.offer.dropoff`, and wiping the field
-          // re-opens it. The next unprompted sighting — a navigation screen
-          // left up, the previous job's — was then accepted over the press and
-          // appended as a second mark. Reproduced end to end: pressed for
-          // "123 Oak St", the card read again, and the panel and the journal
-          // both ended up saying "999 Wrong Way Dr".
-          if (sameCard && scanner.offer.dropoffScanned && scanner.offer.dropoff) {
-            read.offer.dropoff = scanner.offer.dropoff;
-            read.offer.dropoffScanned = true;
-            // ...and whether it was pressed for, which the hold made from this
-            // card at ✓ Took takes as its provenance (Assemble.cardFields).
-            read.offer.dropoffFrom = scanner.offer.dropoffFrom;
-          }
-          // ...and the store's door a place popup gave it, for the same
-          // reason: the next reading of the card is seconds away and knows
-          // nothing of the tap.
-          if (sameCard && scanner.offer.pickupAddr) {
-            read.offer.pickupAddr = scanner.offer.pickupAddr;
-          }
-          // ...and whether this is the order already in the car, back on the
-          // phone (heldOwnCard). Decided once, on arrival, and carried across
-          // re-reads like the mark: the panel shows it as the order taken, and
-          // no pairing row is written for it below.
-          //
-          // Under its OWN id as well as under a new one. The scanner now keeps
-          // a card's id when the driver pages away and back (rpi/journal.py,
-          // RECENT_CARDS), so the held card returns after another card under
-          // the held order's id — which is that order by the journal's own
-          // word, however long after the Took. This tested `!==` for as long
-          // as a held id could only reappear as the same slot (sameCard), and
-          // with `!==` that return was paired with itself.
-          //
-          // ANY order in the car, first-taken first: with two held, the second
-          // one's card back on the phone is that order too.
-          var carriedNow = heldOrders(Date.now()).filter(function (h) {
-            return read.offer.id === h.id || heldOwnCard(h, read.offer, Date.now(), false);
-          })[0] || null;
-          if (sameCard && scanner.offer.heldCard) {
-            read.offer.heldCard = scanner.offer.heldCard;
-          } else if (!sameCard && carriedNow) {
-            read.offer.heldCard = holdIdOf(carriedNow);
-          }
-          // ...and where the orders in the car end (offerAfter): Map view's
-          // preview searches this card's places from those ends too, through
-          // MV.discFor on the offer line, as searchCardEarly does here. Read
-          // afresh at every reading, so a held end pinned since the last one
-          // is a circle now. Absent with nothing held, so every other offer
-          // line is the shape it was; never on a hold (cardOf's fields).
-          var offerEnds = offerAfter(read.offer, Date.now());
-          if (offerEnds.length) read.offer.after = offerEnds; else delete read.offer.after;
-          // ...and DoorDash's map label for a card that printed only "Customer
-          // dropoff" (dropoffGuessOf; the owner, 27 Oct), kept as the offer's
-          // `dropoffGuess` and carried across re-reads like the tap above.
-          // Never `dropoff`: nothing here or in the hold reads it.
-          read.offer.dropoffGuess = dropoffGuessOf(read.offer)
-            || (sameCard && !read.offer.dropoff ? scanner.offer.dropoffGuess || null : null);
-          delete read.offer.mapLabel;
-          // ...and how many times the scanner has read this card on the slot,
-          // carried across re-reads like the rest: an order's record says it
-          // (offeredOf), a card read once and taken being weaker evidence of
-          // what it printed than one read a dozen times alike.
-          read.offer.reads = (sameCard && typeof scanner.offer.reads === 'number'
-            ? scanner.offer.reads : 0) + 1;
-          scanner.offer = read.offer;
-          if (!sameCard) {
-            scanner.offerAt = Date.now();
-            scanner.offerAts = scanner.offerAts.filter(function (c) {
-              return c.id !== read.offer.id;
-            }).concat([{ id: read.offer.id, at: scanner.offerAt }]).slice(-OFFER_ATS_MAX);
-          }
-          // ...and its reading, for the offers page's ✓ (offersTickHolds).
-          keepOfferCard(scanner.offer, scanner.offerAt);
-          // ...and its pickup and dropoff searched on the NucBox now, so a
-          // ✓ Took finds them answered (searchCardEarly).
-          searchCardEarly(scanner.offer, Date.now());
-          scanner.offerSeenAt = Date.now();
-          // ...and the Trip Planner the order in the car keeps is NOT forgotten
-          // here any more (the owner, 30 Oct: "after getting 3 correct drop
-          // off locations the rig dropped it on the map after some time").
-          // Offers come up all through a batch, and each one took the held
-          // planner off the order: on 26, 28 and 29 Oct 15 of the 21 trips
-          // that had a planner lost it this way mid-trip, and no later read
-          // put it back — a reload, a restart or the next planner page then
-          // had no D1/D2, no planner pickup and no customer names. It goes now
-          // when a Took starts a different trip (placeTook) and with the
-          // trip itself (setHeld). See forgetPlanner.
-          // ...and if there is an order in the car, WRITE THE PAIRING DOWN.
-          //
-          // Without this a shift produces no evidence about the one feature it
-          // was driven to test. The offer rows record what each card said and
-          // whether the driver marked it taken; the advice that was on the
-          // panel when they decided — the range, the state, whether the two
-          // jobs were called near or elsewhere — was computed in this process's
-          // memory, shown once, and lost. Afterwards there is no way to ask the
-          // only question that matters: when it said take both, was it right?
-          //
-          // Once per offer, here, because this is the moment an offer goes on
-          // the record and it happens exactly once. Doing it in withStack()
-          // would write five rows a second for as long as the card is on the
-          // phone.
-          //
-          // Its own row with a `kind`, like a mark or a rule, so every reader
-          // that walks this file already knows to skip it — including the
-          // scanner's own resume(), which must never mistake an annotation for
-          // the last offer.
-          //
-          // Not for the held order's own card come back, under its own id or
-          // a new one: that is one order measured against itself (above).
-          if (!sameCard && !scanner.offer.heldCard) {
-            recordPairing(scanner.offer, Date.now(), scanner.last);
-          }
-        }
-        // The destination, read off the screen that comes AFTER the accept:
-        // see dropoffArrived, which is this branch moved out so an address the
-        // assembler made off a planner's sighting takes the same road.
-        dropoffArrived(read);
-        // ...and, with two orders in the car, what waited for a cue asked
-        // again: an address just filed may be the one that eliminates.
-        retryPool();
-        // Uber's Trip Planner, read off the whole screen because ⌖ was
-        // pressed: every stop of the trip in order. See emit_planner.
-        //
-        // To the panel on the stream — the broadcast below sends it whole, as
-        // it sends a dropoff line — and onto the order in the car, so a panel
-        // reloaded mid-delivery shows the stops it showed before. Kept there
-        // for exactly as long as the panel keeps them, which is not as long as
-        // the order: see forgetPlanner. With nothing held there is nothing to
-        // attach them to, and like an address read with nothing held they are
-        // shown and not kept. Through holding(), for the reason the dropoff
-        // branch gives. The stops and the scanner's reason for filing none of
-        // them as the order's end travel together, so a reloaded panel says
-        // the same thing about the button as the live one did.
-        //
-        // NOT a destination. The one dropoff of a planner is the assembler's
-        // to give, off the `sighting` the scanner sends just before this line
-        // for the same read (the two carry the read's `at`), and it is filed by
-        // dropoffArrived like every other; nothing here reads an address out
-        // of the stops, so there is one rule for where an order ends. The
-        // reason none was filed is the assembler's too, and goes onto the line
-        // here so the panel says it: a scanner from before the assembler said
-        // its own on the line, and that is believed as it was.
-        //
-        // Into the journal only when the scanner says the record may hold
-        // them — `keep`, which is `"keepPlaces"` and --no-journal: the stops
-        // are customers' names and front doors.
-        if (read.planner && Array.isArray(read.planner.stops)) {
-          var plannedAt = Date.now();
-          if (typeof read.planner.keep === 'boolean') scanner.keepPlaces = read.planner.keep;
-          if (!('unfiled' in read.planner)) {
-            var verdict = Assemble.verdictFor(assembly, read.planner.at);
-            read.planner.unfiled = verdict === undefined ? null : verdict;
-          }
-          var heldNow = holding(plannedAt);
-          // With two orders in the car, a pickup whose name is ONE of their
-          // cards' pickups (Assemble.sameStore) is marked with that order's
-          // id, `of`, which Map view numbers its pin by (P1, P2). One that
-          // fits both, or neither, is no order's and stays a plain P.
-          // The page this read was, off its sighting (same `at`): its app
-          // for ownPickups, and whether it shows the top of the list.
-          var plannerPage = Assemble.pageOf(assembly, read.planner.at);
-          ownPickups(read.planner.stops, plannedAt, plannerPage, read.planner.at);
-          if (heldNow) {
-            var heldWas = JSON.stringify(scanner.held);
-            // MERGED with the pages this hold already keeps, not in place of
-            // them (Assemble.mergePlanner; the owner's snap of 24 Oct, 03:03:
-            // page 1 read the pickup's door, the scrolled pages after it did
-            // not, and each replaced the last, so the restaurant was gone
-            // from the hold — and from its pickup search and Map view's run —
-            // before anything asked for it). The reason none was filed is
-            // this read's. `held` on the line is the merged list, for the
-            // panel's heldPlan, so the live page and a reload show the same
-            // stops; the line's own `stops` stay the page as read, which is
-            // what the journal row and plannerVisits are given.
-            //
-            // ...and a read that answers a ⌖ press (`asked`) is merged too
-            // (the owner, 24 Oct: "Would there be a way to have the scan
-            // button also merge?"). It used to be kept as read, because the
-            // press forgot the planner first, so a press on page 2 lost the
-            // pickup page 1 had read. The press no longer forgets (see
-            // /api/dropoff), and its read merges with PRESS PRECEDENCE: for a
-            // stop both show, its fields win wherever it read them, its
-            // address block included (mergePlanner's `pressed`).
-            var passedWas = heldWasPassed(heldNow);
-            heldNow.planner = {
-              stops: Assemble.mergePlanner(heldNow.planner && heldNow.planner.stops,
-                                           read.planner.stops, plannerPage,
-                                           read.planner.asked === true),
-              unfiled: read.planner.unfiled || null };
-            // ...and the doors already behind the car (planPassed) kept with
-            // the list they are about: a read does not un-deliver a door.
-            if (passedWas) heldNow.planner.passed = passedWas;
-            read.planner.held = heldNow.planner.stops;
-            // ...and a pickup it lists no longer marked visited, by the
-            // planner's word (plannerVisits) — only off a read that shows
-            // the list from its top. It writes the orders when this changed
-            // them (`heldWas`).
-            plannerVisits(heldNow, read.planner.stops, plannedAt,
-                          !!(plannerPage && plannerPage.top === true), heldWas);
-            // ...and its pickups searched for on the NucBox, for the
-            // restaurant guard (searchHeldPickup); a no-op for one already
-            // asked about on this hold.
-            armHeldPickups(heldNow);
-            // ...and, with two orders in the car, the list it keeps asked for
-            // an end the screen has not filed, by each card's street alone
-            // (heldPlanEnds; the owner's snap of 31 Oct, 21:46).
-            heldPlanFiled(heldNow, read.planner, plannerPage, plannedAt);
-          }
-          if (read.planner.keep === true) recordPlanner(read.planner, plannedAt);
-        }
-        // The scan loop's own voice — a reading or a heartbeat — as opposed to
-        // the autopilot's progress messages. Only this arms the watchdog, and
-        // only this feeds it.
-        // `reading` counts too: it is sent from inside the loop the moment a
-        // read is handed over, so it proves the loop is turning exactly as a
-        // heartbeat does — and on a busy screen it is the message that arrives.
-        if (read.ready !== undefined || read.alive || read.reading) {
-          scanner.heardAt = Date.now();
-        }
-        // The heartbeat itself, kept for /api/status. It goes to the panel
-        // the way it always has — broadcast whole, below, which is how
-        // tooBright and notSaving reach it and now the GPS and the Pi's
-        // temperature and throttling too — and this is only the copy the raw
-        // status link beside the connection dot can show afterwards. The page
-        // does not seed itself from it: like tooBright, it waits for the next
-        // beat, which is ALIVE_EVERY (four seconds) away at most.
-        if (read.alive) {
-          scanner.beat = read;
-          // ...and the held pickups: one the car has stopped at and left is
-          // visited, and off the run (visitPickups). Before the door, so the
-          // state the beat carries below has it.
-          visitPickups(read, Date.now());
-          // ...and the GPS drop's one input: whether this beat's fix puts the
-          // car at the held order's door, or takes it away (gpsArrival). The
-          // answer rides the beat to the panel, which says "at dropoff".
-          read.atDropoff = gpsArrival(read, Date.now());
-          // ...and the orders Drop let go of, finished quietly from the same
-          // fix (finishStep): nothing on the beat is changed by it.
-          finishStep(read, Date.now());
-          // ...and each order's record counts the fix, or the silence, or a
-          // step of the clock (orderBeat): a few additions, nothing written.
-          orderBeat(read, Date.now());
-          // ...and the car's stops, for the store waits of pickups the GPS
-          // never visited (stopWatchStep): kept in memory, nothing written.
-          stopWatchStep(read, Date.now());
-          // ...and kept, thinned, for a 📷 Snap's gps.json and health.json.
-          snapBeatKeep(read, Date.now());
-          // ...and the NucBox services not answering, by name (nbxDown).
-          read.nucboxDown = nbxDown();
-          // ...and the whole NucBox out of reach for a minute or more, with
-          // since when and why (nbxOffOut; the owner's 9 Nov shift): the
-          // panel's red line on the status row, null while it answers.
-          read.nucboxOff = nbxOffOut(Date.now());
-          // ...and the rest of the GPS drop's state, on the same beat. Between
-          // offers no reading arrives to carry heldForPanel, and that is when
-          // the panel's in-car line is the card's whole message: a pin armed
-          // or refused while the driver drives would otherwise reach the glass
-          // at the next offer. Null with nothing held. See heldEndState.
-          var heldBeat = holding(Date.now());
-          read.heldEnd = heldBeat ? heldEndState(heldBeat) : null;
-          // ...and every order's, with carrying two on (ordersForPanel).
-          if (heldBeat && carryingTwo(Date.now())) read.orders = ordersForPanel(Date.now());
-          // ...and the hold itself, heldForPanel's shape as a reading carries
-          // it, on the first beat after what is held changed. An order put
-          // down on its own clock (heldOrders, holdEnds) was said to no
-          // panel: no press made it, and no reading comes between offers to
-          // carry `holding` — so Drop and the in-car line stayed up over an
-          // empty car until the next card. Only on a change, so a beat is
-          // the size it was.
-          var heldNowSig = heldOrders(Date.now()).map(holdIdOf).join(' ');
-          if (heldNowSig !== beatHeldSaid) {
-            beatHeldSaid = heldNowSig;
-            read.holding = heldForPanel(heldBeat);
-          }
-        }
-        broadcast(read);
-      } catch (e) {
-        console.error('server: a scanner line could not be handled: '
-                      + (e && e.stack ? e.stack : String(e)));
-      }
-    });
+    lines.forEach(scannerLine);
   });
 
   // Kept, and not called an error. See `stderr` where `scanner` is built: a
@@ -820,6 +427,408 @@ function startScanner() {
     lastWords = scanner.stderr;
   });
 
+}
+
+/* One line off the scanner's stdout: a log line, or a message to act on.
+ *
+ * Out of startScanner, whose closure is the PROCESS — its pipes, its last
+ * words, its restart ladder — and nothing below reads any of that: a line
+ * means the same from whichever process said it, and what it changes is
+ * `scanner`, the orders in the car and the panels, all of them this file's.
+ * The data handler still splits the stream into lines; each comes here. */
+function scannerLine(line) {
+  line = line.trim();
+  if (!line) return;
+  var read;
+  try {
+    read = JSON.parse(line);
+  } catch (e) {
+    console.log('scanner: ' + line);   // not JSON, so it is a log line
+    return;
+  }
+  if (!read || typeof read !== 'object') {
+    console.log('scanner: ' + line);   // JSON, but no message: a log line too
+    return;
+  }
+  // ...and a message this process then fails on is ITS fault, said as one
+  // with the stack that names where. One try round both used to log a
+  // throw anywhere below as `scanner: <the line>`, the shape of a
+  // library's chatter on the scanner's stdout: a planner line whose stops
+  // held a null was printed as if the scanner had said it, with nothing
+  // pointing at this file.
+  try {
+    read.at = Date.now();
+    // Every address this line reports, searched on the NucBox while an
+    // order is held, a few a minute at most (warmEarly).
+    warmEarly(read, read.at);
+    // A sighting (rpi/scan_pi.py, emit_sighting): what a whole-screen or
+    // planner read saw, typed by its screen. Counted by that type for
+    // /api/status, and — Stage 3 — handed to the assembler, which is now
+    // where a Trip Planner's one dropoff comes from: off one page as the
+    // scanner used to decide it, or off several pages stitched. What it
+    // offers goes through the one dropoff path below (dropoffArrived),
+    // exactly as a dropoff line from the scanner does, and is said to the
+    // panel as one. The sighting itself is still not broadcast and writes
+    // no row: its stops are names and front doors, and the stream is
+    // somewhere they have not been before. See countSighting.
+    if (read.sighting) {
+      countSighting(read.sighting);
+      // ...and whether the record may hold places, the scanner's word for
+      // keepPlaces (an order's record follows it: orderKeepsPlaces).
+      if (typeof read.sighting.keep === 'boolean') scanner.keepPlaces = read.sighting.keep;
+      var sightedNow = Date.now();
+      // The orders in the car, as the assembler takes them: one is the
+      // order (Stage 3, unchanged), two only while carrying two is on.
+      var assembled = Assemble.sighting(assembly, assemblerHeld(sightedNow),
+                                        read.sighting, sightedNow);
+      assembled.candidates.forEach(function (c) {
+        var said = { dropoff: c, at: Date.now() };
+        dropoffArrived(said);
+        if (said.dropoff) broadcast(said);
+      });
+      // ...and what waited for a cue asked again: this sighting may be it.
+      retryPool();
+      return;
+    }
+    // DoorDash's place popup (rpi/scan_pi.py, emit_popup): an address the
+    // driver tapped a stop on the card being screened to show. Filed onto
+    // that card or nowhere, by the assembler; never onto the order in the
+    // car. See popupArrived.
+    if (read.popup) {
+      popupArrived(read.popup, Date.now());
+      return;
+    }
+    // DoorDash's pickup screen (rpi/scan_pi.py, emit_pickup_seen): the
+    // store's door, onto the one DoorDash order in the car as its pickup,
+    // or nowhere. See pickupSeenArrived.
+    if (read.pickupSeen) {
+      pickupSeenArrived(read.pickupSeen, Date.now());
+      return;
+    }
+    // The delivery app's own screen from after a delivery (rpi/scan_pi.py,
+    // emit_delivered): a put-down, or the Drop chooser, for an order of
+    // that app in the car. See deliveredArrived.
+    if (read.delivered) {
+      deliveredArrived(read.delivered, Date.now());
+      return;
+    }
+    if (read.phase) {
+      scanner.phase = read.phase;
+      scanner.status = read;
+      if (read.message) console.log('scanner[' + read.phase + ']: ' + read.message);
+    }
+    // Setup messages carry no rate, so they must not overwrite the last read.
+    if (read.ready !== undefined) scanner.last = read;
+    // The cost per mile the scan loop is using, said when it starts and
+    // whenever the driver changes it. See /api/settings.
+    if (read.settings && typeof read.settings.costPerMile === 'number') {
+      scanner.costPerMile = read.settings.costPerMile;
+    }
+    // Which offer is on the record, so the driving screen can offer to mark
+    // it as taken. Held here as well as pushed, because a tab opened after
+    // the card has gone — which is the normal case, the driver accepts on
+    // the phone and the card disappears — would otherwise have nothing to
+    // mark. Cleared by nothing: the last offer stays markable until the
+    // next one replaces it.
+    if (read.offer && typeof read.offer.id === 'string') {
+      // The same card read again — a fuller reading of it, or the scanner
+      // resuming it after a restart — replaces what is on record and
+      // keeps the mark; a different card starts afresh, and is the one
+      // moment the pairing below is written. Before this every restart
+      // mid-card wrote a second pair row for the same id.
+      var sameCard = scanner.offer && scanner.offer.id === read.offer.id;
+      if (sameCard && scanner.offer.accepted !== undefined) {
+        read.offer.accepted = scanner.offer.accepted;
+      }
+      // ...and the destination read off the PHONE, for the same reason.
+      //
+      // A later reading is a better reading of the CARD. It says nothing
+      // about what the phone answered when the driver asked it, and this
+      // assignment replaces the slot object wholesale — so without this the
+      // press was thrown away by the next reading of the card it belonged
+      // to, which arrives within seconds because every card here is read
+      // repeatedly as the reading improves.
+      //
+      // What made that a wrong ADDRESS rather than a lost one: the guard
+      // below is `wasAsked || !scanner.offer.dropoff`, and wiping the field
+      // re-opens it. The next unprompted sighting — a navigation screen
+      // left up, the previous job's — was then accepted over the press and
+      // appended as a second mark. Reproduced end to end: pressed for
+      // "123 Oak St", the card read again, and the panel and the journal
+      // both ended up saying "999 Wrong Way Dr".
+      if (sameCard && scanner.offer.dropoffScanned && scanner.offer.dropoff) {
+        read.offer.dropoff = scanner.offer.dropoff;
+        read.offer.dropoffScanned = true;
+        // ...and whether it was pressed for, which the hold made from this
+        // card at ✓ Took takes as its provenance (Assemble.cardFields).
+        read.offer.dropoffFrom = scanner.offer.dropoffFrom;
+      }
+      // ...and the store's door a place popup gave it, for the same
+      // reason: the next reading of the card is seconds away and knows
+      // nothing of the tap.
+      if (sameCard && scanner.offer.pickupAddr) {
+        read.offer.pickupAddr = scanner.offer.pickupAddr;
+      }
+      // ...and whether this is the order already in the car, back on the
+      // phone (heldOwnCard). Decided once, on arrival, and carried across
+      // re-reads like the mark: the panel shows it as the order taken, and
+      // no pairing row is written for it below.
+      //
+      // Under its OWN id as well as under a new one. The scanner now keeps
+      // a card's id when the driver pages away and back (rpi/journal.py,
+      // RECENT_CARDS), so the held card returns after another card under
+      // the held order's id — which is that order by the journal's own
+      // word, however long after the Took. This tested `!==` for as long
+      // as a held id could only reappear as the same slot (sameCard), and
+      // with `!==` that return was paired with itself.
+      //
+      // ANY order in the car, first-taken first: with two held, the second
+      // one's card back on the phone is that order too.
+      var carriedNow = heldOrders(Date.now()).filter(function (h) {
+        return read.offer.id === h.id || heldOwnCard(h, read.offer, Date.now(), false);
+      })[0] || null;
+      if (sameCard && scanner.offer.heldCard) {
+        read.offer.heldCard = scanner.offer.heldCard;
+      } else if (!sameCard && carriedNow) {
+        read.offer.heldCard = holdIdOf(carriedNow);
+      }
+      // ...and where the orders in the car end (offerAfter): Map view's
+      // preview searches this card's places from those ends too, through
+      // MV.discFor on the offer line, as searchCardEarly does here. Read
+      // afresh at every reading, so a held end pinned since the last one
+      // is a circle now. Absent with nothing held, so every other offer
+      // line is the shape it was; never on a hold (cardOf's fields).
+      var offerEnds = offerAfter(read.offer, Date.now());
+      if (offerEnds.length) read.offer.after = offerEnds; else delete read.offer.after;
+      // ...and DoorDash's map label for a card that printed only "Customer
+      // dropoff" (dropoffGuessOf; the owner, 27 Oct), kept as the offer's
+      // `dropoffGuess` and carried across re-reads like the tap above.
+      // Never `dropoff`: nothing here or in the hold reads it.
+      read.offer.dropoffGuess = dropoffGuessOf(read.offer)
+        || (sameCard && !read.offer.dropoff ? scanner.offer.dropoffGuess || null : null);
+      delete read.offer.mapLabel;
+      // ...and how many times the scanner has read this card on the slot,
+      // carried across re-reads like the rest: an order's record says it
+      // (offeredOf), a card read once and taken being weaker evidence of
+      // what it printed than one read a dozen times alike.
+      read.offer.reads = (sameCard && typeof scanner.offer.reads === 'number'
+        ? scanner.offer.reads : 0) + 1;
+      scanner.offer = read.offer;
+      if (!sameCard) {
+        scanner.offerAt = Date.now();
+        scanner.offerAts = scanner.offerAts.filter(function (c) {
+          return c.id !== read.offer.id;
+        }).concat([{ id: read.offer.id, at: scanner.offerAt }]).slice(-OFFER_ATS_MAX);
+      }
+      // ...and its reading, for the offers page's ✓ (offersTickHolds).
+      keepOfferCard(scanner.offer, scanner.offerAt);
+      // ...and its pickup and dropoff searched on the NucBox now, so a
+      // ✓ Took finds them answered (searchCardEarly).
+      searchCardEarly(scanner.offer, Date.now());
+      scanner.offerSeenAt = Date.now();
+      // ...and the Trip Planner the order in the car keeps is NOT forgotten
+      // here any more (the owner, 30 Oct: "after getting 3 correct drop
+      // off locations the rig dropped it on the map after some time").
+      // Offers come up all through a batch, and each one took the held
+      // planner off the order: on 26, 28 and 29 Oct 15 of the 21 trips
+      // that had a planner lost it this way mid-trip, and no later read
+      // put it back — a reload, a restart or the next planner page then
+      // had no D1/D2, no planner pickup and no customer names. It goes now
+      // when a Took starts a different trip (placeTook) and with the
+      // trip itself (setHeld). See forgetPlanner.
+      // ...and if there is an order in the car, WRITE THE PAIRING DOWN.
+      //
+      // Without this a shift produces no evidence about the one feature it
+      // was driven to test. The offer rows record what each card said and
+      // whether the driver marked it taken; the advice that was on the
+      // panel when they decided — the range, the state, whether the two
+      // jobs were called near or elsewhere — was computed in this process's
+      // memory, shown once, and lost. Afterwards there is no way to ask the
+      // only question that matters: when it said take both, was it right?
+      //
+      // Once per offer, here, because this is the moment an offer goes on
+      // the record and it happens exactly once. Doing it in withStack()
+      // would write five rows a second for as long as the card is on the
+      // phone.
+      //
+      // Its own row with a `kind`, like a mark or a rule, so every reader
+      // that walks this file already knows to skip it — including the
+      // scanner's own resume(), which must never mistake an annotation for
+      // the last offer.
+      //
+      // Not for the held order's own card come back, under its own id or
+      // a new one: that is one order measured against itself (above).
+      if (!sameCard && !scanner.offer.heldCard) {
+        recordPairing(scanner.offer, Date.now(), scanner.last);
+      }
+    }
+    // The destination, read off the screen that comes AFTER the accept:
+    // see dropoffArrived, which is this branch moved out so an address the
+    // assembler made off a planner's sighting takes the same road.
+    dropoffArrived(read);
+    // ...and, with two orders in the car, what waited for a cue asked
+    // again: an address just filed may be the one that eliminates.
+    retryPool();
+    // Uber's Trip Planner, read off the whole screen because ⌖ was
+    // pressed: every stop of the trip in order. See emit_planner.
+    //
+    // To the panel on the stream — the broadcast below sends it whole, as
+    // it sends a dropoff line — and onto the order in the car, so a panel
+    // reloaded mid-delivery shows the stops it showed before. Kept there
+    // for exactly as long as the panel keeps them, which is not as long as
+    // the order: see forgetPlanner. With nothing held there is nothing to
+    // attach them to, and like an address read with nothing held they are
+    // shown and not kept. Through holding(), for the reason the dropoff
+    // branch gives. The stops and the scanner's reason for filing none of
+    // them as the order's end travel together, so a reloaded panel says
+    // the same thing about the button as the live one did.
+    //
+    // NOT a destination. The one dropoff of a planner is the assembler's
+    // to give, off the `sighting` the scanner sends just before this line
+    // for the same read (the two carry the read's `at`), and it is filed by
+    // dropoffArrived like every other; nothing here reads an address out
+    // of the stops, so there is one rule for where an order ends. The
+    // reason none was filed is the assembler's too, and goes onto the line
+    // here so the panel says it: a scanner from before the assembler said
+    // its own on the line, and that is believed as it was.
+    //
+    // Into the journal only when the scanner says the record may hold
+    // them — `keep`, which is `"keepPlaces"` and --no-journal: the stops
+    // are customers' names and front doors.
+    if (read.planner && Array.isArray(read.planner.stops)) {
+      var plannedAt = Date.now();
+      if (typeof read.planner.keep === 'boolean') scanner.keepPlaces = read.planner.keep;
+      if (!('unfiled' in read.planner)) {
+        var verdict = Assemble.verdictFor(assembly, read.planner.at);
+        read.planner.unfiled = verdict === undefined ? null : verdict;
+      }
+      var heldNow = holding(plannedAt);
+      // With two orders in the car, a pickup whose name is ONE of their
+      // cards' pickups (Assemble.sameStore) is marked with that order's
+      // id, `of`, which Map view numbers its pin by (P1, P2). One that
+      // fits both, or neither, is no order's and stays a plain P.
+      // The page this read was, off its sighting (same `at`): its app
+      // for ownPickups, and whether it shows the top of the list.
+      var plannerPage = Assemble.pageOf(assembly, read.planner.at);
+      ownPickups(read.planner.stops, plannedAt, plannerPage, read.planner.at);
+      if (heldNow) {
+        var heldWas = JSON.stringify(scanner.held);
+        // MERGED with the pages this hold already keeps, not in place of
+        // them (Assemble.mergePlanner; the owner's snap of 24 Oct, 03:03:
+        // page 1 read the pickup's door, the scrolled pages after it did
+        // not, and each replaced the last, so the restaurant was gone
+        // from the hold — and from its pickup search and Map view's run —
+        // before anything asked for it). The reason none was filed is
+        // this read's. `held` on the line is the merged list, for the
+        // panel's heldPlan, so the live page and a reload show the same
+        // stops; the line's own `stops` stay the page as read, which is
+        // what the journal row and plannerVisits are given.
+        //
+        // ...and a read that answers a ⌖ press (`asked`) is merged too
+        // (the owner, 24 Oct: "Would there be a way to have the scan
+        // button also merge?"). It used to be kept as read, because the
+        // press forgot the planner first, so a press on page 2 lost the
+        // pickup page 1 had read. The press no longer forgets (see
+        // /api/dropoff), and its read merges with PRESS PRECEDENCE: for a
+        // stop both show, its fields win wherever it read them, its
+        // address block included (mergePlanner's `pressed`).
+        var passedWas = heldWasPassed(heldNow);
+        heldNow.planner = {
+          stops: Assemble.mergePlanner(heldNow.planner && heldNow.planner.stops,
+                                       read.planner.stops, plannerPage,
+                                       read.planner.asked === true),
+          unfiled: read.planner.unfiled || null };
+        // ...and the doors already behind the car (planPassed) kept with
+        // the list they are about: a read does not un-deliver a door.
+        if (passedWas) heldNow.planner.passed = passedWas;
+        read.planner.held = heldNow.planner.stops;
+        // ...and a pickup it lists no longer marked visited, by the
+        // planner's word (plannerVisits) — only off a read that shows
+        // the list from its top. It writes the orders when this changed
+        // them (`heldWas`).
+        plannerVisits(heldNow, read.planner.stops, plannedAt,
+                      !!(plannerPage && plannerPage.top === true), heldWas);
+        // ...and its pickups searched for on the NucBox, for the
+        // restaurant guard (searchHeldPickup); a no-op for one already
+        // asked about on this hold.
+        armHeldPickups(heldNow);
+        // ...and, with two orders in the car, the list it keeps asked for
+        // an end the screen has not filed, by each card's street alone
+        // (heldPlanEnds; the owner's snap of 31 Oct, 21:46).
+        heldPlanFiled(heldNow, read.planner, plannerPage, plannedAt);
+      }
+      if (read.planner.keep === true) recordPlanner(read.planner, plannedAt);
+    }
+    // The scan loop's own voice — a reading or a heartbeat — as opposed to
+    // the autopilot's progress messages. Only this arms the watchdog, and
+    // only this feeds it.
+    // `reading` counts too: it is sent from inside the loop the moment a
+    // read is handed over, so it proves the loop is turning exactly as a
+    // heartbeat does — and on a busy screen it is the message that arrives.
+    if (read.ready !== undefined || read.alive || read.reading) {
+      scanner.heardAt = Date.now();
+    }
+    // The heartbeat itself, kept for /api/status. It goes to the panel
+    // the way it always has — broadcast whole, below, which is how
+    // tooBright and notSaving reach it and now the GPS and the Pi's
+    // temperature and throttling too — and this is only the copy the raw
+    // status link beside the connection dot can show afterwards. The page
+    // does not seed itself from it: like tooBright, it waits for the next
+    // beat, which is ALIVE_EVERY (four seconds) away at most.
+    if (read.alive) {
+      scanner.beat = read;
+      // ...and the held pickups: one the car has stopped at and left is
+      // visited, and off the run (visitPickups). Before the door, so the
+      // state the beat carries below has it.
+      visitPickups(read, Date.now());
+      // ...and the GPS drop's one input: whether this beat's fix puts the
+      // car at the held order's door, or takes it away (gpsArrival). The
+      // answer rides the beat to the panel, which says "at dropoff".
+      read.atDropoff = gpsArrival(read, Date.now());
+      // ...and the orders Drop let go of, finished quietly from the same
+      // fix (finishStep): nothing on the beat is changed by it.
+      finishStep(read, Date.now());
+      // ...and each order's record counts the fix, or the silence, or a
+      // step of the clock (orderBeat): a few additions, nothing written.
+      orderBeat(read, Date.now());
+      // ...and the car's stops, for the store waits of pickups the GPS
+      // never visited (stopWatchStep): kept in memory, nothing written.
+      stopWatchStep(read, Date.now());
+      // ...and kept, thinned, for a 📷 Snap's gps.json and health.json.
+      snapBeatKeep(read, Date.now());
+      // ...and the NucBox services not answering, by name (nbxDown).
+      read.nucboxDown = nbxDown();
+      // ...and the whole NucBox out of reach for a minute or more, with
+      // since when and why (nbxOffOut; the owner's 9 Nov shift): the
+      // panel's red line on the status row, null while it answers.
+      read.nucboxOff = nbxOffOut(Date.now());
+      // ...and the rest of the GPS drop's state, on the same beat. Between
+      // offers no reading arrives to carry heldForPanel, and that is when
+      // the panel's in-car line is the card's whole message: a pin armed
+      // or refused while the driver drives would otherwise reach the glass
+      // at the next offer. Null with nothing held. See heldEndState.
+      var heldBeat = holding(Date.now());
+      read.heldEnd = heldBeat ? heldEndState(heldBeat) : null;
+      // ...and every order's, with carrying two on (ordersForPanel).
+      if (heldBeat && carryingTwo(Date.now())) read.orders = ordersForPanel(Date.now());
+      // ...and the hold itself, heldForPanel's shape as a reading carries
+      // it, on the first beat after what is held changed. An order put
+      // down on its own clock (heldOrders, holdEnds) was said to no
+      // panel: no press made it, and no reading comes between offers to
+      // carry `holding` — so Drop and the in-car line stayed up over an
+      // empty car until the next card. Only on a change, so a beat is
+      // the size it was.
+      var heldNowSig = heldOrders(Date.now()).map(holdIdOf).join(' ');
+      if (heldNowSig !== beatHeldSaid) {
+        beatHeldSaid = heldNowSig;
+        read.holding = heldForPanel(heldBeat);
+      }
+    }
+    broadcast(read);
+  } catch (e) {
+    console.error('server: a scanner line could not be handled: '
+                  + (e && e.stack ? e.stack : String(e)));
+  }
 }
 
 /* Kill a scanner that is running and has stopped saying anything.
