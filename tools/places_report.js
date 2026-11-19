@@ -1938,11 +1938,21 @@ function wilson(k, n) {
   return [round2(Math.max(0, mid - half)), round2(Math.min(1, mid + half))];
 }
 
-// P(X <= x) for X ~ Poisson(lam).
+/* P(X <= x) for X ~ Poisson(lam), summed in logs. The plain sum started from
+ * exp(-lam), which is 0 for any lam over about 745: every term after it was
+ * 0 too, so a busy area expecting 1,142 offers that got 1,138 read p = 0 and
+ * "Gone quiet" flagged every busy town on the invented 11,721-offer journal
+ * (true p 0.46). Each term's log is the last one's plus log(lam / k), added
+ * to the running log-sum without leaving logs. */
 function poissonLE(x, lam) {
-  var term = Math.exp(-lam), sum = term;
-  for (var k = 1; k <= x; k++) { term *= lam / k; sum += term; }
-  return Math.min(1, sum);
+  if (x < 0) return 0;
+  if (lam <= 0) return 1;
+  var t = -lam, s = t;
+  for (var k = 1; k <= x; k++) {
+    t += Math.log(lam / k);
+    s = s > t ? s + Math.log1p(Math.exp(t - s)) : t + Math.log1p(Math.exp(s - t));
+  }
+  return Math.min(1, Math.exp(s));
 }
 
 // The ISO week ('2026-W10') of a shift day 'YYYY-MM-DD'.

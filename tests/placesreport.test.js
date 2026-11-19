@@ -816,6 +816,23 @@ function nbx() {
     function (k) { return k; }, {}, 'place');
   eq('...and too few offers before is never flagged, whatever the silence', [rowOf(thinQ, 'Old Haunt').countP,
      rowOf(thinQ, 'Old Haunt').flag], [null, '']);
+  // The second review: exp(-lam) is 0 over lam ~745, and the plain sum read
+  // every busy area's count as impossible. Tables: P(X<=2; 3) = 0.42319;
+  // P(X<=800; 800) = 0.5094 and P(X<=1138; 1141.96) = 0.4612 (each term
+  // from lgamma, summed in Python: a second way to the same figures).
+  eq('poissonLE: a small count by the table, and counts of hundreds do not underflow',
+     [P.poissonLE(2, 3), P.poissonLE(800, 800), P.poissonLE(1138, 1141.96), P.poissonLE(-1, 4), P.poissonLE(3, 0)]
+       .map(function (v) { return Math.round(v * 1e4) / 1e4; }),
+     [0.4232, 0.5094, 0.4612, 0, 1]);
+  var busyQ = [];
+  for (var bq = 1; bq <= 41; bq++) {
+    for (var bm = 0; bm < 60; bm++) busyQ.push(card({ id: 'bq' + bq + '-' + bm, at: day(bq, 18, 0) + bm * 120000, town: 'Brimhaven' }));
+  }
+  // One late card, so the cut falls after the 27th's evening and no day is on both sides.
+  busyQ.push(card({ id: 'bq-late', at: day(41, 23, 0), town: 'Brimhaven' }));
+  var busyRow = rowOf(P.quietTable(busyQ, function (o) { return o.town; }, function (k) { return k; }, {}, 'town'), 'Brimhaven');
+  eq('...so a town sending its 60 a day all along is not gone quiet (expected ' + busyRow.expected + ', got '
+     + busyRow.recent + ', p ' + busyRow.countP + ')', [busyRow.flag, busyRow.countP > 0.4], ['', true]);
 
   eq('ISO weeks: 1 Jan 2026 is in its first', P.isoWeek('2026-01-01'), '2026-W01');
   eq('...and 1 Jan 2027 in 2026\'s fifty-third', P.isoWeek('2027-01-01'), '2026-W53');
