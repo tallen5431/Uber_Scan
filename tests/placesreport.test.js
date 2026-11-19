@@ -749,9 +749,11 @@ function nbx() {
   var page6 = P.html(rep6);
   ok('...said on the page to be for reading, not an accept rule', /\$\/mi is shown for reading, not as an accept rule/.test(page6));
 
-  // The page and its CSVs hold no dropoff. The page's "made" is the clock
-  // (now: 0 is no time given), and one run in about ninety its milliseconds
-  // held "742" and failed this check with no dropoff anywhere: left out.
+  // The page and its CSVs hold no dropoff. The page's "made" was the clock
+  // while now: 0 read as no time given, and one run in about ninety its
+  // milliseconds held "742" and failed this check with no dropoff anywhere:
+  // left out still, though now: 0 is the epoch now.
+  eq('now: 0 is a time given, not the clock', rep6.made, 0);
   var page6Held = page6.replace(/"made":\d+/g, '"made":0');
   ok('the second pass\'s page holds no dropoff text', page6Held.indexOf('Ombre') < 0 && page6Held.indexOf('742') < 0);
   ok('...nor a drop position', page6.indexOf(String(dropFix.lat).slice(0, 7)) < 0 && page6.indexOf('12.712') < 0);

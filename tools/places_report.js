@@ -396,7 +396,9 @@ function analyse(offers, taken, placed, dropAt, opts) {
                      records: (opts.records || []).length, gps: !!opts.fixes };
   var times = counts.map(function (o) { return o.at; }).filter(isFinite);
   return {
-    made: opts.now || Date.now(),
+    // A time given is the time, 0 included: `opts.now || Date.now()` read the
+    // suite's { now: 0 } as none and stamped the clock.
+    made: typeof opts.now === 'number' ? opts.now : Date.now(),
     span: times.length ? [minOf(times), maxOf(times)] : null,
     outings: A.outingsIn(counts),
     minN: typeof opts.minN === 'number' ? opts.minN : MIN_N,
