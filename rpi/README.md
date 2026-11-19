@@ -9200,6 +9200,13 @@ the tracker and the money were in practice run by whoever remembered them.
 `tools/test.sh` runs the lot, prints a line each, and exits non-zero if any of
 them fails.
 
+It runs the suites that only wait — on a server, a browser, a scanner's clock —
+several at once, as many as the machine has cores, after the twelve that need
+the machine to themselves (the OCR suites, the ones with a budget on wall time,
+and the two that read the whole tree) have run alone. On a four-core machine
+that took the gate from 55 minutes to 22. `TEST_JOBS=1 bash tools/test.sh` is
+one suite at a time, as it always was; `TEST_JOBS=N` sets how many at once.
+
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh

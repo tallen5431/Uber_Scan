@@ -6429,6 +6429,20 @@ def _drops(oid):
     return [r for r in rows if r.get('kind') == 'drop' and r.get('id') == oid]
 
 
+def _drops_soon(oid, seconds=5.0):
+    """_drops, once there is one or `seconds` have gone. A replaced order's drop
+    row is appended after the Took has been answered (see _took2), so a read
+    made as the answer lands can beat it to the journal. Alone it never did;
+    four suites at once (tools/test.sh's pool), it did once in three full runs:
+    the batch check below read [] where the row it wanted came a moment later."""
+    end = time.time() + seconds
+    while True:
+        got = _drops(oid)
+        if got or time.time() >= end:
+            return got
+        time.sleep(0.05)
+
+
 def _holding(base):
     return get(base, '/api/status').get('holding')
 
@@ -6725,7 +6739,7 @@ try:
     _bh = _holding(_gb) or {}
     eq('[batch] ...and a later Took replaces it, the batch with it',
        (_bh.get('dropoff'), _bh.get('batch'), _bh.get('drops'),
-        [r.get('by') for r in _drops('b-off')]),
+        [r.get('by') for r in _drops_soon('b-off')]),
        ('Kestrel Dr, Marietta', False, None, ['replaced']))
     post(_gb, '/api/delivered', {})
     # An add-on trip is untouched: two orders held, the planner's doors are
