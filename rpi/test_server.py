@@ -15750,6 +15750,51 @@ finally:
     stop(proc)
 shutil.rmtree(_svdir, ignore_errors=True)
 
+
+def _logged(env, journal):
+    """A server whose log is kept: (proc, base, read the log)."""
+    port = free_port()
+    logpath = journal + '.log'
+    fh = open(logpath, 'w')
+    p = subprocess.Popen(['node', os.path.join(ROOT, 'server.js')],
+                         env=dict(os.environ, PORT=str(port), HTTPS_PORT='0', JOURNAL=journal, **env),
+                         stdout=fh, stderr=fh)
+    b = 'http://127.0.0.1:%d' % port
+    for _ in range(120):
+        try:
+            urllib.request.urlopen(b + '/api/status', timeout=1).read()
+            break
+        except Exception:
+            time.sleep(0.1)
+    return p, b, lambda: (fh.flush(), open(logpath).read())[1]
+
+
+# A finishing.json that does not parse (finishWatch's file, beside the
+# journal) was read as no watches and said nothing, and saveFinishing then
+# removed it: every order a watch was keeping lost its order row, silently.
+# loadHolding's rule now: said at boot, and the file kept aside.
+_fndir = tempfile.mkdtemp()
+_fnj = os.path.join(_fndir, 'offers.jsonl')
+open(_fnj, 'w').close()
+_fnwhole = json.dumps({'v': 1, 'watches': [
+    {'id': 'fin-torn', 'holdId': 'fin-torn@1', 'dropAt': NOW - 60000, 'ends': NOW + 600000,
+     'to': {'kind': 'none'}, 'from': None}]})
+_fntorn = _fnwhole[:-9]
+with open(os.path.join(_fndir, 'finishing.json'), 'w') as _fh:
+    _fh.write(_fntorn)
+proc, base, _fnlog = _logged({'SCANNER': '0'}, _fnj)
+try:
+    time.sleep(0.3)
+    _fnbad = os.path.join(_fndir, 'finishing.json.bad')
+    eq('[finish] a torn finishing.json is said at boot and kept aside, not removed',
+       ('could not be read' in _fnlog(),
+        open(_fnbad).read() if os.path.exists(_fnbad) else None,
+        os.path.exists(os.path.join(_fndir, 'finishing.json'))),
+       (True, _fntorn, False))
+finally:
+    stop(proc)
+shutil.rmtree(_fndir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

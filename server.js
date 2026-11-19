@@ -6231,7 +6231,26 @@ function finishFromFile(w) {
  * an order the list holds again, is forgotten. Returns how many are kept. */
 function loadFinishing() {
   var f = null;
-  try { f = JSON.parse(fs.readFileSync(finishPath(), 'utf8')); } catch (e) { f = null; }
+  var raw = null;
+  try { raw = fs.readFileSync(finishPath(), 'utf8'); } catch (e) { raw = null; }
+  if (raw !== null) {
+    try {
+      f = JSON.parse(raw);
+    } catch (e) {
+      // loadHolding's rule, for the same reason. A file that does not parse
+      // was read as no watches and said nothing, and saveFinishing below then
+      // removed it: every order a watch was keeping lost its order row, with
+      // no line anywhere (the server review, Nov 2026, measured with the
+      // file's last nine bytes cut off). Said now, and kept aside.
+      f = null;
+      var aside = finishPath() + '.bad';
+      var kept = true;
+      try { fs.renameSync(finishPath(), aside); } catch (e2) { kept = false; }
+      console.error('finishing: ' + finishPath() + ' could not be read (' + e.message
+                    + '), so no watch on an order put down is restored'
+                    + (kept ? '; it is kept as ' + aside : ''));
+    }
+  }
   var now = Date.now();
   var held = (scanner.held || []).map(holdIdOf);
   var all = (f && f.v === 1 && Array.isArray(f.watches) ? f.watches : []).map(finishFromFile)
