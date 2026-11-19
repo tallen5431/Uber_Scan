@@ -5536,23 +5536,83 @@
    * driving panel asked on every message, and with the CDN unreachable 60
    * beats made 120 requests and took <head> from 12 nodes to 132 (measured).
    * Taken out again, a failed load leaves the page as it found it; WHEN to
-   * try again is the caller's (live.html, showMap). */
+   * try again is the caller's (live.html, showMap).
+   *
+   * A load that never ANSWERS is a failed load too. One that errored was
+   * dropped, but a CDN reached through car wifi that opens and then says
+   * nothing — the case sw.js's within() is there for — left the promise
+   * pending for good, and kept: every later ask joined it, so live.html's
+   * mapBusy never cleared, showMap returned at its first line from then on,
+   * the beat's redraw was skipped, and LEAFLET_AGAIN_MS's retry could not
+   * run because nothing ever failed. The map page waited behind it the same
+   * way. Raced, not aborted, as within() is: a <script> once inserted cannot
+   * be called back, and if it lands late, L is defined and the next ask is
+   * answered at once — with its stylesheet put back, which the failure took
+   * out (keepCss). LEAFLET_WAIT_MS is chosen, not measured: Leaflet is about
+   * 150 kB, seconds even on a poor link, and the driver is looking at
+   * "loading the map…" for as long as this waits. */
   var loading = null;
+  var LEAFLET_WAIT_MS = 15000;
+
+  /* The two files' digests, so a CDN that served anything else — compromised,
+     or a man in the middle on a hotel's wifi — gets no script run in a page
+     that holds the driver's offers and position. Taken from the published
+     package: `npm pack leaflet@1.9.4`, whose tarball matched the registry's
+     sha512 integrity and shasum, then dist/leaflet.css and dist/leaflet.js
+     hashed; they are also the digests Leaflet's own download page gives for
+     1.9.4. Keyed by the URL, so only the pinned version is checked and a
+     caller asking for another is loaded as before rather than refused by a
+     digest that is not its own. A wrong digest here is no map at all — the
+     browser refuses the file — so these are changed only with the version. */
+  var LEAFLET_SRI = {
+    'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css':
+      'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=',
+    'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js':
+      'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo='
+  };
+
+  function pinned(el, url) {
+    var sri = LEAFLET_SRI[url];
+    if (!sri) return;
+    el.integrity = sri;
+    // An integrity check is only made on a CORS fetch; unpkg answers with
+    // Access-Control-Allow-Origin: *.
+    el.crossOrigin = 'anonymous';
+  }
+
+  function keepCss(doc, urls) {
+    var links = doc.head.querySelectorAll ? doc.head.querySelectorAll('link[rel="stylesheet"]') : [];
+    for (var i = 0; i < links.length; i++) if (links[i].href === urls.css) return;
+    var css = doc.createElement('link');
+    css.rel = 'stylesheet';
+    pinned(css, urls.css);
+    css.href = urls.css;
+    doc.head.appendChild(css);
+  }
 
   function needLeaflet(doc, urls) {
-    if (typeof doc.defaultView.L !== 'undefined') return Promise.resolve(true);
+    if (typeof doc.defaultView.L !== 'undefined') {
+      keepCss(doc, urls);
+      return Promise.resolve(true);
+    }
     if (loading) return loading;
     var css = doc.createElement('link');
     var s = doc.createElement('script');
+    var wait = urls.wait || LEAFLET_WAIT_MS;
+    var timer = null;
     loading = new Promise(function (done) {
       css.rel = 'stylesheet';
+      pinned(css, urls.css);
       css.href = urls.css;
       doc.head.appendChild(css);
+      pinned(s, urls.js);
       s.src = urls.js;
       s.onload = function () { done(typeof doc.defaultView.L !== 'undefined'); };
       s.onerror = function () { done(false); };
       doc.head.appendChild(s);
+      timer = setTimeout(function () { done(false); }, wait);
     }).then(function (got) {
+      clearTimeout(timer);
       if (!got) {
         loading = null;
         [css, s].forEach(function (el) { if (el.parentNode) el.parentNode.removeChild(el); });

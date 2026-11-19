@@ -8057,6 +8057,44 @@ const framed = (page) => page.waitForFunction(
     await ctx.close();
   }
 
+  // ...and a CDN that never ANSWERS: car wifi that opens and says nothing.
+  // MV.needLeaflet's promise used to stay pending for good, so mapBusy never
+  // cleared and "loading the map…" was the pane's last word; a press found
+  // showMap busy and asked nobody. The page's clock runs LEAFLET_WAIT_MS.
+  stage = 'Leaflet that never answers';
+  {
+    const ctx = await browser.newContext({ viewport: { width: 800, height: 480 } });
+    const page = await ctx.newPage();
+    await page.clock.install({ time: Date.now() });
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    let cdn = 0;
+    await page.route('https://unpkg.com/**', () => { cdn++; /* never answered */ });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 })
+              .catch(() => {});
+    const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+    const said = () => page.evaluate(() => ((n) => (n.classList.contains('chipped') ? n.title
+      : n.textContent))(document.getElementById('viewNote')).trim());
+    await push(Object.assign({}, READINGS.deducted, { places: ['Chipotle (Barrett Pkwy)', 'Canton Rd, Marietta'] }));
+    await push({ offer: { id: 'h-1', pay: 8.0, minutes: 22, pickup: 'Chipotle (Barrett Pkwy)',
+                          dropoff: 'Canton Rd, Marietta' } });
+    await page.click('#viewMode');
+    await page.clock.runFor(150);
+    await page.click('#viewMode');
+    await page.clock.runFor(500);
+    const waiting = await said();
+    await page.clock.runFor(16000);
+    await page.waitForFunction(() => /^no signal/.test(((n) => (n.title
+      || n.textContent))(document.getElementById('viewNote'))), null, { timeout: 5000 }).catch(() => {});
+    out.hungLeaflet = { waiting: waiting, said: await said(), first: cdn };
+    const beforePress = cdn;
+    for (let i = 0; i < 3; i++) { await page.click('#viewMode'); await page.clock.runFor(150); }
+    await page.clock.runFor(300);
+    out.hungLeaflet.pressed = cdn - beforePress;
+    await page.close();
+    await ctx.close();
+  }
+
   // --- the view between offers ------------------------------------------------
   stage = 'the map mode: the view between offers';
   //
@@ -9339,6 +9377,14 @@ try:
         (_nl.get('said') or '').startswith('no signal'))
     eq('[no Leaflet] ⛶ Map round again asks again, and <head> still holds no leftovers',
        (_nl.get('pressed'), _nl.get('headPressed')), (2, _nl.get('head')))
+    _hl = got.get('hungLeaflet') or {}
+    ok_('[no Leaflet] a CDN that never answers: Map view says it is loading the map (%r), '
+        'asking once for the stylesheet and the script (%r)' % (_hl.get('waiting'), _hl.get('first')),
+        'loading the map' in (_hl.get('waiting') or '') and _hl.get('first') == 2)
+    ok_('[no Leaflet] ...and once the wait is up it is no signal, not loading for ever (%r)'
+        % _hl.get('said'), (_hl.get('said') or '').startswith('no signal'))
+    eq('[no Leaflet] ...and ⛶ Map round again asks again rather than joining the load that '
+       'never answered', _hl.get('pressed'), 2)
 
     # --- the view between offers ---------------------------------------------
     _bw = got.get('between') or {}
