@@ -8516,7 +8516,7 @@
       $('trWeekNext').disabled = i >= keys.length - 1;
       var first = got.floor > 0 ? T.dayKeyOf(got.floor) : rows[0].day;
       var wr = T.weekReview(rows, got.runs, st.week, { cut: cut(), costPerMile: got.cpm, first: first,
-                                                      last: T.dayKeyOf(Date.now()) });
+                                                      last: T.dayKeyOf(Date.now()), now: Date.now() });
       var n = wr.now, p = wr.prev, both = !!(p && n.enough && p.enough);
       $('trWeekHead').innerHTML = 'Week in review <small>' + esc(weekNames(st.week))
         + (n.partEnd ? ' · so far' : '') + (n.partStart ? ' · the range starts ' + esc(dayWords(first)) + ': part of this week' : '')
@@ -8534,7 +8534,15 @@
         if (c.shade === 'below') return '<b class="down">▼ clearly below</b> last week\'s ' + esc(fmt(c.prev));
         return 'last week ' + esc(fmt(c.prev)) + ', no clear difference';
       }
-      function was(v) { return both ? ' · last week ' + v : ''; }
+      // A count beside last week's, like with like: a week still running
+      // against last week to the same weekday and hour, else "(full)"; a week
+      // before the range began says from when it was read.
+      var wc = wr.counts;
+      function was(f) {
+        if (!wc || !both) return '';
+        var lab = wc.soFar ? 'same time last week' : n.partEnd ? 'last week (full)' : 'last week';
+        return ' · ' + lab + ' ' + f(wc) + (wc.partStart && wc.from ? ' (only from ' + esc(dayWords(wc.from)) + ')' : '');
+      }
       function perH(v) { return v === null ? '—' : money2(v) + '/h'; }
       function goodH(v) { return v === null ? '—' : v.toFixed(1) + '/h'; }
       var thin = n.enough ? '' : 'thin: ' + (n.hours || 0).toFixed(1) + ' h on ' + n.onlineDays + ' day'
@@ -8544,16 +8552,19 @@
         html = row('runs', 'Hours online', '0 h', 'the rig was off all this week: no card and no minute online');
       } else {
         html += row('runs', 'Hours online', esc(n.hours.toFixed(1)) + ' h', 'on ' + n.onlineDays + ' day'
-          + (n.onlineDays === 1 ? '' : 's') + was(p ? p.hours.toFixed(1) + ' h' : ''));
-        html += row('week', 'Offers', esc(n.offers.toLocaleString()), 'press to list them' + was(p ? p.offers.toLocaleString() : ''));
+          + (n.onlineDays === 1 ? '' : 's') + was(function (c) { return c.hours.toFixed(1) + ' h'; }));
+        html += row('week', 'Offers', esc(n.offers.toLocaleString()), 'press to list them'
+          + was(function (c) { return c.offers.toLocaleString(); }));
         var r = got.ruler;
         html += row('good', 'Good offers', esc(n.good + ' · ' + goodH(n.goodRate)),
           (r && r.cut !== null ? 'top ' + r.top + '% of this range, ≥ ' + esc(money2(r.cut)) + '/hr · ' : '') + thin
           + vs(wr.cmp.good, goodH));
         html += row('week', 'Takes', esc(String(n.takes)), (n.unpaid ? n.unpaid + ' more with the pay not trusted · ' : '')
-          + 'your ✓ or Took only; a card nobody answered for is not a take' + was(p ? p.takes : ''));
+          + 'your ✓ or Took only; a card nobody answered for is not a take'
+          + was(function (c) { return String(c.takes); }));
         html += row('gross', 'Earned / hr online, gross', esc(perH(n.gross)), esc(money2(n.earned)) + ', the card pay of '
-          + 'the takes, over every minute online · ' + thin + vs(wr.cmp.gross, perH));
+          + 'the takes, over every minute online — a floor: only your ✓ or Took counts as taken · ' + thin
+          + vs(wr.cmp.gross, perH));
         html += wr.net
           ? row('net', 'Earned / hr online, net', esc(perH(n.net)), 'less ' + esc(money2(got.cpm)) + '/mi, the rig\'s '
             + 'own cost per mile' + (n.noMiles ? ' (' + n.noMiles + ' take' + (n.noMiles === 1 ? '' : 's') + ' with no miles, '
@@ -8564,13 +8575,15 @@
         var sl = wr.slots;
         var none = sl.met + ' of ' + sl.of + ' weekday × block slot' + (sl.of === 1 ? '' : 's') + ' had ' + sl.floorHours
           + ' h online, and none differed clearly from this range\'s ' + (wr.ref === null ? '—' : wr.ref.toFixed(1)) + ' good/h';
+        // A slot in one week is one evening: said so. Marked at 99% shared
+        // over the slots that met the floor (trends.js weekReview).
         var slotRow = function (k, x, side) {
-          return x ? row('slots', k, esc(x.name), esc(x.rate.toFixed(1) + ' good/h over ' + x.hours.toFixed(1) + ' h online, '
-            + 'clearly ' + side + ' this range\'s ' + wr.ref.toFixed(1) + '/h (one day: a calendar tile\'s rule)'))
+          return x ? row('slots', k, esc(x.name), esc(x.rate.toFixed(1) + ' good/h over ' + x.hours.toFixed(1) + ' h online '
+            + 'that evening, clearly ' + side + ' this range\'s ' + wr.ref.toFixed(1) + '/h (one evening, not a pattern)'))
             : row('slots', k, 'none clear', esc(none));
         };
-        html += slotRow('Best slot', sl.best, 'above');
-        html += slotRow('Worst slot', sl.worst, 'below');
+        if (!sl.best && !sl.worst) html += row('slots', 'Slots', 'No slot clearly better or worse', esc(none));
+        else { html += slotRow('Best slot', sl.best, 'above'); html += slotRow('Worst slot', sl.worst, 'below'); }
         var q = n.quality, flags = [];
         if (q.suspect) flags.push(q.suspect + ' suspect');
         if (q.corrected) flags.push(q.corrected + ' re-read');
@@ -8581,8 +8594,9 @@
       $('trWeekBody').innerHTML = html;
       $('trWeekNote').textContent = 'Each line opens the view that explains it. Every figure is this tab\'s own, cut at '
         + 'the same clock hours (a week here is the hour × date chart\'s week row). Last week is set beside a rate, and '
-        + 'an arrow drawn, only where both weeks have ' + floorWords + ' and the difference clears 99%; a slot is one '
-        + 'driver day, marked only where its 99% interval clears this range\'s good per hour. What happened, not advice: '
+        + 'an arrow drawn, only where both weeks have ' + floorWords + ' and the difference clears 99%; a count still '
+        + 'running is set beside last week to the same day and hour. A slot is one evening, marked only where its '
+        + 'interval clears this range\'s good per hour at 99% shared over the slots. What happened, not advice: '
         + 'nothing here reaches the verdict, the target or the rig.';
     }
     function matchedTrip(e) { var m = (e && e.match) || {}; return m.status === 'matched' || m.status === 'picked'; }
@@ -8590,7 +8604,7 @@
       var k = 'Paid against the card';
       var E = window.Earnings;
       if (!money || !Array.isArray(money.entries) || !money.entries.some(matchedTrip)) {
-        return row('money', k, 'Money tab ›', 'no earnings screenshot is matched to an order in this range');
+        return row('money', k, 'Money tab ›', 'no earnings screenshot is matched to an order in this week');
       }
       if (!E || typeof E.rangeSummary !== 'function') return row('money', k, 'Money tab ›', 'worked out on the Money tab');
       var s = E.rangeSummary(money.entries, money.records || [], { from: wr.span[0], to: wr.span[1] }), a = s.all;

@@ -821,6 +821,22 @@ function offer(x) {
      [T.weekReview(wkR, wkRun, '2026-03-16', { cut: 25, first: '2026-03-17' }).now.partStart,
       T.weekReview(wkR, wkRun, '2026-03-16', { cut: 25, first: '2026-03-16' }).now.partStart], [true, false]);
 
+  // Like with like (the reporting review's F2): a week still running is set
+  // beside last week to the same weekday and hour; the whole week before
+  // where no moment inside this week is given; a week before the range
+  // began says from when.
+  var wSo = T.weekReview(wkR, wkRun, '2026-03-23', { cut: 25, now: at(24, 19, 0) });
+  eq('F2: Tuesday 7pm of week B against Tuesday 7pm of week A: 3 h (Monday\'s 2, Tuesday\'s first), 25 offers, 2 takes',
+     [wSo.counts.soFar, wSo.counts.hours, wSo.counts.offers, wSo.counts.takes, wSo.counts.until === at(17, 19, 0)],
+     [true, 3, 25, 2, true]);
+  eq('...with no moment inside the week, the whole week before (5 h, 30 offers, 2 takes), said as full by the page',
+     [wB.counts.soFar, wB.counts.hours, wB.counts.offers, wB.counts.takes], [false, 5, 30, 2]);
+  var wPart = T.weekReview(wkR, wkRun, '2026-03-23', { cut: 25, first: '2026-03-17' });
+  eq('...a week before the range began is part of one, and says from when', [wPart.counts.partStart, wPart.counts.from],
+     [true, '2026-03-17']);
+  eq('S5: the slots share 99% over the two that met the floor (0.5% each), and Monday and Tuesday still clear',
+     [wA.slots.alpha, wA.slots.best.name, wA.slots.worst.name], [0.005, 'Mon 6–9pm', 'Tue 6–9pm']);
+
   /* --- a large journal is quick --- */
   var r5 = rng(3), big = [];
   for (var b = 0; b < 12500; b++) {
@@ -923,6 +939,11 @@ function offer(x) {
        && /id="trWeekPrev"[\s\S]*id="trWeekNext"/.test(page) && /T\.weekReview\(rows, got\.runs, st\.week/.test(page)
        && /E\.rangeSummary\(money\.entries/.test(page) && /CustomEvent\('money:held'/.test(page)
        && /addEventListener\('money:ask', sayMoneyHeld\)/.test(page));
+    ok('the week card words a running week like with like, the earned floor, one evening and one "no slot" row',
+       /same time last week/.test(page) && /last week \(full\)/.test(page) && /\(only from /.test(page)
+       && /a floor: only your ✓ or Took counts as taken/.test(page) && /that evening, clearly/.test(page)
+       && /No slot clearly better or worse/.test(page) && /matched to an order in this week/.test(page)
+       && /now: Date\.now\(\) \}\)/.test(page));
     ok('...the ruler offers 10, 20, 30 and 50, opens on 20, and says it is for reading only',
        /data-top="10"[\s\S]*data-top="20" aria-pressed="true"[\s\S]*data-top="30"[\s\S]*data-top="50"/.test(page)
        && /never\s+reaches the verdict/.test(page));

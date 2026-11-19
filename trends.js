@@ -221,14 +221,19 @@
  *   - the best and worst slot, weekday x three-hour block. In one week that
  *     slot is ONE driver day, so the grid's two-night floor can never be met
  *     and is not pretended: it is a calendar tile's rule, GOOD_FLOOR_HOURS
- *     online and the plain 99% Poisson interval on its good offers clear of
- *     the range's own good per hour. Best is the highest marked above, worst
+ *     online and the plain Poisson interval on its good offers (99% shared
+ *     over the slots that met it) clear of the range's own good per hour. Best is the highest marked above, worst
  *     the lowest marked below, and "none clear" where nothing is. The blocks
  *     are Advice's clock blocks on the driver's day, so Friday's 12-3am is
  *     the small hours after Friday evening and its 3-6am holds 4-6am Friday
  *     and 3-4am the next morning, both Friday's driver day.
  * Counts (hours, offers, takes) are printed beside last week's with no test:
- * a count is what it was. Descriptive like every figure here.
+ * a count is what it was — but like with like: a week still running beside
+ * last week up to the same weekday and clock time, and a week before the
+ * range began said to be part of one. A slot is one evening and is said so,
+ * and is marked at 99% shared over the slots that met the floor (Bonferroni):
+ * naming the best of seven at 99% each named one in 79% of no-effect weeks
+ * once nights swing. Descriptive like every figure here.
  *
  * THE RATE CARD is least squares, pay = base + a·minutes + b·miles, per app
  * per ISO week, reported as the price of a 20-minute, 5-mile trip with a
@@ -1719,6 +1724,38 @@
       e.partEnd = !!opts.last && e.to > opts.last;
     });
 
+    // Counts beside last week's, like with like (the reporting review's F2):
+    // a week still running is set against last week up to the same weekday
+    // and clock time (`opts.now`, a moment inside this week), not against
+    // all seven of its days; a week before the range began is said to be
+    // only part of one (`partStart`), and the page says from when. With no
+    // `now` inside the week the whole week before is the figure, and the
+    // page says "full". Rates are not cut: a rate is already per hour, and
+    // it is compared only under the floors below.
+    var counts = null;
+    if (prev) {
+      var span = weekSpanMs(wk), pspan = weekSpanMs(addDays(wk, -7));
+      var nowMs = typeof opts.now === 'number' ? opts.now : null;
+      var soFar = nowMs !== null && nowMs > span[0] && nowMs < span[1];
+      var until = pspan[1];
+      if (soFar) { var same = new Date(nowMs); same.setDate(same.getDate() - 7); until = same.getTime(); }
+      var ch = 0;
+      (runs || []).forEach(function (r) {
+        if (!r || !(r[1] > r[0])) return;
+        var a = Math.max(r[0], pspan[0]), b = Math.min(r[1], until);
+        if (b > a) ch += (b - a) / 3.6e6;
+      });
+      var co = 0, ct = 0, pk = addDays(wk, -7);
+      rows.forEach(function (r) {
+        if (r.week !== pk || r.t >= until) return;
+        co += 1;
+        var tk = takeOf(r, null);
+        if (tk && !tk.unpaid) ct += 1;
+      });
+      counts = { soFar: soFar, until: soFar ? until : null, hours: r2(ch), offers: co, takes: ct,
+                 partStart: prev.partStart, from: prev.partStart ? opts.first : null };
+    }
+
     // Against the week before: only where BOTH meet the week's floor; the
     // tests are compare mode's (gridCompare), so a week's arrow means what a
     // B-vs-A cell's shading means.
@@ -1745,15 +1782,21 @@
 
     // The week's slots: a weekday x block is ONE driver day in one week, so
     // it is marked as a calendar tile is — at GOOD_FLOOR_HOURS online, the
-    // plain 99% Poisson interval on its good offers clear of the range's own
+    // plain Poisson interval on its good offers clear of the range's own
     // good per hour (one day is one day; there is no second night to measure
-    // phi on). Best is the highest marked above, worst the lowest marked
-    // below; with none marked, "none clear".
+    // phi on), and the card says "that evening", which is all it can say.
+    // Best is the highest marked above, worst the lowest marked below.
+    // BONFERRONI over the slots that met the floor (the reporting review's
+    // S5): the card names the best of six or seven at 99% each, so on
+    // nights that swing 40% (the owner's do) 79% of no-effect weeks named a
+    // slot; at 0.01 / slots met, one name among them is under 1% by chance
+    // with no swing (stats in the AUDITS entry).
     var ref = gross.refRate;
     var met = now.slots.filter(function (s) { return s.hours >= GOOD_FLOOR_HOURS; });
+    var slotAlpha = met.length ? CI_ALPHA / met.length : CI_ALPHA;
     met.forEach(function (s) {
       s.rate = r2(s.good / s.hours);
-      s.shade = ref === null ? null : rateShade(s.good, s.hours, ref, 1).shade;
+      s.shade = ref === null ? null : rateShade(s.good, s.hours, ref, 1, slotAlpha).shade;
       s.hours = r2(s.hours);
     });
     var best = null, worst = null;
@@ -1768,11 +1811,11 @@
                earned: e.earned, earnedNet: e.earnedNet, gross: e.gross, net: e.net, enough: e.enough,
                quality: e.quality, partStart: e.partStart, partEnd: e.partEnd, any: e.any };
     }
-    return { week: wk, span: weekSpanMs(wk), now: slim(now), prev: slim(prev), cmp: cmp, net: net !== null,
+    return { week: wk, span: weekSpanMs(wk), now: slim(now), prev: slim(prev), cmp: cmp, counts: counts, net: net !== null,
              cut: typeof cut === 'number' ? cut : null, ref: ref === null ? null : r2(ref),
              phi: { good: Math.round(ph.good * 100) / 100, takes: Math.round(ph.takes * 100) / 100 },
              slots: { met: met.length, of: now.slots.length, best: best, worst: worst,
-                      floorHours: GOOD_FLOOR_HOURS } };
+                      floorHours: GOOD_FLOOR_HOURS, alpha: slotAlpha } };
   }
 
   /* --- the rate card --------------------------------------------------------- */
