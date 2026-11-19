@@ -6948,6 +6948,16 @@
     return '/api/frame.mjpeg?view=' + (viewMode === 'scene' ? 'scene' : 'screen');
   }
   var FRAME_GAP = 30;          // a floor for the fallback, so it cannot spin
+  /* ...and the gap when the stills themselves fail. A 404 is answered at once,
+     so 30 ms between failures was the floor and nothing else: a rig with no
+     frame file — the camera unplugged, the scanner not started — was asked
+     17 to 29 times a second, for ever, and at a phone's speed the error
+     handling alone held about a third of the panel's main thread (measured,
+     4x CPU throttle). Each failure in a row doubles the gap, up to a second,
+     which still puts the picture back within a second of the rig writing one;
+     the first frame that lands puts it straight back to FRAME_GAP. */
+  var FRAME_GAP_DOWN = 1000;
+  var frameMisses = 0;
   var streaming = false;
   var streamTried = 0;
   var framePending = false;
@@ -7037,7 +7047,9 @@
 
   function frameDone() {
     framePending = false;
-    if (!streaming && !document.hidden) setTimeout(refreshView, FRAME_GAP);
+    var gap = frameMisses ? Math.min(FRAME_GAP_DOWN, FRAME_GAP * Math.pow(2, frameMisses))
+                          : FRAME_GAP;
+    if (!streaming && !document.hidden) setTimeout(refreshView, gap);
   }
 
   view.addEventListener('load', function () {
@@ -7053,6 +7065,7 @@
     // is the single place "no frames while the map is up" is decided, and it
     // is exercised on every frame that lands after the switch.
     if (viewMode !== 'map') sawAFrame();
+    frameMisses = 0;
     if (!streaming) frameDone();
   });
   view.addEventListener('error', function () {
@@ -7070,6 +7083,7 @@
       return fallBackToStills();
     }
     noFrameYet();
+    frameMisses++;
     frameDone();
   });
 

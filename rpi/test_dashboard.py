@@ -3789,6 +3789,41 @@ const framed = (page) => page.waitForFunction(
     await ctx.close();
   }
 
+  // --- a rig with no frame to give -------------------------------------------
+  stage = 'a rig with no frame to give';
+  //
+  // The stream refused and every still a 404, as a rig with no frame file
+  // answers. A 404 comes back at once, and the stills were asked again
+  // FRAME_GAP (30 ms) after each: 17 to 29 a second for as long as the panel
+  // was open (measured). Then the frames come back, and the picture must
+  // follow at the stills' own rate, not at the backed-off one. Real time:
+  // the chain is driven by the picture's own load and error events.
+  {
+    const ctx = await browser.newContext({ viewport: { width: 800, height: 480 } });
+    const page = await ctx.newPage();
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    let down = true;
+    const asked = { refused: 0, given: 0 };
+    await page.route('**/api/frame.mjpeg*', (route) => route.fulfill({ status: 404, body: 'not found' }));
+    await page.route('**/api/frame.jpg*', (route) => {
+      if (down) { asked.refused++; return route.fulfill({ status: 404, body: 'not found' }); }
+      asked.given++;
+      return route.fulfill({ status: 200, contentType: 'image/jpeg',
+                             body: Buffer.from(FRAMES.portrait, 'base64') });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 })
+              .catch(() => {});
+    await page.waitForTimeout(3000);
+    const refused = asked.refused;
+    down = false;
+    await page.waitForTimeout(2000);
+    out.noFrame = { refused: refused, given: asked.given,
+                    w: await page.evaluate(() => document.getElementById('view').naturalWidth) };
+    await page.close();
+    await ctx.close();
+  }
+
   // --- the shift line when the figures cannot be trusted -------------------
   stage = 'the shift line when the figures cannot be trusted';
   //
@@ -8022,6 +8057,61 @@ const framed = (page) => page.waitForFunction(
     await ctx.close();
   }
 
+  // ...and a CDN that never ANSWERS: car wifi that opens and says nothing.
+  // MV.needLeaflet's promise used to stay pending for good, so mapBusy never
+  // cleared and "loading the map…" was the pane's last word; a press found
+  // showMap busy and asked nobody. The page's clock runs LEAFLET_WAIT_MS.
+  stage = 'Leaflet that never answers';
+  {
+    const ctx = await browser.newContext({ viewport: { width: 800, height: 480 } });
+    const page = await ctx.newPage();
+    await page.clock.install({ time: Date.now() });
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    let cdn = 0;
+    await page.route('https://unpkg.com/**', () => { cdn++; /* never answered */ });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 })
+              .catch(() => {});
+    const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+    const said = () => page.evaluate(() => ((n) => (n.classList.contains('chipped') ? n.title
+      : n.textContent))(document.getElementById('viewNote')).trim());
+    await push(Object.assign({}, READINGS.deducted, { places: ['Chipotle (Barrett Pkwy)', 'Canton Rd, Marietta'] }));
+    await push({ offer: { id: 'h-1', pay: 8.0, minutes: 22, pickup: 'Chipotle (Barrett Pkwy)',
+                          dropoff: 'Canton Rd, Marietta' } });
+    await page.click('#viewMode');
+    await page.clock.runFor(150);
+    await page.click('#viewMode');
+    await page.clock.runFor(500);
+    const waiting = await said();
+    // The reading again half way, as the rig sends one, so the card is still
+    // fresh (READ_STALE_MS is 16 s) when the wait is up.
+    const reading = Object.assign({}, READINGS.deducted, { places: ['Chipotle (Barrett Pkwy)', 'Canton Rd, Marietta'] });
+    await page.clock.runFor(8000);
+    await push(reading);
+    await page.clock.runFor(8000);
+    await page.waitForFunction(() => /^no signal/.test(((n) => (n.title
+      || n.textContent))(document.getElementById('viewNote'))), null, { timeout: 5000 }).catch(() => {});
+    out.hungLeaflet = { waiting: waiting, said: await said(), first: cdn };
+    // ⛶ Map round again tries again: loading, and once its own wait is up,
+    // no signal again with <head> as it was. Not counted at the network: the
+    // first request is still hanging there, and the browser hands a second
+    // tag for the same URL that same request rather than asking again.
+    const head = () => page.evaluate(() => document.head.querySelectorAll('script[src*="unpkg"]').length);
+    await push(reading);
+    for (let i = 0; i < 3; i++) { await page.click('#viewMode'); await page.clock.runFor(150); }
+    await page.clock.runFor(300);
+    out.hungLeaflet.again = { said: await said(), tags: await head() };
+    await page.clock.runFor(8000);
+    await push(reading);
+    await page.clock.runFor(8000);
+    await page.waitForFunction(() => /^no signal/.test(((n) => (n.title
+      || n.textContent))(document.getElementById('viewNote'))), null, { timeout: 5000 }).catch(() => {});
+    out.hungLeaflet.againSaid = await said();
+    out.hungLeaflet.againTags = await head();
+    await page.close();
+    await ctx.close();
+  }
+
   // --- the view between offers ------------------------------------------------
   stage = 'the map mode: the view between offers';
   //
@@ -9304,6 +9394,19 @@ try:
         (_nl.get('said') or '').startswith('no signal'))
     eq('[no Leaflet] ⛶ Map round again asks again, and <head> still holds no leftovers',
        (_nl.get('pressed'), _nl.get('headPressed')), (2, _nl.get('head')))
+    _hl = got.get('hungLeaflet') or {}
+    ok_('[no Leaflet] a CDN that never answers: Map view says it is loading the map (%r), '
+        'asking once for the stylesheet and the script (%r)' % (_hl.get('waiting'), _hl.get('first')),
+        'loading the map' in (_hl.get('waiting') or '') and _hl.get('first') == 2)
+    ok_('[no Leaflet] ...and once the wait is up it is no signal, not loading for ever (%r)'
+        % _hl.get('said'), (_hl.get('said') or '').startswith('no signal'))
+    _ha = _hl.get('again') or {}
+    ok_('[no Leaflet] ...and ⛶ Map round again tries again rather than finding the panel busy '
+        'for good: loading the map (%r), its script in <head> (%r)' % (_ha.get('said'), _ha.get('tags')),
+        'loading the map' in (_ha.get('said') or '') and _ha.get('tags') == 1)
+    ok_('[no Leaflet] ...and no signal again once that wait is up (%r), <head> left as it was'
+        % _hl.get('againSaid'),
+        (_hl.get('againSaid') or '').startswith('no signal') and _hl.get('againTags') == 0)
 
     # --- the view between offers ---------------------------------------------
     _bw = got.get('between') or {}
@@ -11263,6 +11366,15 @@ try:
         (_ds.get('asked') or {}).get('still', 0) >= 1
         and '/api/frame.jpg' in (_ds.get('src') or ''))
     ok_('[dead stream] ...and a picture is on it', (_ds.get('w') or 0) > 0 and not _ds.get('gone'))
+
+    # --- a rig with no frame to give --------------------------------------
+    _nf = got.get('noFrame') or {}
+    ok_('[no frame] every still a 404 for three seconds: the panel asks again, backing off '
+        '(%r asked; at the 30 ms floor it was 50 to 90)' % _nf.get('refused'),
+        1 <= (_nf.get('refused') or 0) <= 15)
+    ok_('[no frame] ...and once the rig has a frame again the picture is back at the stills\' '
+        'own rate (%r in two seconds) and on the pane' % _nf.get('given'),
+        (_nf.get('given') or 0) >= 8 and (_nf.get('w') or 0) > 0)
 
     # --- a reading with no verdict, and what it did read -----------------
     #

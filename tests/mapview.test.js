@@ -4618,6 +4618,68 @@ async function nucbox() {
      [firstTry, secondTry].join(','), 'false,false');
   eq('...and leaves nothing of itself in <head>', head.kids.length, 0);
 
+  // ...and a load that never answers at all: the CDN through car wifi that
+  // opens and says nothing. Its promise was kept pending for good, every
+  // later ask joined it, and live.html's mapBusy never cleared. A short wait
+  // stands in for LEAFLET_WAIT_MS.
+  var mute = { kids: [],
+               appendChild: function (el) { el.parentNode = this; this.kids.push(el); },
+               removeChild: function (el) {
+                 this.kids.splice(this.kids.indexOf(el), 1); el.parentNode = null;
+               } };
+  var stalled = { defaultView: {}, head: mute,
+                  createElement: function (tag) { return { tag: tag }; } };
+  var muteUrls = { css: 'https://cdn.invalid/l.css', js: 'https://cdn.invalid/l.js', wait: 30 };
+  var hung = MV.needLeaflet(stalled, muteUrls);
+  var hungJoined = MV.needLeaflet(stalled, muteUrls) === hung;
+  var orPending = function (p) {
+    return Promise.race([p, new Promise(function (r) { setTimeout(function () { r('still pending'); }, 500); })]);
+  };
+  var hungGot = await orPending(hung);
+  var hungNext = MV.needLeaflet(stalled, muteUrls);
+  eqJ('a Leaflet that never answers is a failed load once its wait is up, a second ask during '
+     + 'the wait joining the first, and the next ask after it a new attempt rather than the '
+     + 'dead one kept',
+     [hungJoined, hungGot, hungNext !== hung], [true, false, true]);
+  await orPending(hungNext);
+  eq('...and it too leaves nothing of itself in <head>', mute.kids.length, 0);
+
+  // The pinned version is fetched with its published digests, as a CORS
+  // request (an integrity check is made on no other kind); any other URL is
+  // fetched as it was, with no digest that is not its own.
+  var seen = { kids: [],
+               appendChild: function (el) {
+                 el.parentNode = this; this.kids.push(el);
+                 if (el.tag === 'script') setTimeout(function () { el.onerror(); }, 0);
+               },
+               removeChild: function (el) { el.parentNode = null; } };
+  var watched = { defaultView: {}, head: seen,
+                  createElement: function (tag) { return { tag: tag }; } };
+  await MV.needLeaflet(watched, { css: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
+                                  js: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js' });
+  await MV.needLeaflet(watched, urls);
+  eqJ('Leaflet 1.9.4 is asked for with its sha256 digests and crossorigin, another URL without',
+     seen.kids.map(function (el) { return [el.tag, el.integrity || null, el.crossOrigin || null]; }),
+     [['link', 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=', 'anonymous'],
+      ['script', 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=', 'anonymous'],
+      ['link', null, null], ['script', null, null]]);
+
+  // A library that landed after its wait was up: L is there, but the failure
+  // took its stylesheet out, and a Leaflet map with no stylesheet is tiles
+  // scattered down the page. The next ask puts it back, once.
+  var late = { kids: [],
+               appendChild: function (el) { el.parentNode = this; this.kids.push(el); },
+               querySelectorAll: function () {
+                 return this.kids.filter(function (el) { return el.tag === 'link'; });
+               } };
+  var landed = { defaultView: { L: {} }, head: late,
+                 createElement: function (tag) { return { tag: tag }; } };
+  var lateA = await MV.needLeaflet(landed, urls);
+  var lateB = await MV.needLeaflet(landed, urls);
+  eqJ('a Leaflet already there is ready, and its stylesheet is put in <head> once',
+     [lateA, lateB, late.kids.map(function (el) { return el.tag + ' ' + el.href; })],
+     [true, true, ['link https://cdn.invalid/l.css']]);
+
   /* ---- a refusal in words (refusalWords): the rig's and the report's -------
    *
    * The 7 Nov log and the places report said "not inside the card's reach"
