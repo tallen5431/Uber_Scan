@@ -597,6 +597,7 @@ used. A one-line key across the map's foot names the marks on it.
 | `tools/street_index.py` | Makes the street index once, on the NucBox, from the Georgia extract it already holds — osmium-tool for the cutting, Python's standard library for the rest |
 | `tools/install-sync.sh` | Puts the rig's journal on a timer to the machine at home; see the rig's README |
 | `tools/places_report.js`, `tools/places_nightly.sh` | The NucBox's offline report of where good offers start, and its nightly rebuild; see *Where the good offers start* |
+| `tools/report_check.js` | The reports checked against the real journal on the NucBox, aggregates only; see *Checking the reports against the real journal* |
 | `tools/strategy.js` | What $/hr to expect and what holding out for a line paid, off the record: one computation for the report's Strategy tab and `tools/shift_report.py --strategy`; see *The Strategy tab* |
 | [`lite/`](lite/README.md) | The lite edition: the camera, the reader and one big card on a display with nothing to touch, on at boot — the full rig with its experimental half switched off by one flag (`LITE=1`), not a copy of it. Its page, its server switch, its installer and kiosk, and its parts list; see [lite/README.md](lite/README.md) |
 | [`CLAUDE.md`](CLAUDE.md) | What a new working session needs before it starts: the lite decision and its rules, the standing conventions (twin parsers, signed commits, privacy, branches) and the settled list. Short on purpose; AUDITS.md has the reasons |
@@ -1161,6 +1162,27 @@ Then `crontab -e` and add:
 a path inside it) and is not to be committed. Dropoffs are counted by area
 only: no door, name or position of a customer is written, and a 2-mile cell
 with fewer than 10 trips is not named at all.
+
+### Checking the reports against the real journal
+
+`tools/report_check.js` reads the journal the way the report does (through the
+server, paging past its limit, and `/api/trends` for the offers page's Trends
+tab) and prints **aggregates only** — counts, shares, the top 10/20/30/50%
+cutoffs, settings and dates; never a place, a coordinate, a card's text, an id
+or one trip's amount — so its output can be pasted back as it is:
+
+```sh
+# on the NucBox, from the checkout
+node tools/report_check.js http://localhost:8081            # or --since 2026-09-01, --json
+```
+
+It says what was read (and whether the server cut it), the GPS fix coverage,
+the cutoffs as Trends and the report each work them out, for every Trends
+view and figure the cells meeting the floors and the cells coloured, hours
+online by the one rule, the takes by each view's rule with the weeks they
+disagree, each cost per mile on the rows and its dates, the share of offers
+re-read, suspect or unread, and how long the main computations took. Nothing
+is written; nothing on the rig runs it.
 
 ## What the server will not serve
 
