@@ -345,6 +345,9 @@ SHUT = [
     ('POST', '/api/held-pickup', b'{}'),
     ('POST', '/api/mapwalk', b'{}'),
     ('GET', '/map.html', None),
+    # Round B: the owner's special days, a Trends reading aid lite never loads.
+    ('GET', '/api/specialdays', None),
+    ('POST', '/api/specialdays', b'{"add": "2026-10-31"}'),
 ]
 # ...and what it keeps, which a phone on the same Wi-Fi uses to set it up.
 KEPT = ['/live.html', '/index.html', '/lite/lite.html', '/api/status', '/api/journal',

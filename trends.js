@@ -333,7 +333,7 @@
   // F_TAKEN: the driver's own ✓ only (see the header); a bit, not a column,
   // so the answer grows by nothing and carries no more than it did.
   var F_OK = 1, F_GOOD = 2, F_SUSPECT = 4, F_CORRECTED = 8, F_UNREAD = 16, F_BOOST_KNOWN = 32, F_BOOST = 64,
-      F_TAKEN = 128;
+      F_TAKEN = 128, F_REOFFER = 256;
 
   function num(v) { return typeof v === 'number' && isFinite(v) ? v : null; }
   function r2(v) { return v === null ? null : Math.round(v * 100) / 100; }
@@ -386,6 +386,10 @@
           | (known ? F_BOOST_KNOWN : 0)
           | (known && (typeof o.boost === 'number' ? o.boost > 0 : !!o.boost) ? F_BOOST : 0)
           | (o.accepted === true ? F_TAKEN : 0)
+          // Round B: server.js's fold marks a card offered again (its
+          // `reoffered`, absent otherwise); one bit, so the answer stays
+          // numbers only.
+          | (o.reoffered === true ? F_REOFFER : 0)
       });
     });
     out.sort(function (a, b) { return a.t - b.t; });
@@ -469,6 +473,7 @@
         ok: !!(f & F_OK), good: !!(f & F_GOOD), suspect: !!(f & F_SUSPECT),
         corrected: !!(f & F_CORRECTED), unread: !!(f & F_UNREAD),
         boost: f & F_BOOST_KNOWN ? !!(f & F_BOOST) : null, taken: !!(f & F_TAKEN),
+        reoffered: !!(f & F_REOFFER),
         day: day, week: week, month: month, dow: dow, hour: hour
       };
     }
@@ -1520,8 +1525,13 @@
     opts = opts || {};
     var stat = statOf(opts.stat), cut = opts.cut, cpm = cpmOf(opts);
     var p = STAT_P[stat] || 0.5;
+    // Round B: a window from the overview is several weekdays and hours at
+    // once — `dow` and `hour` may each be a list — and is looked at in the
+    // same panel, by the same sums, as one cell.
+    var dows = Array.isArray(dow) ? dow : null, hours = Array.isArray(hour) ? hour : null;
     function inCell(x) {
-      return (dow === null || dow === undefined || x.dow === dow) && x.hour === hour
+      return (dows ? dows.indexOf(x.dow) >= 0 : dow === null || dow === undefined || x.dow === dow)
+        && (hours ? hours.indexOf(x.hour) >= 0 : x.hour === hour)
         && (!opts.from || x.day >= opts.from) && (!opts.to || x.day <= opts.to);
     }
     var list = rows.filter(inCell);
@@ -1536,7 +1546,7 @@
       hoursByWeek[wk] = (hoursByWeek[wk] || 0) + pc.hours;
     });
     function earnedOf(sub) {
-      var sl = emptySlice('2000-01-01', hour);
+      var sl = emptySlice('2000-01-01', hours ? hours[0] : hour);
       sub.forEach(function (r) { addTake(sl, r, cpm); });
       return sl;
     }
@@ -2302,7 +2312,9 @@
                        'app', 'pay', 'boost', 'card_minutes', 'card_miles', 'per_hour', 'per_mile',
                        'panel_said', 'driver_marked', 'during_job', 'good_top' + CSV_TOP + '_of_range',
                        'counted', 'suspect', 'doubt', 'pay_reread', 'pay_unread',
-                       'lat', 'lon', 'gps_ok', 'gps_err_m', 'gps_age_s', 'pickup', 'dropoff', 'offer_id'];
+                       'lat', 'lon', 'gps_ok', 'gps_err_m', 'gps_age_s', 'pickup', 'dropoff', 'offer_id',
+                       // Round B, appended as every column is (the rule above).
+                       'special_day', 'reoffered'];
   var SAID = { go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' };
   function fixed(v, places) { return num(v) === null ? null : Number(v.toFixed(places)); }
   function yn(b) { return b ? 'yes' : 'no'; }
@@ -2310,6 +2322,10 @@
     opts = opts || {};
     var busy = opts.busy || {}, paired = opts.paired || {};
     var noPlaces = opts.keepPlaces === false;
+    // Round B: the two marks the Trends overview can leave out, as columns
+    // (never as rows taken away): the special day's name, the owner's marked
+    // days among them (`marked`), and the fold's `reoffered`.
+    var marked = markedSet(opts.marked);
     var list = distinct(offers);
     var rule = ruler(readRows(rowsOf(list)), CSV_TOP);
     var lines = [OFFER_COLUMNS.slice()];
@@ -2351,10 +2367,470 @@
           hasFix ? fixed(o.gpsAge, 1) : null,
           noPlaces || typeof o.pickup !== 'string' ? null : o.pickup,
           noPlaces || typeof o.dropoff !== 'string' ? null : o.dropoff,
-          typeof o.id === 'string' ? o.id : null
+          typeof o.id === 'string' ? o.id : null,
+          day ? specialDayOf(day, marked) : null, yn(o.reoffered === true)
         ]);
       });
     return { text: csvText(lines), rows: lines.length - 1, gps: gps, cut: rule.cut, top: CSV_TOP };
+  }
+
+  /* --- round B: the overview, special days, re-offered cards, outliers ---------
+   *
+   * The owner, Nov 2026: "a simplified overview that lets you expand into
+   * more specific details ... to figure out when (time of day, day of the
+   * week, etc) and where ... to find the most profitable times to work and
+   * areas." And on outliers: "many very high paying orders to fast food
+   * places tend to be undeliverable and the price ends up being very high but
+   * is not real and can make the charts hard to read. Though it can be
+   * impossible to tell, or certain days like Halloween pay very well due to
+   * the holiday." Everything below READS the record: nothing deletes a row,
+   * and nothing reaches the verdict, the target, the panel or the rig. */
+
+  /* SPECIAL DAYS. A built-in list, by rule, and the days the owner marks
+   * (server.js /api/specialdays, dates only). A special day is a DRIVER day
+   * (4am to 4am), so Halloween's small hours after midnight are Halloween,
+   * and New Year's Eve's last hours are the Eve, not the Day.
+   *
+   * SUPER BOWL SUNDAY, CHECKED. From the 2021 season on (17 games and a week
+   * off before the game) it falls 22 weeks after the first Sunday after Labor
+   * Day: 13 Feb 2022, 12 Feb 2023, 11 Feb 2024, 9 Feb 2025, 8 Feb 2026, all
+   * the 2nd Sunday of February. The two rules are one: Labor Day falls 1-7
+   * Sep, so that first Sunday is 7-13 Sep, and 154 days on is 8-14 Feb, which
+   * is exactly the 2nd Sunday's range. The same rule gives 14 Feb 2027 (also
+   * Valentine's Day; the day says both) and 13 Feb 2028. Before 2022 the
+   * game was on the 1st Sunday (7 Feb 2021, 2 Feb 2020). A schedule change by
+   * the league is what would break it, and a marked day covers that. */
+  var specialMemo = Object.create(null);
+  function nthSunday(y, m, n) { var d = new Date(y, m, 1, 12); return 1 + (7 - d.getDay()) % 7 + (n - 1) * 7; }
+  function nthWeekdayOf(y, m, dow, n) { var d = new Date(y, m, 1, 12); return 1 + (dow - d.getDay() + 7) % 7 + (n - 1) * 7; }
+  function specialDays(year) {
+    var y = Number(year);
+    if (specialMemo[y]) return specialMemo[y];
+    var out = Object.create(null);
+    function at(m, d, name) {
+      var k = y + '-' + pad2(m + 1) + '-' + pad2(d);
+      out[k] = out[k] ? out[k] + ' · ' + name : name;
+    }
+    at(0, 1, 'New Year\'s Day');
+    at(1, 14, 'Valentine\'s Day');
+    at(1, nthSunday(y, 1, y >= 2022 ? 2 : 1), 'Super Bowl Sunday');
+    at(4, nthSunday(y, 4, 2), 'Mother\'s Day');
+    at(6, 4, 'July 4th');
+    at(9, 31, 'Halloween');
+    at(10, nthWeekdayOf(y, 10, 4, 4), 'Thanksgiving');
+    at(11, 24, 'Christmas Eve');
+    at(11, 25, 'Christmas Day');
+    at(11, 31, 'New Year\'s Eve');
+    specialMemo[y] = out;
+    return out;
+  }
+  var DATE_KEY = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+  // A list of marked days (or a set already) as a set of 'YYYY-MM-DD'.
+  function markedSet(marked) {
+    if (marked && !Array.isArray(marked) && typeof marked === 'object') return marked;
+    var out = Object.create(null);
+    (marked || []).forEach(function (k) { if (typeof k === 'string' && DATE_KEY.test(k)) out[k] = true; });
+    return out;
+  }
+  // The day's name, 'marked by you' for a day the owner marked, both where
+  // both, else null.
+  function specialDayOf(day, marked) {
+    if (typeof day !== 'string' || !DATE_KEY.test(day)) return null;
+    var name = specialDays(day.slice(0, 4))[day] || null;
+    if (markedSet(marked)[day]) return name ? name + ' (marked by you)' : 'marked by you';
+    return name;
+  }
+
+  /* LEAVE OUT. The overview's two switches, both off unless pressed, both
+   * reading-only: the rows and runs every figure on the tab is worked from,
+   * with the re-offered cards (the fold's `reoffered`) and/or every offer and
+   * minute online on a special day taken out, and what was taken out. A run
+   * is cut at 4am (a clock-hour edge, so no hour's piece changes) and its
+   * pieces on a special day dropped, so a holiday's hours leave with its
+   * offers and good per hour is not lowered by hours whose cards are gone. A
+   * re-offered card's minutes stay: the driver was online for them. Nothing
+   * on: the same rows and runs, by identity, so every cache holds. */
+  function nextDayEdge(t) {
+    var d = dateOfKey(dayKeyOf(t));
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, DAY_STARTS_AT).getTime();
+  }
+  function leaveOut(rows, runs, opts) {
+    opts = opts || {};
+    var sp = !!opts.special, re = !!opts.reoffered;
+    var out = { rows: rows, runs: runs, removed: 0, reoffered: 0, special: 0, days: [] };
+    if (!sp && !re) return out;
+    var marked = markedSet(opts.marked), named = Object.create(null), gone = Object.create(null);
+    function special(day) {
+      if (!(day in named)) named[day] = sp ? specialDayOf(day, marked) : null;
+      return named[day];
+    }
+    out.rows = rows.filter(function (r) {
+      var s = special(r.day), x = re && r.reoffered;
+      if (s) gone[r.day] = s;
+      if (!s && !x) return true;
+      out.removed += 1;
+      if (x) out.reoffered += 1;
+      if (s) out.special += 1;
+      return false;
+    });
+    if (sp) {
+      out.runs = [];
+      (runs || []).forEach(function (r) {
+        if (!r || !(r[1] > r[0])) return;
+        for (var t = r[0], guard = 0; t < r[1] && guard < 400; guard++) {
+          var end = Math.min(r[1], nextDayEdge(t)), day = dayKeyOf(t), s = special(day);
+          if (s) gone[day] = s; else out.runs.push([t, end]);
+          t = end;
+        }
+      });
+    }
+    out.days = Object.keys(gone).sort().map(function (d) { return { day: d, name: gone[d] }; });
+    return out;
+  }
+
+  /* WHEN: THE BEST AND WEAKEST WINDOWS. A window is a run of whole clock
+   * hours, in the driver day's order (4am first, so a night is one stretch),
+   * of 1 to WINDOW_MAX_H hours, on one driver weekday or a group of them
+   * (Weekdays, Monday to Friday; Weekends, Saturday and Sunday, the driver's
+   * days). Its figure is good offers per hour online, the grid's own: the
+   * good count over the minutes online in those cells, pooled over the
+   * nights. Floor: GOOD_FLOOR_HOURS online on GOOD_FLOOR_DAYS driver days,
+   * the grid's. Clear: the grid's widened Poisson interval (phi measured over
+   * the cells' nights, as the grid's) wholly above or below the range's own
+   * rate.
+   *
+   * WHY THE INTERVAL IS SHARED OVER THE SEARCH. A grid cell is one question;
+   * this asks a few hundred overlapping ones and keeps the best, and the best
+   * of many at 99% each is clear by chance far more than 1 time in 100. So
+   * the 99% is shared (Bonferroni) over every window that met the floor, as
+   * the week card shares it over its slots: CI_ALPHA / m, m kept on the
+   * answer (`searched`). Simulated on records built like the owner's (AUDITS.md,
+   * the round B entry, has the table). Conservative where windows overlap,
+   * which costs power and never a false "clearly".
+   *
+   * WHICH WINDOW SPEAKS FOR A STRETCH. Of the windows that are clear, the one
+   * whose interval sits furthest from the range (the highest lower end for
+   * the best, the lowest upper end for the weakest) is taken first, then the
+   * next that shares no cell with it, and so on: a three-hour Friday evening
+   * that is clearly better outranks the single hour inside it that happens
+   * to read higher on fewer nights. The chosen ones are then listed by good
+   * per hour. With none clear, the three highest by good per hour that share
+   * no cell are listed as "leading, not yet clear". Every hour inside a
+   * window had time online; untried hours (no minute online and no card in
+   * the range) are listed apart and never as weak.
+   * Descriptive: when offers paid best, never which to take. */
+  var WINDOW_MAX_H = 6, WINDOW_BEST = 3, WINDOW_WORST = 2;
+  var DAY_GROUPS = [[1], [2], [3], [4], [5], [6], [0], [1, 2, 3, 4, 5], [6, 0]];
+  var GROUP_NAMES = ['Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays', 'Sundays',
+                     'Weekdays', 'Weekends'];
+  function clockName(h) { return (h % 12 || 12) + (h < 12 ? 'am' : 'pm'); }
+  // '6–10pm', '10pm–2am', '4–5am': hours h0 to hLast inclusive.
+  function spanName(h0, hLast) {
+    var a = clockName(h0), b = clockName((hLast + 1) % 24);
+    return (a.slice(-2) === b.slice(-2) ? a.slice(0, -2) : a) + '–' + b;
+  }
+  function windowName(w) { return GROUP_NAMES[w.group] + ' ' + spanName(w.from, w.to); }
+
+  /* The search itself, over plain slices so the places report can hand it
+   * its own (cards waited, not minutes online): each slice { day, dow, hour,
+   * k (good), h (hours), offers, takes, e (earned) }. */
+  function findWindows(slices, opts) {
+    opts = opts || {};
+    var fH = typeof opts.floorHours === 'number' ? opts.floorHours : GOOD_FLOOR_HOURS;
+    var fD = typeof opts.floorDays === 'number' ? opts.floorDays : GOOD_FLOOR_DAYS;
+    var maxLen = opts.maxLen || WINDOW_MAX_H, alpha = opts.alpha || CI_ALPHA;
+    var cells = [];
+    for (var c0 = 0; c0 < 168; c0++) cells.push({ K: 0, H: 0, offers: 0, takes: 0, e: 0, nights: Object.create(null) });
+    var K = 0, H = 0;
+    (slices || []).forEach(function (s) {
+      var c = cells[s.dow * 24 + s.hour];
+      if (!c) return;
+      c.K += s.k || 0; c.H += s.h || 0; c.offers += s.offers || 0; c.takes += s.takes || 0; c.e += s.e || 0;
+      var n = c.nights[s.day] || (c.nights[s.day] = { k: 0, h: 0 });
+      n.k += s.k || 0; n.h += s.h || 0;
+      K += s.k || 0; H += s.h || 0;
+    });
+    var ref = H > 0 ? K / H : null;
+    // phi AT THE WINDOW'S OWN LENGTH. A slow night lowers every hour of it,
+    // so a window's nights swing more than one cell's: measured over the
+    // grid's per-cell phi, a four-hour window was clear by chance in 9% of
+    // no-effect records with a 40% night-to-night swing (simulated, 300
+    // records of nine weeks). So phi is measured per length, over every
+    // single weekday's windows of that length, each night's good and hours
+    // summed across the window's hours.
+    var phiLen = [1];
+    for (var L0 = 1; L0 <= maxLen; L0++) {
+      var groups = [];
+      for (var dd = 0; dd < 7; dd++) {
+        for (var i0 = 0; i0 + L0 <= 24; i0++) {
+          var nightsOf = Object.create(null);
+          for (var j0 = 0; j0 < L0; j0++) {
+            var cn = cells[dd * 24 + HOUR_ORDER[i0 + j0]].nights;
+            for (var dk in cn) {
+              var x = nightsOf[dk] || (nightsOf[dk] = { k: 0, h: 0 });
+              x.k += cn[dk].k; x.h += cn[dk].h;
+            }
+          }
+          groups.push(Object.keys(nightsOf).map(function (dk2) { return nightsOf[dk2]; }));
+        }
+      }
+      phiLen.push(typeof opts.phi === 'number' ? opts.phi : dispersion(groups));
+    }
+    var cands = [];
+    DAY_GROUPS.forEach(function (dows, g) {
+      for (var i = 0; i < 24; i++) {
+        var k = 0, h = 0, offers = 0, takes = 0, e = 0, days = Object.create(null), nDays = 0, keys = [];
+        for (var len = 1; len <= maxLen && i + len <= 24; len++) {
+          var hour = HOUR_ORDER[i + len - 1];
+          // Every hour of a window was tried: one with no minute online on
+          // any of its days ends the run (an untried hour is listed apart,
+          // never folded into a window's figure or its name).
+          var tried = false;
+          for (var dt = 0; dt < dows.length; dt++) if (cells[dows[dt] * 24 + hour].H > 0) tried = true;
+          if (!tried) break;
+          for (var di = 0; di < dows.length; di++) {
+            var c = cells[dows[di] * 24 + hour];
+            k += c.K; h += c.H; offers += c.offers; takes += c.takes; e += c.e;
+            keys.push(dows[di] * 24 + hour);
+            for (var dy in c.nights) if (c.nights[dy].h > 0 && !days[dy]) { days[dy] = true; nDays += 1; }
+          }
+          if (h >= fH - 1e-9 && nDays >= fD) {
+            cands.push({ group: g, dows: dows, from: HOUR_ORDER[i], to: hour, len: len, k: k, h: h, nights: nDays,
+                         offers: offers, takes: takes, earned: e, cells: keys.slice() });
+          }
+        }
+      }
+    });
+    var m = cands.length, a = alpha / Math.max(1, m);
+    cands.forEach(function (w) {
+      w.rate = w.k / w.h;
+      w.shade = null; w.ci = null;
+      if (ref === null) return;
+      var phi = phiLen[w.len], f = phi > 1 ? phi : 1;
+      // A screen before the exact interval, kept only where it cannot change
+      // the answer: at a shared level under 1e-3 a count within 2 sd of the
+      // range's (on k/phi) can never clear, and the bisections are most of
+      // the search's cost on a phone.
+      var mu = ref * w.h;
+      if (a < 1e-3 && Math.abs(w.k - mu) / Math.sqrt(Math.max(w.k, mu, 1) * f) < 2) return;
+      var rs = rateShade(w.k, w.h, ref, phi, a);
+      w.shade = rs.shade; w.ci = rs.ci;
+    });
+    function pick(list, n, order) {
+      var used = Object.create(null), chosen = [];
+      list.slice().sort(order).forEach(function (w) {
+        if (chosen.length >= n || w.cells.some(function (c) { return used[c]; })) return;
+        w.cells.forEach(function (c) { used[c] = true; });
+        chosen.push(w);
+      });
+      return chosen;
+    }
+    var byRate = function (x, y) { return y.rate - x.rate || y.h - x.h || x.group - y.group; };
+    var best = pick(cands.filter(function (w) { return w.shade === 'above'; }), WINDOW_BEST, function (x, y) {
+      return y.ci[0] - x.ci[0] || byRate(x, y);
+    }).sort(byRate);
+    var worst = pick(cands.filter(function (w) { return w.shade === 'below'; }), WINDOW_WORST, function (x, y) {
+      return x.ci[1] - y.ci[1] || byRate(y, x);
+    }).sort(function (x, y) { return x.rate - y.rate || y.h - x.h; });
+    var leading = best.length ? [] : pick(cands.filter(function (w) { return w.shade !== 'below'; }), WINDOW_BEST, byRate);
+    function said(w) {
+      var at = HOUR_ORDER.indexOf(w.from);
+      return { group: w.group, dows: w.dows, from: w.from, to: w.to, len: w.len, name: windowName(w),
+               hours: HOUR_ORDER.slice(at, at + w.len), good: w.k, online: r2(w.h), nights: w.nights,
+               offers: w.offers, rate: r2(w.rate), waitMin: w.k > 0 ? Math.round(60 * w.h / w.k) : null,
+               shade: w.shade, ci: w.ci, takes: w.takes, earned: r2(w.earned), earnedRate: r2(w.earned / w.h),
+               cells: w.cells };
+    }
+    // Untried: no minute online and no card, by weekday, as runs of hours;
+    // a run untried on every weekday is said once, as every day's.
+    var WEEK = [1, 2, 3, 4, 5, 6, 0], runsBy = [];
+    for (var d0 = 0; d0 < 7; d0++) {
+      var list = [], run = null;
+      for (var hi = 0; hi < 24; hi++) {
+        var hr = HOUR_ORDER[hi], cc = cells[d0 * 24 + hr];
+        if (cc.H === 0 && cc.offers === 0) { if (run) run.to = hr; else run = { from: hr, to: hr }; }
+        else if (run) { list.push(run); run = null; }
+      }
+      if (run) list.push(run);
+      runsBy.push(list);
+    }
+    function offOn(d, r) { return runsBy[d].some(function (o) { return o.from === r.from && o.to === r.to; }); }
+    var untried = [], every = Object.create(null);
+    runsBy[1].forEach(function (r) {
+      if (WEEK.every(function (d) { return offOn(d, r); })) {
+        every[r.from + '-' + r.to] = true;
+        untried.push({ dows: WEEK, every: true, from: r.from, to: r.to });
+      }
+    });
+    WEEK.forEach(function (d) {
+      runsBy[d].forEach(function (r) {
+        if (!every[r.from + '-' + r.to]) untried.push({ dows: [d], every: false, from: r.from, to: r.to });
+      });
+    });
+    untried.forEach(function (u) {
+      u.name = (u.every ? 'every day' : WEEKDAYS[u.dows[0]]) + ' ' + spanName(u.from, u.to);
+      u.hours = HOUR_ORDER.indexOf(u.to) - HOUR_ORDER.indexOf(u.from) + 1;
+    });
+    return { best: best.map(said), worst: worst.map(said), leading: leading.map(said), clear: best.length > 0,
+             searched: m, alpha: a, ref: ref === null ? null : r2(ref), phi: phiLen.slice(1).map(r2),
+             floorHours: fH, floorDays: fD, maxLen: maxLen, untried: untried, online: r2(H), good: K };
+  }
+  // The tab's windows: the slice table's own good, minutes online, takes and
+  // earned (net at the rig's one cost per mile where `net` asks).
+  function overviewWhen(rows, runs, opts) {
+    opts = opts || {};
+    var tab = sliceTable(rows, runs, { cut: opts.cut, cpm: cpmOf(opts) });
+    var res = findWindows(sliceList(tab).map(function (s) {
+      return { day: s.day, dow: s.dow, hour: s.hour, k: s.good, h: s.hours, offers: s.rows.length,
+               takes: s.takes, e: s.earned };
+    }), opts);
+    res.cut = typeof opts.cut === 'number' ? opts.cut : null;
+    res.net = tab.net;
+    return res;
+  }
+
+  /* WHERE, on the offers page: the card's own towns (map-view.js townOf
+   * over Advice.area, the Targets lines' rule; the caller hands it in, so
+   * this file knows no place), the pickup's and the dropoff's apart, from
+   * the offers the page already holds. Each town: offers counted, the share
+   * good against the ruler, the typical $/hr, driver days; ranked by share
+   * good at FLOOR offers on FLOOR_DAYS days, the rest counted as thin. A
+   * share is called clearly above or below the range's only where its 99%
+   * interval, shared over the towns ranked (Bonferroni), leaves the range's
+   * share out. `keep` is the overview's switches, by the page. */
+  function towns(offers, opts) {
+    opts = opts || {};
+    var cut = opts.cut, townOf = opts.townOf, keep = opts.keep;
+    var minN = typeof opts.minN === 'number' ? opts.minN : FLOOR;
+    var minD = typeof opts.minDays === 'number' ? opts.minDays : FLOOR_DAYS;
+    var ends = { pickup: Object.create(null), dropoff: Object.create(null) };
+    var unnamed = { pickup: 0, dropoff: 0 }, n = 0, good = 0;
+    distinct(offers).forEach(function (o) {
+      if (keep && !keep(o)) return;
+      var ok = o.payUnread !== true && (Advice && Advice.trustworthy ? Advice.trustworthy(o) : !o.suspect)
+        && num(o.perHour) !== null;
+      var t = seenAt(o);
+      if (!ok || t === null) return;
+      var g = typeof cut === 'number' && o.perHour >= cut;
+      n += 1; if (g) good += 1;
+      ['pickup', 'dropoff'].forEach(function (end) {
+        var name = typeof townOf === 'function' && typeof o[end] === 'string' ? townOf(o[end]) : null;
+        if (!name) { unnamed[end] += 1; return; }
+        var e = ends[end][name] || (ends[end][name] = { town: name, n: 0, good: 0, days: Object.create(null), v: [] });
+        e.n += 1; if (g) e.good += 1;
+        e.days[dayKeyOf(t)] = true;
+        e.v.push(o.perHour);
+      });
+    });
+    var share = n ? good / n : null;
+    var res = { n: n, good: good, share: share === null ? null : r2(share), minN: minN, minDays: minD };
+    ['pickup', 'dropoff'].forEach(function (end) {
+      var ranked = [], thin = 0;
+      Object.keys(ends[end]).forEach(function (k) {
+        var e = ends[end][k], days = Object.keys(e.days).length;
+        if (e.n >= minN && days >= minD) {
+          ranked.push({ town: e.town, n: e.n, good: e.good, share: r2(e.good / e.n), days: days,
+                        typical: r2(q(sorted(e.v), 0.5)) });
+        } else thin += 1;
+      });
+      var a = CI_ALPHA / Math.max(1, ranked.length);
+      ranked.forEach(function (e) {
+        e.shade = null;
+        if (share === null) return;
+        var ci = shareCI(e.good, e.n, a);
+        e.shade = ci[0] > share ? 'above' : ci[1] < share ? 'below' : null;
+      });
+      ranked.sort(function (x, y) { return y.share - x.share || y.typical - x.typical || y.n - x.n; });
+      res[end] = { ranked: ranked, thin: thin, unnamed: unnamed[end] };
+    });
+    return res;
+  }
+
+  /* OUTLIERS, DRAWN, NEVER DROPPED. A chart of single offers scales its axis
+   * to the bulk: the higher of the 99th percentile and Tukey's far fence (the
+   * upper quartile plus three times the middle half's width), so at most one
+   * offer in a hundred sits past it and a record with no wild offer has no
+   * cap at all. The offers past it are counted on the edge ("↑ 4 above
+   * $62/hr") and listed on a press. AN AXIS CAP FOR DRAWING IS NOT A FLOOR OR
+   * A CEILING ON PAY (Settled: no $/mile rules and no payout floors): every
+   * offer stays in every figure and the ruler; only the drawing's edge moves.
+   * Under AXIS_CAP_MIN values there is too little to call anything the bulk. */
+  var AXIS_CAP_MIN = 20;
+  function axisCap(vals) {
+    var s = sorted((vals || []).filter(function (v) { return typeof v === 'number' && isFinite(v); }));
+    var max = s.length ? s[s.length - 1] : null;
+    if (s.length < AXIS_CAP_MIN) return { cap: null, above: 0, max: max, n: s.length };
+    var q1 = q(s, 0.25), q3 = q(s, 0.75), cap = Math.max(q(s, 0.99), q3 + 3 * (q3 - q1));
+    if (!(max > cap)) return { cap: null, above: 0, max: max, n: s.length };
+    var above = 0;
+    for (var i = s.length - 1; i >= 0 && s[i] > cap; i--) above += 1;
+    return { cap: r2(cap), above: above, max: max, n: s.length };
+  }
+  // The money rows over a cap, highest first: figures and when only (the
+  // rows hold no text and no place).
+  function outliers(rows, cap) {
+    if (typeof cap !== 'number') return [];
+    return rows.filter(function (r) { return r.ok && r.perHour !== null && r.perHour > cap; })
+      .sort(function (a, b) { return b.perHour - a.perHour || a.t - b.t; })
+      .map(function (r) {
+        return { t: r.t, day: r.day, app: r.app, pay: r.pay, minutes: r.minutes, miles: r.miles,
+                 perHour: r.perHour, reoffered: !!r.reoffered, taken: !!r.taken };
+      });
+  }
+
+  /* COST PER MILE, AS THE ROWS CARRY IT. Every offer's $/hr is net of its
+   * card miles at the cost per mile in force when it was seen (journal.py
+   * row_for stores the setting beside the rate). /api/trends sends where that
+   * changed in the window ([seconds, cost] at each change, numbers only), so
+   * the tab can say "$/hr after $0.30/mi (card miles)" and, where it moved,
+   * when and from what. */
+  function costNote(costs) {
+    var list = (costs || []).filter(function (c) { return c && num(c[0]) !== null && num(c[1]) !== null; });
+    var changes = [];
+    for (var i = 1; i < list.length; i++) {
+      if (list[i][1] !== list[i - 1][1]) {
+        changes.push({ t: list[i][0] * 1000, day: dayKeyOf(list[i][0] * 1000), from: list[i - 1][1], to: list[i][1] });
+      }
+    }
+    return { now: list.length ? list[list.length - 1][1] : null, first: list.length ? list[0][1] : null,
+             changes: changes };
+  }
+
+  /* WHAT THE RECORD CAN HOLD YET (the UX review's D4-D6): a view that cannot
+   * say anything until the record is longer is hidden until it can, rather
+   * than drawn grey. Months on the timeline and the days of the month need
+   * three calendar months with data; one weekday over the weeks needs
+   * SAME_DOW_MIN of that weekday with data; this month against last needs
+   * two calendar months wholly inside the record's first and last driver day. */
+  var SAME_DOW_MIN = 4;
+  function reveals(rows, runs) {
+    var months = Object.create(null), dayHas = Object.create(null), first = null, last = null;
+    function see(day) {
+      months[day.slice(0, 7)] = true;
+      dayHas[day] = true;
+      if (first === null || day < first) first = day;
+      if (last === null || day > last) last = day;
+    }
+    rows.forEach(function (r) { see(r.day); });
+    var pieces = onlinePieces(runs);
+    Object.keys(pieces).forEach(function (k) { if (pieces[k].hours > 0) see(pieces[k].day); });
+    var dowDays = [0, 0, 0, 0, 0, 0, 0];
+    Object.keys(dayHas).forEach(function (d) { dowDays[dateOfKey(d).getDay()] += 1; });
+    var full = 0;
+    if (first !== null) {
+      var y = Number(first.slice(0, 4)), m = Number(first.slice(5, 7)) - 1;
+      for (var guard = 0; guard < 600; guard++) {
+        var a = y + '-' + pad2(m + 1) + '-01';
+        if (a > last) break;
+        var z = y + '-' + pad2(m + 1) + '-' + pad2(new Date(y, m + 1, 0, 12).getDate());
+        if (a >= first && z <= last) full += 1;
+        m += 1; if (m > 11) { m = 0; y += 1; }
+      }
+    }
+    var nMonths = Object.keys(months).length;
+    return { months: nMonths, fullMonths: full, dowDays: dowDays,
+             tlMonths: nMonths >= 3, thirds: nMonths >= 3, monthVsLast: full >= 2,
+             sameDow: dowDays.map(function (n) { return n >= SAME_DOW_MIN; }) };
   }
 
   return {
@@ -2379,6 +2855,10 @@
     grid: grid, calendar: calendar, fit3: fit3, rateFit: rateFit, rateCard: rateCard,
     compare: compare, scatter: scatter, csvPeriods: csvPeriods, csvHourly: csvHourly,
     BOM: BOM, safeCell: safeCell, hourLabel: hourLabel, offersCsv: offersCsv, OFFER_COLUMNS: OFFER_COLUMNS,
-    CSV_TOP: CSV_TOP
+    CSV_TOP: CSV_TOP, F_REOFFER: F_REOFFER,
+    specialDays: specialDays, specialDayOf: specialDayOf, leaveOut: leaveOut, findWindows: findWindows,
+    overviewWhen: overviewWhen, windowName: windowName, spanName: spanName, GROUP_NAMES: GROUP_NAMES,
+    DAY_GROUPS: DAY_GROUPS, WINDOW_MAX_H: WINDOW_MAX_H, towns: towns, axisCap: axisCap, AXIS_CAP_MIN: AXIS_CAP_MIN,
+    outliers: outliers, costNote: costNote, reveals: reveals, SAME_DOW_MIN: SAME_DOW_MIN
   };
 }));

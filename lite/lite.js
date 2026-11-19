@@ -32,6 +32,8 @@
  *   - the pins Map view posts (/api/held-end, /api/held-pickup) and its walk
  *     (/api/mapwalk): there is no map to post them from.
  *   - map.html: a page that is nothing but the NucBox's answers.
+ *   - the owner's special days (/api/specialdays): a reading aid for the
+ *     Trends tab, which lite never loads.
  * Refused with 404 and a JSON body saying "lite", so a page that asks finds
  * an answer it already handles (a refused fetch) and a person who asks finds
  * out why.
@@ -86,6 +88,7 @@ var OFF = [
   [/^\/api\/journal\/ingest$/, 'the journal copy (sync)'],
   [/^\/api\/held-(end|pickup)$/, 'map pins'],
   [/^\/api\/mapwalk$/, 'Map view'],
+  [/^\/api\/specialdays$/, 'special days (a Trends reading aid)'],
   [/^\/map\.html$/, 'Map view']
 ];
 
