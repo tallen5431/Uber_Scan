@@ -1631,6 +1631,77 @@ function aroundYou(offers, waiting, ww) {
            pickup: { bands: PICKUP_BANDS.map(function (p) { return p[2]; }), b: pick.b, r: pick.r, d: pick.d, h: pick.h } };
 }
 
+/* --- the front page's when and where (the reporting work's round B) --------
+ *
+ * The owner, Nov 2026: "a simplified overview that lets you expand into more
+ * specific details ... when (time of day, day of the week, etc) and where
+ * (gps, pickup and drop off areas)". The Overview now opens on that, from
+ * this report's own data, each part linking to the tab that works it out:
+ *
+ *   - THE BEST WINDOWS: trends.js findWindows — the offers page's own search,
+ *     one definition — over When & where's line (cards with no order in the
+ *     car, each credited the minutes to the next card, capped as that tab
+ *     caps them), good at When & where's fixed 20% cut. So a window here is
+ *     good offers per hour WAITED, When & where's figure, not per hour
+ *     online as on the offers page; the floor is When & where's (2 hours on
+ *     2 shift days), and "clearly" is the 99% shared over the windows looked
+ *     at, phi measured at each window length, as findWindows says.
+ *   - THE BEST WAITING AREAS IN THOSE WINDOWS, by the car's own fix: the
+ *     same line inside the window's weekday and hours, by town (where the
+ *     NucBox named the cell's centre) or 2-mile cell, at When & where's
+ *     floor, ranked by good per hour waited. HOME IS LEFT OUT here by
+ *     homeOf, the Offers around you rule (each day's starting stay, and
+ *     anything within 0.3 mi of a usual start). This is a new view, so the
+ *     exclusion changes no existing table: When & where, Waited and Busy
+ *     still count home, as AUDITS.md's Open entry says, until the owner
+ *     decides.
+ *   - PICKUP AND DROP-OFF TOWNS: trends.js towns over every counted offer
+ *     (the card's printed town, map-view.js townOf over advice.js area, the
+ *     offers page's rule), at the same cut.
+ *
+ * Descriptive like every tab: when and where offers paid best, never what
+ * to take; nothing reaches the rig. No coordinate is added: an area is a
+ * town or a cell already named on the report. */
+var GLANCE_AREAS = 2;
+function glanceOf(offers, waiting, rulers) {
+  var ti = WW_TOPS.indexOf(WW_TOP), cut = rulers.cuts[ti];
+  var home = homeOf(offers);
+  var line = (waiting || []).map(function (w) {
+    var sl = wwSlotOf(w.at);
+    if (!sl) return null;
+    return { w: w, dow: sl.day, hour: (sl.hour + A.DAY_STARTS_AT) % 24, day: outingOf(w.at),
+             good: cut !== null && w.o.perHour >= cut };
+  }).filter(Boolean);
+  var win = TR.findWindows(line.map(function (c) {
+    return { day: c.day, dow: c.dow, hour: c.hour, k: c.good ? 1 : 0, h: c.w.credit / 60, offers: 1 };
+  }), { floorHours: WW_MIN_HOURS, floorDays: WW_MIN_DAYS });
+  var homeLeft = 0;
+  function areasIn(w) {
+    var by = Object.create(null);
+    line.forEach(function (c) {
+      if (w.dows.indexOf(c.dow) < 0 || w.hours.indexOf(c.hour) < 0) return;
+      if (home.why.has(c.w.o)) { homeLeft += 1; return; }
+      var key = c.w.town ? 't:' + c.w.town : c.w.cell ? 'c:' + c.w.cell : null;
+      if (!key) return;
+      var e = by[key] || (by[key] = { a: key.slice(2), town: key[0] === 't', mins: 0, k: 0, n: 0, days: Object.create(null) });
+      e.mins += c.w.credit; e.n += 1; if (c.good) e.k += 1;
+      e.days[c.day] = true;
+    });
+    return Object.keys(by).map(function (k) {
+      var e = by[k], h = e.mins / 60, d = Object.keys(e.days).length;
+      return { a: e.a, town: e.town, h: round2(h), d: d, n: e.n, good: e.k, r: h > 0 ? round2(e.k / h) : null,
+               ok: h >= WW_MIN_HOURS && d >= WW_MIN_DAYS };
+    }).filter(function (e) { return e.ok; }).sort(function (x, y) { return y.r - x.r || y.h - x.h; }).slice(0, GLANCE_AREAS);
+  }
+  var shown = win.best.length ? win.best : win.leading;
+  shown.forEach(function (w) { w.areas = areasIn(w); });
+  var tw = TR.towns(offers, { cut: cut, townOf: function (v) { return MV.townOf(v, A.area); } });
+  // Kept as `pick` and `drop`: the report's embedded data holds no field
+  // named after a card's ends (the privacy checks look for one).
+  return { cut: cut, top: WW_TOP, windows: win, homeLeft: homeLeft, homeDays: home.days,
+           towns: { n: tw.n, share: tw.share, minN: tw.minN, minDays: tw.minDays, pick: tw.pickup, drop: tw.dropoff } };
+}
+
 /* --- after a drop, the next offer of any kind ------------------------------
  *
  * "Where trips leave you" timed the next offer the rig said TAKE. The owner's
@@ -3093,6 +3164,8 @@ function analyse(offers, taken, placed, dropAt, opts) {
   var whenwhere = whenWhere(offers, waiting, rulers);
   // Offers around you: the same line drawn as dots, home left out (aroundYou).
   var around = aroundYou(offers, waiting, whenwhere);
+  // The front page's when and where (round B; glanceOf).
+  var glance = glanceOf(offers, waiting, rulers);
   var tookRuns = (taken || []).filter(function (t) { return t && typeof t.tookAt === 'number'; });
   // Spells parked with no order in the car (main reads them off the GPS
   // log): each to its 2-mile cell and, where the NucBox named one, the town
@@ -3292,6 +3365,7 @@ function analyse(offers, taken, placed, dropAt, opts) {
     targets: targets,
     whenwhere: whenwhere,
     around: around,
+    glance: glance,
     strategy: strategy,
     places: grouped.places,
     restNames: names.labels,
@@ -3884,6 +3958,56 @@ function fold(id, title, inner) {
 function fmtPH(v) { return typeof v === 'number' ? '$' + v.toFixed(2) + '/hr' : '—'; }
 function fmtPM(v) { return typeof v === 'number' ? '$' + v.toFixed(2) + '/mi' : '—'; }
 
+/* The front page's when and where (round B; glanceOf has the rules). */
+function glanceSection(r) {
+  var g = r.glance;
+  if (!g) return '';
+  var w = g.windows, shown = w.best.length ? w.best : w.leading;
+  function areaName(e) { return e.town ? e.a : labelOf(r, 'grid', e.a); }
+  function days(n, gi) {
+    var names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'weekday', 'weekend day'];
+    return n + ' ' + names[gi] + (n === 1 ? '' : 's');
+  }
+  var wins = shown.map(function (x) {
+    return '<li><b>' + esc(x.name) + '</b> · ' + x.rate.toFixed(1) + ' good/hr waited'
+      + (x.shade === 'above' ? ' <span class="ok">clearly above</span>' : '')
+      + ' <small>' + x.online.toFixed(1) + ' h waited on ' + days(x.nights, x.group) + '</small>'
+      + (x.areas && x.areas.length ? '<br><small>Waiting areas then (home left out): ' + x.areas.map(function (e) {
+        return esc(areaName(e)) + ' ' + (e.r === null ? '—' : e.r.toFixed(1)) + ' good/hr over ' + e.h.toFixed(1) + ' h on '
+          + e.d + ' day' + (e.d === 1 ? '' : 's');
+      }).join('; ') + '</small>' : '<br><small>No waiting area there yet with ' + WW_MIN_HOURS + ' h on ' + WW_MIN_DAYS
+        + ' days, home left out.</small>') + '</li>';
+  }).join('');
+  var weak = w.worst.map(function (x) {
+    return '<li><b>' + esc(x.name) + '</b> · ' + x.rate.toFixed(1) + ' good/hr waited <span class="warn">clearly below</span>'
+      + ' <small>' + x.online.toFixed(1) + ' h on ' + days(x.nights, x.group) + '</small></li>';
+  }).join('');
+  function towns(end, lead) {
+    var t = g.towns[end], top = t.ranked.slice(0, 3);
+    return '<p class="lead">' + lead + ': ' + (top.length ? top.map(function (e) {
+      return '<b>' + esc(e.town) + '</b> ' + Math.round(e.share * 100) + '% good, typical ' + fmtPH(e.typical)
+        + ' (n=' + e.n + ')' + (e.shade ? ' — clearly ' + e.shade : '');
+    }).join('; ') : 'no town with ' + g.towns.minN + ' offers on ' + g.towns.minDays + ' days yet') + '.</p>';
+  }
+  return '<h3>When <a class="more" href="#whenwhere">When &amp; where ›</a></h3>'
+    + '<p class="note">Good = top ' + g.top + '% of every offer in the range: '
+    + (g.cut === null ? 'no offers yet' : '≥ ' + money(g.cut) + '/hr') + '. Good offers per hour WAITED (no order in '
+    + 'the car), When &amp; where\'s own figure.</p>'
+    + (w.best.length ? '<p class="lead">Good offers came clearly more often than the range\'s ' + w.ref.toFixed(1)
+       + ' an hour waited:</p>' : '<p class="lead"><b>No window clearly better yet</b>; highest so far:</p>')
+    + (wins ? '<ol class="lines">' + wins + '</ol>' : '<p class="note">No window has ' + WW_MIN_HOURS + ' h waited on '
+       + WW_MIN_DAYS + ' days yet.</p>')
+    + (weak ? '<p class="lead">Clearly less often:</p><ol class="lines">' + weak + '</ol>' : '')
+    + '<p class="note">A window is 1 to ' + w.maxLen + ' whole hours on a weekday, on weekdays or on weekends, at '
+    + w.floorHours + ' h waited on ' + w.floorDays + ' days; "clearly" holds at 99% shared over the ' + w.searched
+    + ' windows looked at. Waiting areas leave out home (' + g.homeLeft + ' cards; Offers around you\'s rule).</p>'
+    + '<h3>Where <a class="more" href="#around">Offers around you ›</a></h3>'
+    + towns('pick', 'Pickup towns, by share good')
+    + towns('drop', 'Drop-off towns, by share good')
+    + '<p class="note">The town printed on the card (<a href="#towns">Towns</a>); where trips leave you is '
+    + '<a href="#after">After a drop</a>; where you waited is <a href="#waited">Waited</a>.</p>';
+}
+
 function OVERVIEW_SECTION(r, span) {
   var s = r.strategy, cv = s.curve, c = s.counts, all = s.seen.all, act = s.actual.all;
   function line(re) { return s.lines.filter(function (l) { return re.test(l); })[0] || null; }
@@ -3948,7 +4072,10 @@ function OVERVIEW_SECTION(r, span) {
   var wwCut = r.whenwhere.cuts[r.whenwhere.tops.indexOf(r.whenwhere.top)];
   return '<section data-tab="overview"><h2>Overview — the few numbers that matter</h2>'
     + '<p class="exp">Descriptive. Every figure is from the tab it links to, with its sample size under it; nothing '
-    + 'here is an accept rule or changes a verdict, and nothing on the rig reads it.</p>'
+    + 'here is an accept rule or changes a verdict, and nothing on the rig reads it. '
+    + '<a href="#caveats">Read before the numbers</a>.</p>'
+    // Round B: when and where first, the owner's two questions.
+    + glanceSection(r)
     // The figures first, then the Strategy tab's own sentence on them: on a
     // phone the sentence is a screen long, and the tiles are what a glance
     // is for.
@@ -4918,7 +5045,11 @@ var PAGE_CSS = [
   '.wwstrip button.down{background:var(--down);border-color:var(--down);color:#fff}',
   '.wwstrip button.up .hl,.wwstrip button.down .hl{color:#fff}',
   '.wwstrip button.thin{background:transparent;color:var(--muted);font-style:italic}',
-  '.wwstrip button.none{background:transparent;color:var(--muted);border-style:dashed}',
+  '.wwstrip button.none{background:transparent;color:var(--muted);border-style:dashed;opacity:.45}',
+  // R1: on a phone, When & where's P90 and Uber · DD columns become a line
+  // under the area's name.
+  '#wwTable small.narrow{display:none}@media (max-width:759px){#wwTable .wide{display:none}',
+  '#wwTable small.narrow{display:block;font-size:11px;color:var(--ink2);white-space:nowrap}}',
   '.wwstrip button.in{box-shadow:inset 0 -3px 0 var(--ink2)}.wwstrip button.on{outline:2px solid var(--ink);outline-offset:1px}',
   // Offers around you: the map (or the dots on a blank square without the
   // internet), and the three bar charts as rows, a phone's width each.
@@ -5530,7 +5661,9 @@ var PAGE_JS = String(function page() {
     var cells = '';
     for (var i = 0; i < 24; i++) {
       var sl = W.slots[d + '|h' + i], a = sl && sl.all, cls = [], val, tipText;
-      if (!a) { cls.push('none'); val = '–'; tipText = W.hours[i] + ': no waiting on record'; }
+      // An hour with no time waited is greyed (the UX review's R1), as one
+      // with no card at all: nothing to read there either way.
+      if (!a || !(a.h > 0)) { cls.push('none'); val = '–'; tipText = W.hours[i] + ': no time waited on record'; }
       else if (!a.ok) {
         cls.push('thin'); val = 'n' + a.n;
         tipText = W.hours[i] + ': ' + a.n + ' offers, ' + a.h.toFixed(1) + ' h on ' + a.d + ' shift days — under the floor';
@@ -5589,14 +5722,17 @@ var PAGE_JS = String(function page() {
     }
     var rows = u.ranked.slice().sort(function (x, y) { return y.r[ti] - x.r[ti] || y.h - x.h; });
     el.innerHTML = rows.length ? '<div class="tw"><table><thead><tr><th>' + (unit === 'cell' ? 'cell' : 'town')
-      + '</th><th>good / hr</th><th>99%</th><th>hours waited</th><th>offers</th><th>good</th><th>P90 $/hr</th>'
-      + '<th>median $/hr</th><th>Uber · DD</th><th></th></tr></thead><tbody>' + rows.map(function (s) {
+      + '</th><th>good / hr</th><th>99%</th><th>hours waited</th><th>offers</th><th>good</th><th class="wide">P90 $/hr</th>'
+      + '<th>median $/hr</th><th class="wide">Uber · DD</th><th></th></tr></thead><tbody>' + rows.map(function (s) {
         var mk = s.mk[ti];
         // The rate and its interval beside the name: on a phone the table
         // scrolls sideways and the first columns are the ones seen.
-        return '<tr><td>' + esc(nm(s.a)) + '</td><td data-v="' + s.r[ti] + '">' + rt(s.r[ti]) + '</td><td data-v="'
+        // On a phone P90 and the app split ride under the name (R1), the
+        // table's own columns for them hidden, so it scrolls less.
+        return '<tr><td>' + esc(nm(s.a)) + '<small class="narrow">P90 ' + m(s.p90) + '/hr · Uber · DD ' + apps(s)
+          + '</small></td><td data-v="' + s.r[ti] + '">' + rt(s.r[ti]) + '</td><td data-v="'
           + s.lo[ti] + '">' + rt(s.lo[ti]) + '–' + rt(s.hi[ti]) + '</td><td data-v="' + s.h + '">' + s.h.toFixed(1)
-          + ' h</td><td>' + s.n + '</td><td>' + s.g[ti] + '</td><td>' + m(s.p90) + '</td><td>' + m(s.p50) + '</td><td data-v="'
+          + ' h</td><td>' + s.n + '</td><td>' + s.g[ti] + '</td><td class="wide">' + m(s.p90) + '</td><td>' + m(s.p50) + '</td><td class="wide" data-v="'
           + (s.u + s.dd ? s.u / (s.u + s.dd) : '') + '">' + apps(s) + '</td><td>'
           + (mk ? '<span class="tag ' + (mk === 'above' ? 'up' : 'down') + '">' + mk + ' the slot</span>' : '')
           + '</td></tr>';
@@ -6477,7 +6613,7 @@ module.exports = {
   GROUPS: GROUPS, TABS: TABS, blockChart: blockChart, fold: fold,
   bootCIPlain: bootCIPlain, loadJournal: loadJournal, JOURNAL_PAGE: JOURNAL_PAGE,
   whenWhere: whenWhere, reportRulers: reportRulers, wwSlotOf: wwSlotOf, poissonCI: poissonCI, WW_BLOCKS: WW_BLOCKS, WW_TOPS: WW_TOPS,
-  aroundYou: aroundYou, homeOf: homeOf, gridCell: gridCell, HOME_MI: HOME_MI, AROUND_BIN_MI: AROUND_BIN_MI,
+  aroundYou: aroundYou, homeOf: homeOf, glanceOf: glanceOf, glanceSection: glanceSection, gridCell: gridCell, HOME_MI: HOME_MI, AROUND_BIN_MI: AROUND_BIN_MI,
   AROUND_BIN_DAYS: AROUND_BIN_DAYS, AROUND_RINGS: AROUND_RINGS, PICKUP_BANDS: PICKUP_BANDS,
   WW_TOP: WW_TOP, WW_MIN_HOURS: WW_MIN_HOURS, WW_MIN_DAYS: WW_MIN_DAYS, WW_CONF: WW_CONF,
 };

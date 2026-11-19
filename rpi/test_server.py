@@ -13337,11 +13337,11 @@ var ctx = { Advice: require(path.join(ROOT, 'advice.js')), Set: Set, Map: Map, D
             require: function (m) { return require(path.join(ROOT, m)); } };
 vm.createContext(ctx);
 ['CLOCK_BELIEVABLE_AFTER', 'WINDOWS_MAX', 'windows', 'latestCache', 'RowParser',
- 'PAY_REREAD', 'PAY_REREAD_MAX', 'payReread'].forEach(function (n) {
+ 'PAY_REREAD', 'PAY_REREAD_MAX', 'payReread', 'REOFFER_SPAN_MS', 'REOFFER_WINDOW_MS'].forEach(function (n) {
   vm.runInContext(grabVar(n), ctx);
 });
 ['inWindow', 'foldReads', 'windowTakes', 'windowOver', 'rowsFor', 'dayFloor', 'latestPerOffer',
- 'bestReading', 'rowApp', 'withApp', 'rereadPay', 'withPay', 'afterCorrection',
+ 'bestReading', 'rowApp', 'withApp', 'rereadPay', 'withPay', 'afterCorrection', 'placeKey', 'markReoffered',
  'latestPerOfferUncached'].forEach(function (n) {
   vm.runInContext(grab(n), ctx);
 });

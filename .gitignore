@@ -97,3 +97,6 @@ rpi/mapbands/
 # dropoff street of the day on it, and what tesseract read off each. The same
 # fact as the scans, and local to the machine they were uploaded to.
 rpi/earnings/
+# ...and the days the owner marked special on the Trends tab (server.js
+# specialDaysList): dates only, this record's and nobody else's.
+rpi/special-days.json*

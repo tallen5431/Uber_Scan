@@ -9589,10 +9589,58 @@ function trendsOut(rows, floor, days) {
   // than /api/settings so the NucBox's copy, which has no scanner and answers
   // that route with null, still knows it. One number, the driver's own; null
   // where no row carries one, and the page then shows gross only and says why.
+  // `costs` (round B): where the cost per mile the rows carry changed in the
+  // window, [seconds, cost] at the first offer of each, oldest first. Every
+  // offer's $/hr is net of its card miles at the cost set when it was seen,
+  // and the tab says so — "$/hr after $0.30/mi (card miles)" — and, where it
+  // moved inside the range, when and from what. Numbers only.
+  var costs = [], lastCost = null;
+  offers.forEach(function (o) {
+    var c = o.costPerMile;
+    if (typeof c !== 'number' || !isFinite(c) || c === lastCost) return;
+    costs.push([Math.round((o.at || 0) / 1000), c]);
+    lastCost = c;
+  });
   return { ok: true, days: days, floor: floor || 0, total: offers.length,
            target: newest ? newest.target : null,
-           costPerMile: costed ? costed.costPerMile : null,
+           costPerMile: costed ? costed.costPerMile : null, costs: costs,
+           // The owner's marked special days (dates only; /api/specialdays).
+           marked: specialDaysList(),
            rows: TrendsLib.pack(TrendsLib.rowsOf(offers)), runs: spans };
+}
+
+/* THE OWNER'S SPECIAL DAYS (round B): days the Trends tab may leave out
+ * beside its built-in list (trends.js specialDays: Halloween, Thanksgiving
+ * and the rest). Kept here, in a small file beside the journal, rather than
+ * in the browser, so every page this server serves reads the same days, and
+ * read by /api/trends with the rows. The file holds dates and nothing else
+ * ('YYYY-MM-DD', at most SPECIAL_MAX of them): no name, no note, no place.
+ * A reading aid: nothing on the rig, no verdict and no target reads it. Not
+ * part of lite (lite/lite.js shuts the door). */
+var SPECIAL_PATH = path.join(path.dirname(JOURNAL_PATH), 'special-days.json');
+var SPECIAL_MAX = 400;
+var SPECIAL_DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
+var specialCache = null;
+// A real calendar date from 2020 to 2099, as written, or null.
+function specialDate(v) {
+  var m = typeof v === 'string' ? SPECIAL_DAY.exec(v) : null;
+  if (!m) return null;
+  var y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  if (y < 2020 || y > 2099) return null;
+  var t = new Date(Date.UTC(y, mo - 1, d));
+  return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d ? v : null;
+}
+function specialDaysList() {
+  if (specialCache) return specialCache.slice();
+  var days = [];
+  try {
+    var f = JSON.parse(fs.readFileSync(SPECIAL_PATH, 'utf8'));
+    if (f && Array.isArray(f.days)) days = f.days.filter(specialDate);
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.error('special days: ' + SPECIAL_PATH + ': ' + e.message);
+  }
+  specialCache = days.filter(function (d, i) { return days.indexOf(d) === i; }).sort().slice(-SPECIAL_MAX);
+  return specialCache.slice();
 }
 
 /* The payout an offer's stored text gives under the reader as it is now,
@@ -9927,6 +9975,7 @@ function latestPerOfferUncached(rows) {
   });
 
   out.sort(function (a, b) { return (a.at || 0) - (b.at || 0); });
+  markReoffered(out, readings);
   out.seen = seen;
   // Whether the driver went on to take the offer they were being advised
   // about. Joined here rather than on the page, because the mark can be on an
@@ -9943,6 +9992,71 @@ function latestPerOfferUncached(rows) {
   });
   out.pairs = pairs;
   return out;
+}
+
+/* RE-OFFERED (the reporting work's round B; the owner, Nov 2026: "many very
+ * high paying orders to fast food places tend to be undeliverable and the
+ * price ends up being very high but is not real"). The record never said
+ * which cards were the same order coming round again: report_check found no
+ * mark, and DoorDash's "raise" in the shared reader is the crop box raised
+ * over a card stacked above it, not a pay rise. What the journal does hold:
+ *
+ *   - ONE ID COMING BACK. journal.py _returning files a card identical to the
+ *     cent (pay, minutes, miles, places) under the id it first had, and
+ *     keeps that id's firstAt. So an id whose readings span more than
+ *     REOFFER_SPAN_MS, first seen to last seen, left the screen and came back:
+ *     an offer card is up for well under a minute.
+ *   - THE SAME TRIP UNDER TWO IDS. Uber offers a trip again a few cents
+ *     different and DoorDash raises an unclaimed order; journal.py files each
+ *     as its own offer, and is right to (_corrects: another card came
+ *     between them). The same trip here is the same app, the same pickup and
+ *     the same dropoff as printed (lowercased, spaces squeezed), or, where
+ *     neither card names a dropoff, the same pickup with the same card
+ *     minutes and miles; within REOFFER_WINDOW_MS of each other. Every offer
+ *     of such a pair is marked, the first one too: it is the same order.
+ *
+ * ONE definition, here in the fold, so /api/journal (the offers page, the
+ * every-offer CSV) and /api/trends (one flag bit) read the same mark. Set
+ * only where true, as `accepted` is, so a row that is not re-offered is
+ * byte for byte what it was. A card with no places (keepPlaces off, a typed
+ * one) can only be caught the first way. Reading-only: no verdict, target,
+ * ruler or count of offers seen reads it, and the Trends tab leaves these
+ * out only when its switch is pressed. Two orders from one restaurant to one
+ * door inside half an hour would be marked too; the switch is off by
+ * default and says how many it takes out. */
+var REOFFER_SPAN_MS = 3 * 60 * 1000;
+var REOFFER_WINDOW_MS = 30 * 60 * 1000;
+function placeKey(v) {
+  return typeof v === 'string' ? v.toLowerCase().replace(/\s+/g, ' ').trim() : '';
+}
+function markReoffered(out, readings) {
+  var recent = Object.create(null);
+  out.forEach(function (o) {
+    if (!o || typeof o !== 'object') return;
+    var mine = o.id && readings[o.id];
+    if (mine && mine.length > 1) {
+      var lo = Infinity, hi = -Infinity;
+      mine.forEach(function (r) {
+        var a = typeof r.firstAt === 'number' ? r.firstAt : r.at, b = r.at;
+        if (typeof a === 'number' && a < lo) lo = a;
+        if (typeof b === 'number' && b > hi) hi = b;
+      });
+      if (hi - lo > REOFFER_SPAN_MS) o.reoffered = true;
+    }
+    var pick = placeKey(o.pickup), drop = placeKey(o.dropoff);
+    if (!pick) return;
+    var key = drop ? (o.app || '') + '|' + pick + '|' + drop
+      : typeof o.minutes === 'number' && typeof o.miles === 'number'
+        ? (o.app || '') + '|' + pick + '||' + o.minutes + '|' + o.miles : null;
+    if (key === null) return;
+    // By `at`, the order the fold is sorted in, so the oldest falls off first.
+    var at = o.at;
+    if (typeof at !== 'number') return;
+    var list = recent[key] || (recent[key] = []);
+    while (list.length && at - list[0].at > REOFFER_WINDOW_MS) list.shift();
+    list.forEach(function (p) { if (p.o.id !== o.id) { p.o.reoffered = true; o.reoffered = true; } });
+    list.push({ at: at, o: o });
+  });
 }
 
 // Make sure the directory a file is about to be written into exists.
@@ -15268,6 +15382,55 @@ function route(req, res) {
       };
       if (err || !body) return answer(400, { ok: false, error: 'bad body' });
       keepSnapNote(body, answer);
+    });
+  }
+
+  // The owner's special days (round B; specialDaysList says what and why).
+  // GET lists them; POST takes ONE of { add: 'YYYY-MM-DD' } or { remove: ... }
+  // and nothing else — the /api/settings pattern: a body naming any other
+  // key is refused whole, a date that is not a real one from 2020 to 2099 is
+  // refused, and the file is written to a part name and renamed. Here, among
+  // the doors that take a POST, ahead of the GET-only gate below. Lite shuts
+  // this door in lite/lite.js before it is reached.
+  if (req.url.split('?')[0] === '/api/specialdays' && (req.method === 'GET' || req.method === 'POST')) {
+    var spReply = function (code, body) {
+      send(res, code, JSON.stringify(body), { 'Content-Type': 'application/json; charset=utf-8',
+                                             'Cache-Control': 'no-store' });
+    };
+    if (req.method === 'GET') return spReply(200, { ok: true, days: specialDaysList() });
+    return readJsonBody(req, function (err, body) {
+      if (err || !body || typeof body !== 'object' || Array.isArray(body)) {
+        return spReply(400, { ok: false, error: 'not a JSON object' });
+      }
+      var keys = Object.keys(body);
+      var others = keys.filter(function (k) { return k !== 'add' && k !== 'remove'; });
+      if (others.length) return spReply(400, { ok: false, error: 'only add or remove; refused: ' + others.join(', ') });
+      if (keys.length !== 1) return spReply(400, { ok: false, error: 'one of add or remove, with one date' });
+      var day = specialDate(body[keys[0]]);
+      if (!day) return spReply(400, { ok: false, error: 'a date as YYYY-MM-DD, a real one from 2020 to 2099' });
+      var list = specialDaysList().filter(function (d) { return d !== day; });
+      if (keys[0] === 'add') {
+        if (list.length >= SPECIAL_MAX) return spReply(400, { ok: false, error: 'at most ' + SPECIAL_MAX + ' days' });
+        list.push(day);
+      }
+      list.sort();
+      var tmp = partName(SPECIAL_PATH);
+      return withDirectory(SPECIAL_PATH, function (dirErr) {
+        if (dirErr) return spReply(500, { ok: false, error: 'could not save' });
+        fs.writeFile(tmp, JSON.stringify({ v: 1, days: list }), function (writeErr) {
+          var failed = function (e) {
+            fs.unlink(tmp, function () {});
+            console.error('special days: ' + e.message);
+            spReply(500, { ok: false, error: 'could not save' });
+          };
+          if (writeErr) return failed(writeErr);
+          fs.rename(tmp, SPECIAL_PATH, function (renameErr) {
+            if (renameErr) return failed(renameErr);
+            specialCache = list;
+            spReply(200, { ok: true, days: list.slice() });
+          });
+        });
+      });
     });
   }
 

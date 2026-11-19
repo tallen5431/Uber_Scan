@@ -983,7 +983,7 @@ function offer(x) {
      xh, ['datetime', 'date', 'time', 'weekday', 'hour', 'driver_day', 'driver_weekday', 'week_start', 'app', 'pay',
           'boost', 'card_minutes', 'card_miles', 'per_hour', 'per_mile', 'panel_said', 'driver_marked', 'during_job',
           'good_top20_of_range', 'counted', 'suspect', 'doubt', 'pay_reread', 'pay_unread', 'lat', 'lon', 'gps_ok',
-          'gps_err_m', 'gps_age_s', 'pickup', 'dropoff', 'offer_id']);
+          'gps_err_m', 'gps_age_s', 'pickup', 'dropoff', 'offer_id', 'special_day', 'reoffered']);
   eq('[offers csv] one row per offer id, oldest first, the newest copy of each', [made.rows, xr.slice(1).map(function (r) {
     return col(r, 'offer_id'); }), col(rowOf('x7'), 'per_hour')], [7, ['x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7'], '22']);
   var r1 = rowOf('x1'), r2 = rowOf('x2');
@@ -1052,6 +1052,148 @@ function offer(x) {
      + T.csvHourly(T.hourly(T.readRows(T.rowsOf(xoffers)), {}), 'all')));
 
   /* --- /api/trends, through a real server --- */
+  /* --- round B: special days, leave out, windows, outliers, costs, reveals --- */
+
+  // Special days by rule, 2026-2028, checked against the calendar by hand.
+  var sd = [2026, 2027, 2028].map(function (y) {
+    var d = T.specialDays(y), by = {};
+    Object.keys(d).forEach(function (k) { d[k].split(' · ').forEach(function (n) { by[n] = k; }); });
+    return by;
+  });
+  eq('[special] Thanksgiving is the 4th Thursday of November: 26 Nov 2026, 25 Nov 2027, 23 Nov 2028',
+     sd.map(function (b) { return b.Thanksgiving; }), ['2026-11-26', '2027-11-25', '2028-11-23']);
+  eq('[special] Super Bowl Sunday is the 2nd Sunday of February from 2022: 8 Feb 2026, 14 Feb 2027, 13 Feb 2028; '
+     + 'the 1st before (7 Feb 2021), and 13 Feb 2022 and 9 Feb 2025 as played',
+     sd.map(function (b) { return b['Super Bowl Sunday']; }).concat([T.specialDayOf('2021-02-07'),
+       T.specialDayOf('2022-02-13'), T.specialDayOf('2025-02-09')]),
+     ['2026-02-08', '2027-02-14', '2028-02-13', 'Super Bowl Sunday', 'Super Bowl Sunday', 'Super Bowl Sunday']);
+  eq('[special] 14 Feb 2027 is both, and says both; Mother\'s Day the 2nd Sunday of May (10 May 2026, 9 May 2027, '
+     + '14 May 2028); the fixed days',
+     [T.specialDayOf('2027-02-14'), sd[0]['Mother\'s Day'], sd[1]['Mother\'s Day'], sd[2]['Mother\'s Day'],
+      T.specialDayOf('2026-10-31'), T.specialDayOf('2027-12-24'), T.specialDayOf('2027-12-25'), T.specialDayOf('2028-12-31'),
+      T.specialDayOf('2028-01-01'), T.specialDayOf('2026-07-04'), T.specialDayOf('2026-02-14'), T.specialDayOf('2026-11-19')],
+     ['Valentine\'s Day · Super Bowl Sunday', '2026-05-10', '2027-05-09', '2028-05-14', 'Halloween', 'Christmas Eve',
+      'Christmas Day', 'New Year\'s Eve', 'New Year\'s Day', 'July 4th', 'Valentine\'s Day', null]);
+  eq('[special] a day the owner marked, alone and on a built-in day; a bad date is no day',
+     [T.specialDayOf('2026-11-07', ['2026-11-07']), T.specialDayOf('2026-10-31', ['2026-10-31']),
+      T.specialDayOf('2026-02-30'), T.specialDayOf('nonsense', ['nonsense'])],
+     ['marked by you', 'Halloween (marked by you)', null, null]);
+  // Leave out: Halloween's driver day runs 4am 31 Oct to 4am 1 Nov, so its
+  // 1:30am card is Halloween's, and a run across 4am keeps its later part.
+  function hal(day, h, m) { return new Date(2026, 9, day, h, m || 0).getTime(); }
+  var halRows = T.readRows(T.rowsOf([
+    offer({ id: 'h1', at: hal(30, 20), perHour: 20 }), offer({ id: 'h2', at: hal(31, 20), perHour: 60 }),
+    offer({ id: 'h3', at: hal(32, 1, 30), perHour: 70 }), offer({ id: 'h4', at: hal(32, 5), perHour: 22 }),
+    offer({ id: 'h5', at: hal(30, 21), perHour: 90, reoffered: true })]));
+  var halRuns = [[hal(30, 19), hal(30, 23)], [hal(31, 19), hal(32, 6)]];
+  var lo0 = T.leaveOut(halRows, halRuns, {});
+  var loS = T.leaveOut(halRows, halRuns, { special: true });
+  var loR = T.leaveOut(halRows, halRuns, { reoffered: true });
+  var hoursOf = function (runs) { return runs.reduce(function (a, r) { return a + (r[1] - r[0]) / 3.6e6; }, 0); };
+  eq('[leave out] off: the same rows and runs by identity; special days: Halloween\'s 8pm and 1:30am cards and its '
+     + 'nine hours out, the 4-6am of 1 Nov kept; re-offered: the marked card only',
+     [lo0.rows === halRows && lo0.runs === halRuns, loS.removed, loS.days, hoursOf(loS.runs), loR.removed, loR.reoffered,
+      loR.runs === halRuns],
+     [true, 2, [{ day: '2026-10-31', name: 'Halloween' }], 6, 1, 1, true]);
+  // Windows: an invented record with a clear Friday evening, contiguous.
+  function winSlices(seed, fri, nights) {
+    var r = rng(seed), out = [];
+    for (var d = 0; d < (nights || 63); d++) {
+      var day = new Date(2026, 8, 7 + d, 12), key = T.dayKeyOf(day.getTime()), dow = day.getDay();
+      if (r() > 0.6) continue;
+      [17, 18, 19, 20, 21, 22, 23].forEach(function (h) {
+        var lam = 4 * (fri && dow === 5 && h >= 18 && h <= 21 ? fri : 1), k = 0, p = 1, L = Math.exp(-lam);
+        do { k += 1; p *= r(); } while (p > L);
+        out.push({ day: key, dow: dow, hour: h, k: k - 1, h: 1, offers: k - 1 + 3, takes: 0, e: 0 });
+      });
+    }
+    return out;
+  }
+  var wv = T.findWindows(winSlices(7, 2.5));
+  eq('[windows] a Friday evening at 2.5 times the rate is found whole, a contiguous run of its hours, clearly above',
+     [wv.clear, wv.best[0].name, wv.best[0].hours, wv.best[0].shade], [true, 'Fridays 6–10pm', [18, 19, 20, 21], 'above']);
+  ok('[windows] ...no two chosen windows share a cell, and every window shown meets the floor (2 h online on 2 days)',
+     wv.best.concat(wv.worst).every(function (w, i, a) {
+       return w.online >= 2 && w.nights >= 2 && a.every(function (x, j) {
+         return j === i || !x.cells.some(function (c) { return w.cells.indexOf(c) >= 0; });
+       });
+     }));
+  var nulls = 0;
+  for (var sN = 0; sN < 40; sN++) if (T.findWindows(winSlices(100 + sN, 0)).best.length) nulls += 1;
+  var wn = T.findWindows(winSlices(101, 0));
+  eq('[windows] with no effect: "no window clearly better" in (nearly) every record, and three leading windows '
+     + 'listed apart, sharing no cell',
+     [nulls <= 1, wn.clear, wn.best.length, wn.leading.length, wn.leading.every(function (w) { return w.shade !== 'below'; })],
+     [true, false, 0, 3, true]);
+  eq('[windows] untried hours (no minute online, no card) are listed, merged over every day, never ranked as weak',
+     [wn.untried[0].name, wn.untried[0].every, wn.worst.every(function (w) { return w.online > 0; })],
+     ['every day 4am–5pm', true, true]);
+  var one = T.findWindows([{ day: '2026-09-11', dow: 5, hour: 19, k: 30, h: 5, offers: 30 }]);
+  eq('[windows] one night, however strong, is under the floor: no window at all', [one.searched, one.leading.length], [0, 0]);
+  eq('[windows] the names: a night across midnight and a single hour', [T.spanName(22, 1), T.spanName(4, 4), T.spanName(18, 21)],
+     ['10pm–2am', '4–5am', '6–10pm']);
+  // The overview on rows and runs: good per hour online, the grid's own.
+  var ovRows = T.readRows(T.rowsOf([offer({ id: 'v1', at: at(6, 19, 10), perHour: 40 }),
+                                    offer({ id: 'v2', at: at(13, 19, 20), perHour: 40 }),
+                                    offer({ id: 'v3', at: at(13, 19, 40), perHour: 10 })]));
+  var ov = T.overviewWhen(ovRows, [[at(6, 19), at(6, 20)], [at(13, 19), at(13, 20)]], { cut: 30 });
+  eq('[windows] the tab\'s own: 2 good in 2 hours online on two Fridays, the 7pm hour, leading (too little to be clear)',
+     [ov.leading[0].name, ov.leading[0].good, ov.leading[0].online, ov.leading[0].nights, ov.leading[0].rate],
+     ['Fridays 7–8pm', 2, 2, 2, 1]);
+  // Outliers: the axis stops at the bulk; nothing is dropped.
+  var bulk = [];
+  for (var bi = 0; bi < 200; bi++) bulk.push(15 + (bi % 20));
+  var capA = T.axisCap(bulk.concat([400, 250, 180])), capB = T.axisCap(bulk), capC = T.axisCap([10, 500]);
+  eq('[outliers] three wild offers over 200 of the bulk: the cap at the far fence or P99, "↑ 3 above"; none wild, '
+     + 'no cap; under 20 values, no cap', [capA.above, capA.cap > 34 && capA.cap < 180, capB.cap, capC.cap],
+     [3, true, null, null]);
+  var outRows = T.readRows(T.rowsOf(bulk.map(function (v, i) { return offer({ id: 'b' + i, perHour: v, at: at(2, 19) + i * 1000 }); })
+    .concat([offer({ id: 'w1', perHour: 400, pay: 99, reoffered: true, at: at(2, 22) })])));
+  var ol = T.outliers(outRows, T.axisCap(outRows.map(function (r) { return r.perHour; })).cap);
+  eq('[outliers] the list: figures and when only, the re-offered mark carried', [ol.length, ol[0].perHour, ol[0].pay,
+     ol[0].reoffered, Object.keys(ol[0]).sort()],
+     [1, 400, 99, true, ['app', 'day', 'miles', 'minutes', 'pay', 'perHour', 'reoffered', 't', 'taken']]);
+  // Costs: where the rows' own cost per mile moved.
+  var cn = T.costNote([[at(2, 19) / 1000, 0.3], [at(9, 19) / 1000, 0.45]]);
+  eq('[costs] a change in the range: when, from and to; one cost, no change', [cn.now, cn.changes.length, cn.changes[0].day,
+     cn.changes[0].from, cn.changes[0].to, T.costNote([[1, 0.3]]).changes.length], [0.45, 1, '2026-03-09', 0.3, 0.45, 0]);
+  // Hidden until the record can hold it (D4-D6).
+  function spanRows(from, to) {
+    var list = [];
+    for (var t = from; t <= to; t += 864e5) list.push(offer({ id: 's' + t, at: t }));
+    return T.readRows(T.rowsOf(list));
+  }
+  var rv2 = T.reveals(spanRows(new Date(2026, 8, 20, 19).getTime(), new Date(2026, 10, 10, 19).getTime()), []);
+  var rv3 = T.reveals(spanRows(new Date(2026, 7, 20, 19).getTime(), new Date(2026, 10, 10, 19).getTime()), []);
+  var rvF = T.reveals(T.readRows(T.rowsOf([offer({ id: 'f1', at: at(6, 19) }), offer({ id: 'f2', at: at(13, 19) }),
+                                           offer({ id: 'f3', at: at(20, 19) })])), [[at(27, 19), at(27, 20)]]);
+  eq('[reveals] Sep 20 to Nov 10: three months with data, one whole (October); Aug 20 to Nov 10: four, two whole; '
+     + 'four Fridays (three cards and an hour online) show Fridays, nothing else',
+     [rv2.months, rv2.fullMonths, rv2.tlMonths, rv2.monthVsLast, rv3.fullMonths, rv3.monthVsLast, rvF.sameDow[5],
+      rvF.sameDow[4], rvF.thirds],
+     [3, 1, true, false, 2, true, true, false, false]);
+  // The CSV carries both marks as columns, never as rows taken away.
+  var csvB = T.offersCsv([offer({ id: 'c1', at: hal(31, 21) }), offer({ id: 'c2', at: hal(30, 21), reoffered: true }),
+                          offer({ id: 'c3', at: hal(25, 21) })], { marked: ['2026-10-25'] }).text.split('\n');
+  eq('[offers csv] special_day and reoffered, appended last: Halloween, a re-offered card, a day marked by you',
+     [csvB[1].split(',').slice(-2), csvB[2].split(',').slice(-2), csvB[3].split(',').slice(-2), csvB.length - 2],
+     [['marked by you', 'no'], ['', 'yes'], ['Halloween', 'no'], 3]);
+  // The overview words history, never advice (Settled: the rig never says
+  // take or decline off a time or a place): the page's When and Where and the
+  // window names hold none of those words.
+  var pageSrc = fs.readFileSync(path.join(__dirname, '..', 'journal.html'), 'utf8');
+  var ovSrc = pageSrc.slice(pageSrc.indexOf('    function outSaid() {'), pageSrc.indexOf('    function drawOvOutliers('));
+  // What it says: its string literals (code may name a figure `takes`).
+  ovSrc = (ovSrc.replace(/\n\s*\/\/[^\n]*/g, '').match(/'(?:[^'\\\n]|\\.)*'/g) || []).join(' ');
+  ok('[wording] the Overview\'s When, Where and switches say what paid, never take, decline or accept (' + ovSrc.length
+     + ' characters read)', ovSrc.length > 1500 && !/\b(take|takes|taking|decline|declin\w*|accept\w*|should)\b/i.test(ovSrc)
+     && !/\b(take|decline|accept)\b/i.test(T.GROUP_NAMES.join(' ') + wv.best.map(function (w) { return w.name; }).join(' ')));
+  ok('[labels] an offer\'s $/hr is said after its cost per mile on the card\'s miles, and a change in the range is dated',
+     /'after ' \+ money2\(c\.now\) \+ '\/mi \(card miles\)'/.test(pageSrc)
+     && /'Cost per mile changed ' \+ c\.changes\.map/.test(pageSrc)
+     && /offers are netted at the cost set when each was seen/.test(pageSrc)
+     && /Gross \(before costs\)/.test(pageSrc) && /'pay \(before costs\)'/.test(pageSrc));
+
   var dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trends-'));
   var journal = path.join(dir, 'journal.jsonl');
   var now = Date.now();
@@ -1072,6 +1214,22 @@ function offer(x) {
   lines.push(JSON.stringify({ v: 1, kind: 'mark', id: 'srv12', at: now - 1000, accepted: false, via: 'review' }));
   lines.push(JSON.stringify({ v: 1, kind: 'mark', id: 'srv14', at: now - 2000, accepted: true }));
   lines.push(JSON.stringify({ v: 1, kind: 'mark', id: 'srv14', at: now - 1000, accepted: false }));
+  // Round B: re-offered cards, folded by the server. Forty days back, out of
+  // the 30-day window every figure above counts.
+  var ro = now - 40 * 86400000;
+  function roRow(id, seq, t, pay, extra) {
+    return JSON.stringify(Object.assign({ v: 1, id: id, seq: seq, at: t, firstAt: t, pay: pay, minutes: 18, billedMinutes: 18,
+      miles: 6, perHour: pay * 3, target: 25, band: 15, state: 'go', whole: true, app: 'doordash',
+      pickup: 'Invented Burger 7', dropoff: '12 Nowhere St, Faketown' }, extra || {}));
+  }
+  lines.push(roRow('ro1', 1, ro, 40));
+  lines.push(roRow('ro2', 1, ro + 4 * 60000, 55));                                      // the same trip, raised
+  lines.push(roRow('ro3', 1, ro + 6 * 60000, 30, { dropoff: '99 Elsewhere Rd, Mockville' }));   // another door
+  lines.push(roRow('ro4', 1, ro + 50 * 60000, 70));                                     // the same trip, 46 min on
+  lines.push(roRow('rb1', 1, ro + 90 * 60000, 20, { pickup: 'Other Grill', dropoff: '' }));
+  lines.push(roRow('rb1', 2, ro + 95 * 60000, 20, { pickup: 'Other Grill', dropoff: '', firstAt: ro + 90 * 60000 }));  // came back
+  lines.push(roRow('rq1', 1, ro + 120 * 60000, 20, { pickup: 'Quiet Deli', dropoff: '' }));
+  lines.push(roRow('rq1', 2, ro + 120 * 60000 + 2000, 20, { pickup: 'Quiet Deli', dropoff: '', firstAt: ro + 120 * 60000 }));
   fs.writeFileSync(journal, lines.join('\n') + '\n');
   async function serve(lite) {
     var port = 20000 + Math.floor(Math.random() * 20000);
@@ -1118,7 +1276,10 @@ function offer(x) {
     var withTop = JSON.parse((await get(full.port, '/api/trends?days=30&top=10')).body);
     eq('...and the server takes no ruler: the same answer whatever the page\'s choice, no cut in it',
        [Object.keys(withTop).sort(), withTop.total, JSON.stringify(withTop.rows) === JSON.stringify(j1.rows)],
-       [['costPerMile', 'days', 'floor', 'ok', 'rows', 'runs', 'target', 'total'], 5999, true]);
+       [['costPerMile', 'costs', 'days', 'floor', 'marked', 'ok', 'rows', 'runs', 'target', 'total'], 5999, true]);
+    eq('[round B] costs: where the rows\' own cost per mile changed, [seconds, cost], numbers only; marked: dates only',
+       [j1.costs.length, j1.costs[1][1], j1.costs.every(function (c) { return typeof c[0] === 'number' && typeof c[1] === 'number'; }),
+        j1.marked], [2, 0.35, true, []]);
     eq('...with one cost per mile, the rig\'s own off its newest offer (for earned per hour net), a number and nothing else',
        [j1.costPerMile, typeof j1.costPerMile], [0.35, 'number']);
     var j7 = JSON.parse((await get(full.port, '/api/trends?days=7')).body);
@@ -1148,19 +1309,64 @@ function offer(x) {
     eq('R2: /api/journal\'s until lists the newest `limit` offers before it, its total those before it, said cut',
        [ju.offers.length, ju.offers.every(function (o) { return o.at < untilAt; }), Math.abs(ju.total - before10) <= 1,
         ju.truncated], [100, true, true, true]);
+    // Round B: the fold's re-offered mark, one definition for every view.
+    var jall = JSON.parse((await get(full.port, '/api/journal?days=0&limit=0')).body);
+    var reo = {};
+    jall.offers.forEach(function (o) { if (/^r[obq]/.test(o.id)) reo[o.id] = o.reoffered === true; });
+    eq('[reoffered] the same trip twice in 30 min (both marked), another door not, the same trip 46 min on not; '
+       + 'one id back after 5 min marked, one read twice in 2 s not',
+       reo, { ro1: true, ro2: true, ro3: false, ro4: false, rb1: true, rq1: false });
+    ok('[reoffered] ...set only where true, so every other row is byte for byte what it was',
+       jall.offers.filter(function (o) { return 'reoffered' in o; }).every(function (o) { return o.reoffered === true; }));
+    var tall = JSON.parse((await get(full.port, '/api/trends?days=0')).body);
+    eq('[reoffered] ...and /api/trends carries it as one flag bit, no new column',
+       [tall.rows.cols.flags.filter(function (f) { return f & T.F_REOFFER; }).length, Object.keys(tall.rows.cols).length], [3, 7]);
+    // The owner's special days: dates only, the /api/settings pattern.
+    function post(port, p, body) {
+      return new Promise(function (resolve, reject) {
+        var data = typeof body === 'string' ? body : JSON.stringify(body);
+        var rq = http.request({ host: '127.0.0.1', port: port, path: p, method: 'POST',
+                                headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } },
+          function (res) { var b = ''; res.on('data', function (c) { b += c; }); res.on('end', function () { resolve({ status: res.statusCode, body: b }); }); });
+        rq.on('error', reject);
+        rq.end(data);
+      });
+    }
+    var sp1 = await post(full.port, '/api/specialdays', { add: '2026-11-07' });
+    var sp2 = await post(full.port, '/api/specialdays', { add: '2026-02-30' });
+    var sp3 = await post(full.port, '/api/specialdays', { add: '2026-11-08', note: 'x' });
+    var sp4 = await post(full.port, '/api/specialdays', { add: '2026-11-08', remove: '2026-11-07' });
+    var sp5 = await post(full.port, '/api/specialdays', '[1]');
+    var sp6 = await post(full.port, '/api/specialdays', { add: '2019-12-31' });
+    var sp7 = await post(full.port, '/api/specialdays', { add: '<b>2026-11-09' });
+    var spG = JSON.parse((await get(full.port, '/api/specialdays')).body);
+    eq('[special days] a real date is kept; Feb 30, an extra key, two at once, an array, 2019 and a dressed-up date refused',
+       [sp1.status, JSON.parse(sp1.body).days, sp2.status, sp3.status, sp4.status, sp5.status, sp6.status, sp7.status, spG.days],
+       [200, ['2026-11-07'], 400, 400, 400, 400, 400, 400, ['2026-11-07']]);
+    var spFile = JSON.parse(fs.readFileSync(path.join(dir, 'special-days.json'), 'utf8'));
+    eq('[special days] ...the file beside the journal holds dates and nothing else, and /api/trends reads it',
+       [spFile, JSON.parse((await get(full.port, '/api/trends?days=30')).body).marked], [{ v: 1, days: ['2026-11-07'] }, ['2026-11-07']]);
+    var spR = await post(full.port, '/api/specialdays', { remove: '2026-11-07' });
+    eq('[special days] ...and a day unmarked is gone', [spR.status, JSON.parse(spR.body).days], [200, []]);
     var page = (await get(full.port, '/journal.html')).body;
     ok('the offers page has the Trends tab, and loads trends.js only when it is opened',
        /data-view="trends"/.test(page) && !/<script src="trends\.js">/.test(page) && /s\.src = 'trends\.js'/.test(page));
-    var order = ['trWhenHead', 'trTop', 'trStat', 'trGrid', 'trCell', 'trHourly', 'trCal', 'trGood', 'trChangeHead',
-                 'trDaily', 'trSpread', 'trCompare', 'trShare', 'trShape', 'trMixMin', 'trScatter', 'trRate', 'trQuality',
-                 'trCsvDays'].map(function (id) { return page.indexOf('id="' + id + '"'); });
-    ok('the tab in three sections: when to drive (ruler, switch, grid, its cell, hours, calendar, good per hour), '
-       + 'how it\'s changing, and the shape of offers folded away, CSVs last',
+    // Round B: the Overview first (the ruler line, the switches, When,
+    // Where, this week, the outliers), every chart folded beneath it.
+    var order = ['trOverview', 'trRuler', 'trTop', 'trOut', 'trOvWhen', 'trOvWhere', 'trWeek', 'trOvOutliers', 'trMore',
+                 'trWhenHead', 'trStat', 'trGrid', 'trCell', 'trHourly', 'trCal', 'trSpecial', 'trTimeFold', 'trThirdsBox',
+                 'trChangeHead', 'trSame', 'trOverTime', 'trBy', 'trDaily', 'trGood', 'trSpread', 'trShare', 'trCompare',
+                 'trShape', 'trMixMin', 'trScatter', 'trRate', 'trQuality', 'trHow', 'trCsvDays']
+      .map(function (id) { return page.indexOf('id="' + id + '"'); });
+    ok('[round B] the Overview first; every chart of the rounds before folded under "Every chart", each id kept; '
+       + 'Each day, good per hour, the pay spread and the app share folded with By day / By week beside them; the '
+       + 'timeline folded; one "How this is measured"; CSVs last',
        order.every(function (x, i) { return x > 0 && (i === 0 || x > order[i - 1]); })
-       && /<details class="trshape" id="trShape">/.test(page));
-    ok('the week in review heads "How it\'s changing", stepped by ‹ ›, its sums trends.js weekReview\'s, and the Money '
+       && /<details class="trmore" id="trMore">/.test(page) && /<details class="trshape" id="trShape">/.test(page)
+       && /<details class="trfold" id="trTimeFold">/.test(page) && /<details class="trfold" id="trOverTime">/.test(page));
+    ok('the week in review is the Overview\'s "This week", stepped by ‹ ›, its sums trends.js weekReview\'s, and the Money '
        + 'tab\'s earnings handed over by event (never fetched again)',
-       page.indexOf('id="trChangeHead"') < page.indexOf('id="trWeek"') && page.indexOf('id="trWeek"') < page.indexOf('id="trBy"')
+       page.indexOf('id="trOvWeekHead"') < page.indexOf('id="trWeek"') && page.indexOf('id="trWeek"') < page.indexOf('id="trMore"')
        && /id="trWeekPrev"[\s\S]*id="trWeekNext"/.test(page) && /T\.weekReview\(rows, got\.runs, st\.week/.test(page)
        && /E\.rangeSummary\(money\.entries/.test(page) && /CustomEvent\('money:held'/.test(page)
        && /addEventListener\('money:ask', sayMoneyHeld\)/.test(page));
@@ -1170,32 +1376,66 @@ function offer(x) {
        && /No slot clearly better or worse/.test(page) && /matched to an order in this week/.test(page)
        && /now: Date\.now\(\) \}\)/.test(page));
     ok('S7: every coloured view says about 1 coloured square in 100 can be chance; the grid says its quantile is widened',
-       (page.match(/\+ CHANCE|\+ ' ' \+ CHANCE/g) || []).length === 5
-       && /About 1 coloured square in 100 can be chance\./.test(page) && /move together \(a slow night/.test(page));
+       (page.match(/\+ CHANCE|\+ ' ' \+ CHANCE/g) || []).length === 6
+       && /About 1 coloured square in 100 can be chance\./.test(page) && /move together \(a slow night/.test(page)
+       // Round B: kept under the chart when a note is cut to one sentence.
+       && /\$\(id\)\.textContent = first \+ \(chance \? ' ' \+ CHANCE : ''\)/.test(page));
     ok('F3: good per hour online is said apart from When & where\'s good per hour waited',
        /When & where counts good per hour waited \(each \'\s*\+ '\s*gap capped at 10 min, none while carrying\)/.test(page)
        || /good per hour waited \(each/.test(page));
     ok('T1/T2/T7: a press redraws what reads it (ruler, By week, resize), "When to drive" first and the rest after a '
        + 'paint; the folded shape of offers only once open; the CSVs built on their own click',
-       /ruler: \{ first: \['ruler', 'when', 'good'\], rest: \['week', 'same', 'compare'\] \}/.test(page)
-       && /by: \{ first: \['good'\], rest: \['daily', 'spread', 'share', 'shape'\] \}/.test(page)
+       /all: \{ first: \['ruler', 'overview', 'week'\], rest: \['more'\] \}/.test(page)
+       && /by: \{ first: \[\], rest: \['overtime', 'shape'\] \}/.test(page)
+       && /\$\('trMore'\)\.addEventListener\('toggle'/.test(page) && /\$\('trOverTime'\)\.addEventListener\('toggle'/.test(page)
        && /draw\('ruler'\)/.test(page) && /draw\('by'\)/.test(page) && /draw\('resize'\)/.test(page)
        && /requestAnimationFrame\(function \(\) \{ setTimeout\(later, 0\); \}\)/.test(page)
-       && /\$\('trShape'\)\.addEventListener\('toggle'/.test(page) && /if \(\$\('trShape'\)\.open\) drawShape\(\); else shapeDirty = true;/.test(page)
+       && /\$\('trShape'\)\.addEventListener\('toggle'/.test(page)
+       && /if \(moreOpen\(\) && \$\('trShape'\)\.open\) drawShape\(\); else shapeDirty = true;/.test(page)
        && /\$\('trCsvDays'\)\.addEventListener\('click', csvClick\)/.test(page) && !/\n      csvs\(rows, per\);/.test(page));
     ok('T4/T6/T8: the periods worked out once per answer and by-day or by-week, widths read before any write, scroll '
        + 'reads after them, and no title on a day timeline\'s thin square',
-       /function periodsOf\(by\)/.test(page) && /var pb = periodsOf\(st\.by\);\s+drawDaily\(pb\.keys, pb\.line\);/.test(page)
+       /function periodsOf\(by\)/.test(page) && /drawDaily\(pb\.keys, pb\.line\);/.test(page)
        && /function readWidths\(\)/.test(page) && /post\(function \(\) \{ openAtFirst/.test(page)
        && /tl\.by === 'day' \? '' : ' title="'/.test(page));
     ok('...the ruler offers 10, 20, 30 and 50, opens on 20, and says it is for reading only',
        /data-top="10"[\s\S]*data-top="20" aria-pressed="true"[\s\S]*data-top="30"[\s\S]*data-top="50"/.test(page)
-       && /never\s+reaches the verdict/.test(page));
+       && /sets "good" on every chart here/.test(page)
+       && /id="trRulerHint">Descriptive only — never moves your line\.</.test(page));
+    // Round B, the UX review's cleanup, held on the page itself.
+    var visible = page.replace(/<!--[\s\S]*?-->/g, '').replace(/\n\s*\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    eq('[round B] the one disclaimer: the tab says "never moves your line" once, and the dozen repeats are gone',
+       [(visible.match(/never moves your line/g) || []).length,
+        /Descriptive; it feeds nothing|What happened, not advice|accept line is not tuned to the|for reading, not a rule\.'\);/.test(visible)],
+       [1, false]);
+    ok('[round B] D3: no Weekdays vs weekends button on Compare (the hour chart\'s chips set them side by side)',
+       !/id="trCmpWk"/.test(page) && !/trCmpWk/.test(page));
+    ok('[round B] D4: the hour × date timeline folded, opening on Weeks; Months hidden until three months',
+       /<button type="button" data-tl="week" aria-pressed="true">Weeks<\/button>/.test(page)
+       && /data-tl="month" aria-pressed="false" hidden>Months/.test(page) && /tl: 'week'/.test(page)
+       && /querySelector\('button\[data-tl="month"\]'\)\.hidden = !rv\.tlMonths/.test(page));
+    ok('[round B] D5/D6: days of the month, one weekday and this month vs last hidden until the record can hold them',
+       /\$\('trThirdsBox'\)\.hidden = !rv\.thirds/.test(page) && /b\.hidden = !rv\.sameDow\[/.test(page)
+       && /\$\('trMonths'\)\.hidden = !rv\.monthVsLast/.test(page) && /id="trMonths" hidden>/.test(page));
+    ok('[round B] C2/C3/J1: the chips say what they change, the hour chart\'s line is the panel target (not Good), '
+       + 'plain words for the figures', /panel target ' \+ FMT\.perHour\(got\.target\) \+ ' \(not Good\)'/.test(page)
+       && /data-stat="p50" aria-pressed="true">Typical \$\/hr</.test(page) && />Top quarter</.test(page)
+       && />Top tenth</.test(page) && /Group these charts:/.test(page));
+    ok('[round B] D2: each day draws its top tenth beside the typical and the middle half',
+       /e\.metrics\[m\]\.p90; \}\), cls: 'p90' \}/.test(page));
+    ok('[round B] L1: the bottom line points to the places report\'s When & where, by /api/placeslink',
+       /id="trToWw" href="places\/#whenwhere"/.test(page) && /\$\('trToWw'\)\.setAttribute\('href', base \+ '#whenwhere'\)/.test(page));
+    ok('[round B] Where reads the offers the list already holds (an event), never a second fetch, and /api/trends '
+       + 'stays without places', /CustomEvent\('offers:held'/.test(page) && /addEventListener\('offers:held'/.test(page)
+       && /T\.towns\(held\.offers/.test(page));
   } finally { full.proc.kill(); }
   var lite = await serve(true);
   try {
     var la = await get(lite.port, '/api/trends?days=30');
     eq('a lite rig refuses /api/trends in lite\'s own words', [la.status, JSON.parse(la.body).lite], [404, true]);
+    var ls = await get(lite.port, '/api/specialdays');
+    eq('[special days] a lite rig refuses them in lite\'s own words (GET and POST alike: a path, not a method)',
+       [ls.status, JSON.parse(ls.body).lite], [404, true]);
   } finally { lite.proc.kill(); }
   fs.rmSync(dir, { recursive: true, force: true });
 

@@ -2557,6 +2557,8 @@ try:
        ('blob', [0xef, 0xbb, 0xbf], 12, ['datetime', 'date', 'time', 'weekday', 'hour', 'driver_day',
                                          'driver_weekday', 'week_start']))
     _eby = {r[_ehead.index('offer_id')]: dict(zip(_ehead, r)) for r in _erows[1:]} if 'offer_id' in _ehead else {}
+    eq('[every offer csv] round B appends special_day and reoffered after offer_id, and takes no row away',
+       (_ehead[-3:], len(_erows) - 1), (['offer_id', 'special_day', 'reoffered'], 12))
     _e0, _e1, _e2, _e5 = (_eby.get(k, {}) for k in ('r0', 'r1', 'r2', 'r5'))
     _t0 = time.localtime(NOW / 1000.0)
     eq('[every offer csv] the card\'s moment on this clock, and the GPS of a row with a fix: six places, yes, metres',
@@ -2576,7 +2578,10 @@ try:
         and len(_eo.get('asked') or []) == 1)
     _en = (got.get('every offer no places') or {}).get('everyOffer') or {}
     _enr = list(_csv.reader(_io.StringIO(_en.get('csv') or '')))
-    _en0 = dict(zip(_enr[0], [r for r in _enr[1:] if r[-1] == 'r0'][0])) if len(_enr) > 1 else {}
+    # By the offer_id column, not the last: round B appended special_day and
+    # reoffered after it (trends.js, columns only ever appended).
+    _eni = _enr[0].index('offer_id') if _enr and 'offer_id' in _enr[0] else -1
+    _en0 = dict(zip(_enr[0], [r for r in _enr[1:] if r[_eni] == 'r0'][0])) if len(_enr) > 1 else {}
     eq('[every offer csv] keepPlaces off: the columns stay, empty, and the line says so before and after the press',
        (_enr[0] if _enr else None, _en0.get('lat'), _en0.get('gps_ok'), _en0.get('pickup'),
         'keepPlaces is off' in ((_en.get('before') or {}).get('says') or ''), 'keepPlaces is off' in (_en.get('says') or '')),

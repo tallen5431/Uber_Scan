@@ -833,6 +833,41 @@
   .trends .chips .lbl { align-self: center; color: var(--muted); font-size: 14px; margin-right: 2px; }
   .trends .rulerline { margin: 2px 0 0; font-size: 15px; font-variant-numeric: tabular-nums; }
   .trends .rulerline b { color: var(--text); }
+  /* Round B: the Overview. A window or a town is one row, the figure first
+     and how much data it rests on under it; a row that opens a view is a
+     link the width of the card. Every chart after it is folded. */
+  .trends .ov h4 { margin: 14px 0 4px; }
+  .trends .ovlist { list-style: none; margin: 0; padding: 0; }
+  .trends .ovlist li { margin: 0 0 4px; }
+  .trends .ovrow { display: block; width: 100%; min-height: 52px; padding: 6px 10px; text-align: left;
+                   border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--text);
+                   font: inherit; font-size: 15px; cursor: pointer; font-variant-numeric: tabular-nums; }
+  .trends .ovrow b { font-size: 16px; }
+  .trends .ovrow small { display: block; color: var(--muted); font-size: 13px; }
+  .trends .ovrow.above { border-color: var(--go); }
+  .trends .ovrow.below { border-color: var(--no); }
+  .trends .ovrow.lead { border-style: dashed; }
+  .trends .ovrow .tag { float: right; margin-left: 6px; font-size: 12px; color: var(--muted); }
+  .trends .ovsub { margin: 6px 0 2px; font-size: 13px; color: var(--muted); }
+  .trends .chips.outs button { min-height: 44px; font-size: 14px; border-color: var(--line); }
+  .trends .chips.outs button::before { content: '\2610\00a0'; }
+  .trends .chips.outs button[aria-pressed="true"]::before { content: '\2611\00a0'; }
+  .trends .outlier button { min-height: 44px; font: inherit; font-size: 14px; background: transparent;
+                            color: var(--text); border: 1px dashed var(--muted); border-radius: 8px; padding: 4px 10px; }
+  .trends details.trmore > summary, .trends details.trfold > summary, .trends details.trhow > summary {
+    cursor: pointer; list-style: revert; min-height: 44px; }
+  .trends details.trmore > summary h3, .trends details.trhow > summary h3, .trends details.trfold > summary h4 {
+    display: inline; }
+  .trends details.trmore > summary h3 small { font-weight: 400; color: var(--muted); font-size: 13px; }
+  .trends .special { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 6px 0; font-size: 14px; }
+  .trends .special input { min-height: 40px; font: inherit; }
+  .trends .special .sday { display: inline-flex; align-items: center; gap: 2px; margin-right: 8px; }
+  .trends .special .sday button { min-width: 36px; min-height: 36px; font: inherit; background: transparent;
+                                  color: var(--muted); border: 1px solid var(--line); border-radius: 6px; }
+  .trends .tile .sp { float: right; color: var(--warn); font-style: normal; }
+  .trends svg .capmark { fill: var(--warn); }
+  .trends #trHowBody h5 { margin: 10px 0 2px; font-size: 14px; }
+  .trends #trHowBody p { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
   .trends .calmonths { margin: 6px 0 0; font-size: 13px; font-variant-numeric: tabular-nums; }
   /* The cell looked at closely: one at a time, under the grid. */
   .trends .cellpanel { margin: 8px 0 4px; padding: 8px 10px 10px; border: 1px solid var(--line); border-radius: 8px;
@@ -1493,52 +1528,88 @@
   <div class="tab" data-tab="trends" id="tab-trends" role="tabpanel" aria-label="Trends">
   <section class="card trends" id="trends">
   <h2>Trends <em id="trSpan">· every offer in the range</em></h2>
-  <p class="sum">How the offers moved over the range pressed above. What was offered, not what was earned;
-    nothing here moves the verdict or the target, and $/mi is for reading, not a rule.</p>
   <p class="hint" id="trSays">Open this tab with 7 days, 30 days or All pressed.</p>
   <div id="trBody" hidden>
-    <!-- Round two (the owner, Nov 2026: "view by percentile, good = the top
-         20%, adjustable"): three sections. What a selective driver asks first
-         — when the best offers come — on top; how the record moved over the
-         weeks under it; the shape of the offers and the data's own quality
-         last and folded, because they are checked, not read daily. Every id
-         of round one is kept, so the code and the tests find them. -->
-    <h3 class="trsec" id="trWhenHead">When to drive</h3>
-    <div class="ruler">
-      <div class="chips" id="trTop" role="group" aria-label="Good is the top share of this range">
-        <span class="lbl">Good =</span>
-        <button type="button" data-top="10" aria-pressed="false">Top 10%</button>
+    <!-- ROUND B (the owner, Nov 2026: "a simplified overview that lets you
+         expand into more specific details"). An Overview first — when the
+         good offers came, where they started and ended, this week — and
+         every chart of the three rounds before folded beneath it, one tap
+         away, drawn only once opened. Every id of those rounds is kept, so
+         the code, the links and the tests find them. One line says what
+         "good" and "$/hr" are, and the one disclaimer the tab carries is
+         said there, once. -->
+    <section class="ov" id="trOverview" aria-labelledby="trOvHead">
+      <h3 class="trsec" id="trOvHead">Overview</h3>
+      <p class="rulerline" id="trRuler" aria-live="polite"></p>
+      <p class="hint costnote" id="trCostNote" hidden></p>
+      <div class="chips" id="trTop" role="group" aria-label="Good is the top share of this range: sets good for every figure on this tab">
+        <span class="lbl">Good = top</span>
+        <button type="button" data-top="10" aria-pressed="false">10%</button>
         <button type="button" data-top="20" aria-pressed="true">20%</button>
         <button type="button" data-top="30" aria-pressed="false">30%</button>
         <button type="button" data-top="50" aria-pressed="false">50%</button>
+        <span class="lbl">— sets "good" on every chart here</span>
       </div>
-      <p class="rulerline" id="trRuler" aria-live="polite"></p>
-      <p class="hint" id="trRulerHint">A ruler for reading this tab only: it is not your target, and it never
-        reaches the verdict, the panel or the rig.</p>
-    </div>
+      <p class="hint" id="trRulerHint">Descriptive only — never moves your line.</p>
+      <div class="chips outs" id="trOut" role="group" aria-label="Leave out, for reading only">
+        <button type="button" id="trOutRe" aria-pressed="false">Leave out re-offered/raised cards</button>
+        <button type="button" id="trOutSpecial" aria-pressed="false">Leave out special days</button>
+      </div>
+      <p class="hint" id="trOutSaid" aria-live="polite"></p>
+
+      <h4 id="trOvWhenHead">When</h4>
+      <div id="trOvWhen"></div>
+      <p class="hint" id="trOvUntried"></p>
+
+      <h4 id="trOvWhereHead">Where</h4>
+      <div id="trOvWhere"></div>
+      <p class="hint" id="trOvWhereLink" hidden><a id="trOvPlaces" href="places/#whenwhere">GPS view: the places
+        report's When &amp; where and Offers around you ›</a></p>
+
+      <h4 id="trOvWeekHead">This week</h4>
+      <!-- The week in review (the reporting work's third round): one driver
+           week, Monday 4am to Monday 4am, stepped with ‹ ›; trends.js
+           weekReview over the rows and runs this tab holds, with the Money
+           tab's paid-against-the-card for the same week where the page has
+           the earnings loaded. Each line opens the view that explains it. -->
+      <section class="weekrev" id="trWeek" aria-labelledby="trWeekHead">
+        <div class="wkhead">
+          <button type="button" class="wkstep" id="trWeekPrev" aria-label="The week before">&lsaquo;</button>
+          <h4 id="trWeekHead">Week in review</h4>
+          <button type="button" class="wkstep" id="trWeekNext" aria-label="The week after">&rsaquo;</button>
+        </div>
+        <div class="wkrows" id="trWeekBody"></div>
+        <p class="hint" id="trWeekNote"></p>
+      </section>
+
+      <p class="outlier" id="trOvOutliers" hidden></p>
+      <div class="tw" id="trOvOutList" hidden></div>
+    </section>
+
+    <details class="trmore" id="trMore">
+      <summary><h3 class="trsec">Every chart <small>· the grid, hours, calendar, weeks, the shape of offers</small></h3></summary>
+    <h3 class="trsec" id="trWhenHead">When to drive</h3>
     <div class="chips" id="trStat" role="group" aria-label="Which figure the grid, the hours and the calendar show">
-      <button type="button" data-stat="p50" aria-pressed="true">Median</button>
-      <button type="button" data-stat="p75" aria-pressed="false">P75</button>
-      <button type="button" data-stat="p90" aria-pressed="false">P90</button>
+      <button type="button" data-stat="p50" aria-pressed="true">Typical $/hr</button>
+      <button type="button" data-stat="p75" aria-pressed="false">Top quarter</button>
+      <button type="button" data-stat="p90" aria-pressed="false">Top tenth</button>
       <button type="button" data-stat="goodRate" aria-pressed="false">Good/hr online</button>
       <button type="button" data-stat="earned" aria-pressed="false">Earned/hr online</button>
     </div>
-    <!-- Round three: earned per hour, gross or net of the rig's own cost per
-         mile. Shown with Earned/hr only; Net is offered only when the server
-         says what that cost is (never a figure chosen here). -->
-    <div class="chips" id="trNet" role="group" aria-label="Earned gross or net of your cost per mile" hidden>
-      <button type="button" data-net="0" aria-pressed="true">Gross</button>
+    <!-- Round three: earned per hour, gross (before costs) or net of the
+         rig's own cost per mile. Shown with Earned/hr only; Net is offered
+         only when the server says what that cost is. -->
+    <div class="chips" id="trNet" role="group" aria-label="Earned before costs or after your cost per mile" hidden>
+      <button type="button" data-net="0" aria-pressed="true">Gross (before costs)</button>
       <button type="button" data-net="1" aria-pressed="false">Net</button>
     </div>
     <p class="hint nethint" id="trNetWhy" hidden></p>
-    <!-- Compare mode (round three): set by Compare under "How it's
-         changing" with two date periods; left here or there. -->
     <div class="cmpbar" id="trCmpBar" hidden>
       <span id="trCmpSaid"></span>
       <button type="button" class="linkbtn" id="trCmpLeave">Leave compare</button>
     </div>
 
-    <h4 id="trGridHead">Weekday × hour <em>· median $/hr</em></h4>
+    <h4 id="trGridHead">Weekday × hour <em>· typical $/hr</em></h4>
     <div class="chips" id="trGridView" role="group" aria-label="What the grid shows" hidden>
       <button type="button" data-gv="range" aria-pressed="false">This range</button>
       <button type="button" data-gv="diff" aria-pressed="true">B vs A</button>
@@ -1547,80 +1618,50 @@
     <div class="tw" id="trGrid"></div>
     <div class="cellpanel" id="trCell" role="region" aria-labelledby="trCellHead" tabindex="-1" hidden></div>
 
-    <h4 id="trHourHead">Hour of day <em>· median $/hr</em></h4>
+    <h4 id="trHourHead">Hour of day <em>· typical $/hr</em></h4>
     <div class="chips" id="trHourDays" role="group" aria-label="Which days">
       <button type="button" data-days="all" aria-pressed="true">All days</button>
       <button type="button" data-days="weekday" aria-pressed="false">Weekdays</button>
       <button type="button" data-days="weekend" aria-pressed="false">Weekends</button>
-      <button type="button" data-months="1" aria-pressed="false" id="trMonths">This month vs last</button>
+      <button type="button" data-months="1" aria-pressed="false" id="trMonths" hidden>This month vs last</button>
     </div>
     <div class="legend" id="trHourLegend"></div>
     <div class="chart" id="trHourly"></div>
     <p class="hint" id="trHourNote"></p>
 
-    <h4 id="trCalHead">Calendar <em>· median $/hr</em></h4>
+    <h4 id="trCalHead">Calendar <em>· typical $/hr</em></h4>
     <div id="trCal"></div>
     <p class="calmonths" id="trCalMonths"></p>
     <p class="hint" id="trCalNote"></p>
-
-    <h4 id="trThirdsHead">Days of the month <em>· 1–10, 11–20, 21–end</em></h4>
-    <div class="tw" id="trThirds"></div>
-    <p class="hint" id="trThirdsNote"></p>
-
-    <h4 id="trTimeHead">Hour × date <em>· median $/hr</em></h4>
-    <div class="chips" id="trTimeBy" role="group" aria-label="One row per">
-      <span class="lbl">Rows:</span>
-      <button type="button" data-tl="day" aria-pressed="true">Days</button>
-      <button type="button" data-tl="week" aria-pressed="false">Weeks</button>
-      <button type="button" data-tl="month" aria-pressed="false">Months</button>
+    <!-- The owner's special days (round B): kept by this server
+         (/api/specialdays, dates only), so every page it serves agrees;
+         beside the built-in list (trends.js specialDays). -->
+    <div class="special" id="trSpecial">
+      <label>Mark a special day <input type="date" id="trSpecialDate"></label>
+      <button type="button" class="linkbtn" id="trSpecialAdd">Mark</button>
+      <span class="hint" id="trSpecialSaid"></span>
+      <div id="trSpecialList"></div>
     </div>
-    <div class="tw" id="trTime"></div>
-    <p class="hint" id="trTimeNote"></p>
 
-    <h4 id="trGoodHead">Good offers per hour online</h4>
-    <div class="chart" id="trGood"></div>
-    <p class="hint" id="trGoodNote"></p>
+    <details class="trfold" id="trTimeFold">
+      <summary><h4 id="trTimeHead">Hour × date <em>· typical $/hr</em></h4></summary>
+      <div class="chips" id="trTimeBy" role="group" aria-label="One row per">
+        <span class="lbl">Rows:</span>
+        <button type="button" data-tl="day" aria-pressed="false">Days</button>
+        <button type="button" data-tl="week" aria-pressed="true">Weeks</button>
+        <button type="button" data-tl="month" aria-pressed="false" hidden>Months</button>
+      </div>
+      <div class="tw" id="trTime"></div>
+      <p class="hint" id="trTimeNote"></p>
+    </details>
+
+    <div id="trThirdsBox" hidden>
+      <h4 id="trThirdsHead">Days of the month <em>· 1–10, 11–20, 21–end</em></h4>
+      <div class="tw" id="trThirds"></div>
+      <p class="hint" id="trThirdsNote"></p>
+    </div>
 
     <h3 class="trsec" id="trChangeHead">How it's changing</h3>
-    <!-- The week in review (the owner, Nov 2026: the reporting work's third
-         round). One driver week, Monday 4am to Monday 4am, as one card,
-         stepped with ‹ ›; trends.js weekReview over the rows and runs this
-         tab already holds, with the Money tab's paid-against-the-card for
-         the same week where the page has the earnings loaded. Here, at the
-         head of "How it's changing", rather than on Today: every figure on it
-         is this tab's (the ruler, hours online, earned per hour, the slots'
-         marking), which only /api/trends holds, and Today asks nothing of
-         it — putting the card there would fetch the whole range on every
-         open of the page, the rig's Pi included. And a week is a change over
-         time, which is what this section is. Each line opens the view that
-         explains it; nothing on it is advice, and nothing reads it. -->
-    <section class="weekrev" id="trWeek" aria-labelledby="trWeekHead">
-      <div class="wkhead">
-        <button type="button" class="wkstep" id="trWeekPrev" aria-label="The week before">&lsaquo;</button>
-        <h4 id="trWeekHead">Week in review</h4>
-        <button type="button" class="wkstep" id="trWeekNext" aria-label="The week after">&rsaquo;</button>
-      </div>
-      <div class="wkrows" id="trWeekBody"></div>
-      <p class="hint" id="trWeekNote"></p>
-    </section>
-    <div class="chips" id="trBy" role="group" aria-label="Group the time charts by">
-      <button type="button" data-by="day" aria-pressed="true">By day</button>
-      <button type="button" data-by="week" aria-pressed="false">By week</button>
-    </div>
-
-    <h4 id="trDailyHead">Each day</h4>
-    <div class="chips" id="trMetric" role="group" aria-label="Which figure">
-      <button type="button" data-metric="pay" aria-pressed="false">Pay</button>
-      <button type="button" data-metric="perHour" aria-pressed="true">$/hr</button>
-      <button type="button" data-metric="perMile" aria-pressed="false">$/mi</button>
-      <button type="button" data-metric="minutes" aria-pressed="false">Minutes</button>
-      <button type="button" data-metric="miles" aria-pressed="false">Miles</button>
-    </div>
-    <div class="legend"><span><i></i>median</span><span><i class="band"></i>middle half</span>
-      <span><i class="uber"></i>Uber</span><span><i class="dash"></i>DoorDash</span><span><i class="bar"></i>offers</span></div>
-    <div class="chart" id="trDaily"></div>
-    <p class="hint" id="trDailyNote"></p>
-
     <h4 id="trSameHead">One weekday over the weeks</h4>
     <div class="chips" id="trSameDow" role="group" aria-label="Which weekday">
       <button type="button" data-dow="1" aria-pressed="false">Mon</button>
@@ -1634,37 +1675,67 @@
     <div class="small3" id="trSame"></div>
     <p class="hint" id="trSameNote"></p>
 
-    <h4>Pay spread</h4>
-    <div class="legend"><span><i class="p25"></i>P25 and P75</span><span><i></i>median</span><span><i class="p90"></i>P90</span></div>
-    <div class="chart" id="trSpread"></div>
+    <!-- D1/D2 of the UX review: the calendar, with its figure switch, is
+         the day-by-day view; each day's line and good per hour by day are
+         folded here with the pay spread, and By day / By week sits beside
+         the charts it groups. -->
+    <details class="trfold" id="trOverTime">
+      <summary><h4>Each day or week <em>· the figures, good per hour, pay spread, app share</em></h4></summary>
+      <div class="chips" id="trBy" role="group" aria-label="Group these charts by">
+        <span class="lbl">Group these charts:</span>
+        <button type="button" data-by="day" aria-pressed="true">By day</button>
+        <button type="button" data-by="week" aria-pressed="false">By week</button>
+      </div>
+      <h4 id="trDailyHead">Each day</h4>
+      <div class="chips" id="trMetric" role="group" aria-label="Which figure">
+        <button type="button" data-metric="pay" aria-pressed="false">Pay</button>
+        <button type="button" data-metric="perHour" aria-pressed="true">$/hr</button>
+        <button type="button" data-metric="perMile" aria-pressed="false">$/mi</button>
+        <button type="button" data-metric="minutes" aria-pressed="false">Minutes</button>
+        <button type="button" data-metric="miles" aria-pressed="false">Miles</button>
+      </div>
+      <div class="legend"><span><i></i>typical</span><span><i class="band"></i>middle half</span>
+        <span><i class="p90"></i>top tenth</span><span><i class="uber"></i>Uber</span><span><i class="dash"></i>DoorDash</span>
+        <span><i class="bar"></i>offers</span></div>
+      <div class="chart" id="trDaily"></div>
+      <p class="hint" id="trDailyNote"></p>
+
+      <h4 id="trGoodHead">Good offers per hour online</h4>
+      <div class="chart" id="trGood"></div>
+      <p class="hint" id="trGoodNote"></p>
+
+      <h4>Pay spread <em>· before costs</em></h4>
+      <div class="legend"><span><i class="p25"></i>bottom and top quarter</span><span><i></i>typical</span>
+        <span><i class="p90"></i>top tenth</span></div>
+      <div class="chart" id="trSpread"></div>
+
+      <h4>App share and boost share</h4>
+      <div class="legend"><span><i class="uber"></i>Uber</span><span><i class="dash"></i>DoorDash</span><span><i class="bar"></i>app not known</span></div>
+      <div class="chart" id="trShare"></div>
+      <p class="hint" id="trShareNote"></p>
+    </details>
 
     <h4>Compare two periods</h4>
     <div class="cmp">
       <label>A from<input type="date" id="trAFrom"></label><label>A to<input type="date" id="trATo"></label>
       <label>B from<input type="date" id="trBFrom"></label><label>B to<input type="date" id="trBTo"></label>
       <button type="button" class="linkbtn" id="trCmpGo">Compare</button>
-      <button type="button" class="linkbtn" id="trCmpWk">Weekdays vs weekends</button>
     </div>
     <div class="tw" id="trCompare"></div>
-
-    <h4>App share and boost share</h4>
-    <div class="legend"><span><i class="uber"></i>Uber</span><span><i class="dash"></i>DoorDash</span><span><i class="bar"></i>app not known</span></div>
-    <div class="chart" id="trShare"></div>
-    <p class="hint" id="trShareNote"></p>
 
     <details class="trshape" id="trShape">
       <summary><h3 class="trsec" id="trShapeHead">Shape of offers and data quality</h3></summary>
 
-      <h4>Trip mix <em>· median minutes and miles</em></h4>
+      <h4>Trip mix <em>· typical minutes and miles</em></h4>
       <div class="chart" id="trMixMin"></div>
       <div class="chart" id="trMixMi"></div>
 
-      <h4>Pay against miles</h4>
+      <h4>Pay against miles <em>· pay before costs</em></h4>
       <div class="legend" id="trScatterLegend"></div>
       <div class="chart" id="trScatter"></div>
       <p class="hint" id="trScatterNote"></p>
 
-      <h4>Rate card <em>· a 20-minute, 5-mile trip</em></h4>
+      <h4>Rate card <em>· a 20-minute, 5-mile trip, pay before costs</em></h4>
       <div class="legend"><span><i class="uber"></i>Uber</span><span><i class="dash"></i>DoorDash</span></div>
       <div class="chart" id="trRateChart"></div>
       <div class="tw" id="trRate"></div>
@@ -1675,13 +1746,21 @@
       <div class="chart" id="trQuality"></div>
       <p class="hint" id="trQualityNote"></p>
     </details>
+    </details>
+
+    <!-- J1/N1 of the UX review: each chart says one sentence under it, and
+         how it is worked out is here, in one place, for whoever asks. -->
+    <details class="trhow" id="trHow">
+      <summary><h3 class="trsec">How this is measured</h3></summary>
+      <div id="trHowBody"></div>
+    </details>
 
     <div class="csvs">
       <a class="linkbtn" id="trCsvDays" href="#" download="trends-daily.csv">⤓ Daily table (CSV)</a>
       <a class="linkbtn" id="trCsvHours" href="#" download="trends-hourly.csv">⤓ Hourly table (CSV)</a>
     </div>
-    <p class="hint">Where you waited, by the car's own GPS fix when each card came up, is in the
-      Strategy &amp; places report on the NucBox (its "Waited" tab), held to the same hours and tested.</p>
+    <p class="hint" id="trToPlaces">Where you waited, by the car's own GPS fix: the places report's
+      <a id="trToWw" href="places/#whenwhere">When &amp; where</a> (which area at the day and hours you pick) on the NucBox.</p>
   </div>
   </section>
   </div>
@@ -5367,6 +5446,13 @@
 
   function render(data) {
     lastData = data;
+    // The Trends overview's Where (round B) reads its towns off these same
+    // offers rather than a second fetch, said to its script by an event as
+    // the Money tab's earnings are (`money:held`).
+    try {
+      document.dispatchEvent(new CustomEvent('offers:held', { detail: {
+        offers: data.offers || [], total: data.total, days: days } }));
+    } catch (e) { /* an old browser: the overview says the towns have not loaded */ }
     // The last range's file is not this range's.
     resetOffersCsv(data);
     // Rows the scanner was not sure of are kept in the file on purpose, and
@@ -7228,12 +7314,18 @@
                // Round three: earned gross or net, the timeline's rows, the
                // weekday followed over the weeks, compare mode ({ a, b } or
                // null) and what the grid shows in it.
-               net: false, tl: 'day', sameDow: 5, cmp: null, gridView: 'diff' };
+               net: false, tl: 'week', sameDow: 5, cmp: null, gridView: 'diff',
+               // Round B: the overview's two leave-out switches, off unless
+               // pressed, for reading only (trends.js leaveOut).
+               outRe: false, outSp: false };
     var got = null, asked = null, seq = 0, rate = null, urls = [], cmpRange = null;
     // The week the review card shows (its Monday key; the newest on a new
     // range), and the Money tab's earnings as the page's own script last said
     // them (`money:held`): read here, never fetched again.
     var money = null;
+    // The offers the page's own list holds (`offers:held`, round B): the
+    // overview's Where reads its towns off them, never a second fetch.
+    var held = null;
     // The cell looked at closely ({ dow, hour }), kept across a redraw.
     var cellPick = null;
     // The ruler is this viewer's own choice, kept in this browser only: a page
@@ -7330,12 +7422,15 @@
               : 'This server did not answer for trends (an older build?).');
             return;
           }
-          got = { rows: T.unpack(j.rows), total: j.total, target: j.target, floor: j.floor || 0,
+          got = { all: T.unpack(j.rows), total: j.total, target: j.target, floor: j.floor || 0,
                   // The rig's own cost per mile (server.js trendsOut), for
                   // earned NET; null and Net is not offered.
                   cpm: typeof j.costPerMile === 'number' ? j.costPerMile : null,
-                  runs: (j.runs || []).map(function (s) { return [s[0] * 1000, s[1] * 1000]; }) };
-          rate = null; csvKey = null; shapeDirty = true;
+                  // Round B: where the rows' own cost per mile changed, and
+                  // the owner's marked special days (dates only).
+                  costs: T.costNote(j.costs || []), marked: Array.isArray(j.marked) ? j.marked : [],
+                  allRuns: (j.runs || []).map(function (s) { return [s[0] * 1000, s[1] * 1000]; }) };
+          applyOut();
           draw();
         }).catch(function () {
           if (mine !== seq) return;
@@ -7571,34 +7666,37 @@
       return got.per[by];
     }
 
-    /* What a press redraws (the reporting review's T1): everything only for
-       a new answer or the tab shown; a ruler press what counts "good"; By
-       week the charts over periods; a resize the charts drawn to a width
-       (the tables size themselves); a figure picked on the week card the
-       views that read it. "When to drive" first, the rest in the next task
-       after a paint (T7), so the phone draws the top of the tab before it
-       works out the bottom; the folded shape of offers only when open (T2). */
-    var drawSeq = 0, shapeDirty = true, csvKey = null;
+    /* What a press redraws (the reporting review's T1; round B). The
+       Overview first — the ruler line, the windows, the towns, this week —
+       and every chart under it only once "Every chart" is open, after a
+       paint (T7): a fold drawn shut has no width and nobody reading it, and
+       the phone's first screen is the Overview. The folds inside it (Hour ×
+       date, Each day or week, the shape of offers) draw when opened (T2). A
+       ruler press, By week or a resize redraws what reads it. */
+    var drawSeq = 0, shapeDirty = true, moreDirty = true, overDirty = true, timeDirty = true, csvKey = null;
     var PARTS = {
-      all: { first: ['ruler', 'when', 'good'], rest: ['week', 'daily', 'same', 'spread', 'compare', 'share', 'shape'] },
-      ruler: { first: ['ruler', 'when', 'good'], rest: ['week', 'same', 'compare'] },
-      by: { first: ['good'], rest: ['daily', 'spread', 'share', 'shape'] },
-      resize: { first: ['hourly', 'cell', 'good'], rest: ['daily', 'same', 'spread', 'share', 'shape'] },
+      all: { first: ['ruler', 'overview', 'week'], rest: ['more'] },
+      ruler: { first: ['ruler', 'overview', 'week'], rest: ['more'] },
+      by: { first: [], rest: ['overtime', 'shape'] },
+      resize: { first: ['overview'], rest: ['more'] },
       stat: { first: ['ruler', 'when'], rest: [] }
     };
     function draw(what) {
       if (!got || !showing()) return;
       var rows = got.rows;
-      if (!rows.length) {
+      if (!got.all.length) {
         $('trBody').hidden = true;
         says('No offers in this range.');
         return;
       }
       says('');
       $('trBody').hidden = false;
-      $('trSpan').textContent = '· ' + rows.length.toLocaleString() + ' offers, ' + shortDay(rows[0].day) + ' to '
-        + shortDay(rows[rows.length - 1].day);
+      $('trSpan').textContent = '· ' + rows.length.toLocaleString() + ' offers, ' + shortDay(got.all[0].day) + ' to '
+        + shortDay(got.all[got.all.length - 1].day);
       var plan = PARTS[what] || PARTS.all, mine = ++drawSeq;
+      // Everything left out by the overview's switches: the overview says
+      // so, and the charts, which need a row to stand on, wait.
+      if (!rows.length) plan = { first: ['ruler', 'overview', 'week'], rest: [] };
       readWidths();
       csvLabels();
       plan.first.forEach(function (k) { part(k, rows); });
@@ -7610,20 +7708,36 @@
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(function () { setTimeout(later, 0); });
       else setTimeout(later, 0);
     }
+    function moreOpen() { return $('trMore').open; }
     function part(k, rows) {
-      var pb = periodsOf(st.by);
       if (k === 'ruler') drawRuler(rows);
-      else if (k === 'when') drawWhen(rows);
-      else if (k === 'hourly') drawHourly(rows);
-      else if (k === 'cell') drawCell(rows);
-      else if (k === 'good') drawGood(rows, pb.keys);
+      else if (k === 'overview') drawOverview(rows);
       else if (k === 'week') drawWeek(rows);
-      else if (k === 'daily') drawDaily(pb.keys, pb.line);
-      else if (k === 'same') drawSame(rows);
-      else if (k === 'spread') drawSpread(pb.keys, pb.line);
-      else if (k === 'compare') drawCompare(rows, false);
-      else if (k === 'share') drawShare(pb.keys, pb.line);
-      else if (k === 'shape') { if ($('trShape').open) drawShape(); else shapeDirty = true; }
+      else if (k === 'more') { if (moreOpen()) drawMore(rows); else moreDirty = true; }
+      else if (k === 'when') { if (moreOpen()) drawWhen(rows); else moreDirty = true; }
+      else if (k === 'overtime') { if (moreOpen() && $('trOverTime').open) drawOverTime(); else overDirty = true; }
+      else if (k === 'shape') { if (moreOpen() && $('trShape').open) drawShape(); else shapeDirty = true; }
+    }
+    // Everything under "Every chart", at the widths it has once open.
+    function drawMore(rows) {
+      moreDirty = false;
+      readWidths();
+      drawWhen(rows);
+      drawSame(rows);
+      drawCompare(rows, false);
+      part('overtime', rows);
+      part('shape', rows);
+    }
+    // Each day or week, good per hour by period, the pay spread and the
+    // app share: the charts By day / By week groups (D1, D2, C1).
+    function drawOverTime() {
+      var pb = periodsOf(st.by), rows = got.rows;
+      overDirty = false;
+      ['trGood', 'trDaily', 'trSpread', 'trShare'].forEach(function (id) { wcache[id] = $(id).clientWidth; });
+      drawGood(rows, pb.keys);
+      drawDaily(pb.keys, pb.line);
+      drawSpread(pb.keys, pb.line);
+      drawShare(pb.keys, pb.line);
     }
     // The folded charts: the trip mix, pay against miles, the rate card (a
     // 200-draw bootstrap a week per app) and the data-quality strip, worked
@@ -7638,9 +7752,13 @@
       drawRate(rows);
       drawQuality(pb.keys, pb.line);
     }
+    function ready() { return got && got.rows.length && showing(); }
+    $('trMore').addEventListener('toggle', function () { if (this.open && moreDirty && ready()) drawMore(got.rows); });
+    $('trOverTime').addEventListener('toggle', function () { if (this.open && overDirty && ready()) drawOverTime(); });
     $('trShape').addEventListener('toggle', function () {
-      if (this.open && shapeDirty && got && got.rows.length && showing()) drawShape();
+      if (this.open && shapeDirty && ready()) drawShape();
     });
+    $('trTimeFold').addEventListener('toggle', function () { if (this.open && timeDirty && ready()) drawTimeline(got.rows); });
     // The CSVs are built when a link is pressed (T1), not on every draw: the
     // link's href is set in its own click, before the browser follows it.
     function csvLabels() {
@@ -7669,7 +7787,7 @@
       drawHourly(rows);
       drawCalendar(rows);
       drawThirds(rows);
-      drawTimeline(rows);
+      if ($('trTimeFold').open) drawTimeline(rows); else timeDirty = true;
     }
 
     /* --- earned, gross or net (round three) ------------------------------------
@@ -7728,7 +7846,9 @@
     /* --- the ruler ------------------------------------------------------------
        Worked out once over the whole range (T.ruler) and held as one dollar
        figure, so every cell, hour, day and week below is counted against the
-       same line. */
+       same line. Round B: said on the Overview's one line with what $/hr is
+       — after the cost per mile on the card's miles, as each row carries it,
+       and when that changed — and the tab's one disclaimer under it. */
     function drawRuler(rows) {
       got.ruler = T.ruler(rows, st.top);
       [].forEach.call($('trTop').querySelectorAll('button[data-top]'), function (b) {
@@ -7738,16 +7858,310 @@
         b.setAttribute('aria-pressed', b.getAttribute('data-stat') === st.stat ? 'true' : 'false');
       });
       var r = got.ruler;
-      $('trRuler').innerHTML = r.cut === null ? 'Good: no offer in this range has a $/hr to rank.'
+      $('trRuler').innerHTML = (r.cut === null ? 'Good: no offer in this range has a $/hr to rank.'
         : 'Good = top ' + r.top + '% of this range: <b>≥ ' + esc(money2(r.cut)) + '/hr</b> <small>('
-          + r.over.toLocaleString() + ' of ' + r.n.toLocaleString() + ' offers)</small>';
+          + r.over.toLocaleString() + ' of ' + r.n.toLocaleString() + ' offers)</small>')
+        + ' · $/hr is ' + esc(afterCost());
+      var c = got.costs, cn = $('trCostNote');
+      cn.hidden = !c.changes.length;
+      cn.textContent = !c.changes.length ? '' : 'Cost per mile changed ' + c.changes.map(function (x) {
+        return 'on ' + shortDay(x.day) + ' (' + money2(x.from) + ' → ' + money2(x.to) + ')';
+      }).join(', ') + '; offers are netted at the cost set when each was seen.';
     }
     function cut() { return got && got.ruler ? got.ruler.cut : null; }
     function money2(v) { return '$' + v.toFixed(2); }
+    // What an offer's $/hr is net of (round B's labels): the cost per mile the
+    // rows carry, on the card's miles; one figure where it never moved.
+    function afterCost() {
+      var c = got && got.costs;
+      if (!c || c.now === null) return 'as the card read it (no cost per mile on these offers)';
+      if (!c.changes.length) return 'after ' + money2(c.now) + '/mi (card miles)';
+      return 'after the cost per mile set when each offer was seen (card miles)';
+    }
+    function phWords() { return '$/hr after ' + (got && got.costs && got.costs.now !== null && !got.costs.changes.length
+      ? money2(got.costs.now) + '/mi' : 'costs'); }
+    var STAT_PLAIN = { p50: 'typical', p75: 'top quarter', p90: 'top tenth' };
     function statWords() {
       return st.stat === 'goodRate' ? 'good offers per hour online (top ' + st.top + '%)'
-        : st.stat === 'earned' ? 'earned per hour online, ' + (netOn() ? 'net' : 'gross')
-        : (st.stat === 'p50' ? 'median' : st.stat.toUpperCase()) + ' $/hr';
+        : st.stat === 'earned' ? 'earned per hour online, ' + (netOn() ? 'after ' + money2(got.cpm) + '/mi (card miles)'
+          : 'before costs')
+        : (STAT_PLAIN[st.stat] || 'typical') + ' ' + phWords();
+    }
+
+    /* --- the leave-out switches (round B) ---------------------------------------
+       trends.js leaveOut over the whole answer: the rows and runs every view
+       reads, with re-offered cards and/or special days out. Reading only —
+       nothing is deleted, and nothing reaches the verdict, target or rig. */
+    function applyOut() {
+      var o = T.leaveOut(got.all, got.allRuns, { reoffered: st.outRe, special: st.outSp, marked: got.marked });
+      got.rows = o.rows; got.runs = o.runs; got.out = o;
+      got.could = T.leaveOut(got.all, got.allRuns, { reoffered: true, special: true, marked: got.marked });
+      got.per = null; got.reveal = null; csvKey = null; rate = null;
+      shapeDirty = moreDirty = overDirty = timeDirty = true;
+    }
+    function outSaid() {
+      var o = got.out, c = got.could;
+      ['trOutRe', 'trOutSpecial'].forEach(function (id) {
+        $(id).setAttribute('aria-pressed', (id === 'trOutRe' ? st.outRe : st.outSp) ? 'true' : 'false');
+      });
+      var dayList = function (days) {
+        return days.slice(0, 4).map(function (d) { return d.name.replace(/ \(marked by you\)$/, '') + ' ' + shortDay(d.day); })
+          .join(', ') + (days.length > 4 ? ' and ' + (days.length - 4) + ' more' : '');
+      };
+      var said;
+      if (!st.outRe && !st.outSp) {
+        said = 'In this range: ' + plural(c.reoffered, 're-offered or raised card') + '; '
+          + (c.days.length ? plural(c.days.length, 'special day') + ' (' + dayList(c.days) + '), '
+            + plural(c.special, 'offer') + ' on them' : 'no special day') + '. Every figure counts them.';
+      } else {
+        var before = T.ruler(got.all, st.top), now = got.ruler;
+        said = 'Left out: ' + plural(o.removed, 'offer') + ' of ' + got.all.length.toLocaleString()
+          + (st.outRe ? ' · ' + plural(o.reoffered, 're-offered or raised card') : '')
+          + (st.outSp ? ' · ' + (o.days.length ? plural(o.days.length, 'special day') + ' (' + dayList(o.days) + ')'
+            : 'no special day in this range') : '')
+          + (before.cut !== null && now && now.cut !== null ? '. Good moves from ≥ ' + money2(before.cut) + ' to ≥ '
+            + money2(now.cut) + '/hr' : '') + '. Kept in the record and the CSV.';
+      }
+      $('trOutSaid').textContent = said;
+    }
+    function plural(n, word) { return n.toLocaleString() + ' ' + word + (n === 1 ? '' : 's'); }
+
+    /* --- the Overview (round B) ---------------------------------------------------
+       When: trends.js overviewWhen (the best three and weakest two windows,
+       or the three leading ones where none is clear, and the untried hours).
+       Where: trends.js towns over the offers the page's list already holds.
+       Outliers: trends.js axisCap over the range's $/hr. Wording is history —
+       when offers paid best, where they started — never what to do. */
+    var GROUP_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'weekday', 'weekend day'];
+    function drawOverview(rows) {
+      outSaid();
+      drawOvWhen(rows);
+      drawOvWhere();
+      drawOvOutliers(rows);
+      placesLink();
+    }
+    function winRow(w, kind, i) {
+      var tag = kind === 'best' ? 'clearly above' : kind === 'worst' ? 'clearly below' : 'leading, not yet clear';
+      var cls = kind === 'best' ? 'above' : kind === 'worst' ? 'below' : 'lead';
+      var nights = 'on ' + w.nights + ' ' + GROUP_DAYS[w.group] + (w.nights === 1 ? '' : 's') + ', '
+        + w.online.toFixed(1) + ' h online';
+      var earned = w.takes ? 'earned ' + FMT.perHour(w.earnedRate) + '/hr on the ' + plural(w.takes, 'offer')
+        + ' you ticked ✓ (a floor, before costs)' : 'no offer ticked ✓ here';
+      return '<li><button type="button" class="ovrow ' + cls + '" data-win="' + kind + '-' + i + '">'
+        + '<span class="tag">' + tag + '</span><b>' + esc(w.name) + '</b> · ' + w.rate.toFixed(1) + ' good/hr'
+        + (w.waitMin ? ' · a good offer about every ' + w.waitMin + ' min' : ' · no good offer')
+        + '<small>' + esc(earned + ' · ' + nights) + '</small></button></li>';
+    }
+    function drawOvWhen(rows) {
+      var host = $('trOvWhen');
+      if (!rows.length || cut() === null) { host.innerHTML = '<p class="hint">Nothing left to rank.</p>'; $('trOvUntried').textContent = ''; return; }
+      var w = got.win = T.overviewWhen(rows, got.runs, { cut: cut() });
+      var ref = w.ref === null ? '—' : w.ref.toFixed(1);
+      var s = '';
+      if (w.best.length) {
+        s += '<p class="ovsub">Good offers came clearly more often than this range\'s ' + ref + ' good/hr:</p><ol class="ovlist">'
+          + w.best.map(function (x, i) { return winRow(x, 'best', i); }).join('') + '</ol>';
+      } else {
+        s += '<p class="ovsub"><b>No window clearly better yet</b> than this range\'s ' + ref + ' good/hr. Highest so far:</p>'
+          + (w.leading.length ? '<ol class="ovlist">' + w.leading.map(function (x, i) { return winRow(x, 'leading', i); }).join('')
+            + '</ol>' : '<p class="hint">No window has ' + w.floorHours + ' h online on ' + w.floorDays + ' days yet.</p>');
+      }
+      s += w.worst.length ? '<p class="ovsub">Good offers came clearly less often:</p><ol class="ovlist">'
+        + w.worst.map(function (x, i) { return winRow(x, 'worst', i); }).join('') + '</ol>'
+        : '<p class="ovsub">No window clearly weaker.</p>';
+      host.innerHTML = s;
+      var un = w.untried;
+      $('trOvUntried').textContent = un.length ? 'Not tried (no minute online and no card in this range, so not '
+        + 'called weak): ' + un.slice(0, 6).map(function (u) { return u.name; }).join('; ')
+        + (un.length > 6 ? '; and ' + (un.length - 6) + ' more' : '') + '.' : '';
+      how('trOvWhen', 'When (the Overview)', 'A window is 1 to ' + w.maxLen + ' whole clock hours in a row on one weekday, '
+        + 'on weekdays (Mon–Fri) or on weekends (Sat–Sun), the driver\'s days (4am to 4am). Its figure is good offers '
+        + '(top ' + st.top + '%, ≥ ' + money2(cut()) + '/hr) per hour online, the grid\'s own. A window needs ' + w.floorHours
+        + ' h online on ' + w.floorDays + ' days. "Clearly" means its 99% interval, widened for how much the nights swing '
+        + 'at that window\'s length (×' + w.phi.join(', ×') + ' for 1 to ' + w.maxLen + ' hours), lies wholly above or below '
+        + 'this range\'s ' + ref + ' good/hr — and the 99% is shared over all ' + w.searched + ' windows looked at, so '
+        + 'about 1 range in 100 shows a clear window by chance. Of the clear ones, the most clearly different is taken '
+        + 'first and no two share an hour; they are then listed by good per hour. Earned is the card pay of the offers '
+        + 'you ticked ✓ over the window\'s hours online, before costs: a floor, since a card nobody marked is not counted.');
+    }
+    function drawOvWhere() {
+      var host = $('trOvWhere');
+      if (!held || held.days !== rangeDays() || cut() === null) {
+        host.innerHTML = '<p class="hint">Towns come from the offers list for this range; it has not loaded yet.</p>';
+        return;
+      }
+      var MV = window.MapView, A = window.Advice;
+      if (!MV || !A || typeof MV.townOf !== 'function') { host.innerHTML = ''; return; }
+      var marked = got.marked;
+      var tw = T.towns(held.offers, {
+        cut: cut(), townOf: function (v) { return MV.townOf(v, A.area); },
+        keep: function (o) {
+          if (o.hidden) return false;
+          if (st.outRe && o.reoffered === true) return false;
+          var t = typeof o.firstAt === 'number' ? o.firstAt : o.at;
+          return !(st.outSp && typeof t === 'number' && T.specialDayOf(T.dayKeyOf(t), marked));
+        }
+      });
+      function list(end, lead) {
+        var e = tw[end], top = e.ranked.slice(0, 3);
+        if (!top.length) {
+          return '<p class="ovsub">' + lead + ': no town with ' + tw.minN + ' offers on ' + tw.minDays + ' days yet ('
+            + plural(e.thin, 'town') + ' under that; ' + plural(e.unnamed, 'offer') + ' name none).</p>';
+        }
+        return '<p class="ovsub">' + lead + ', by share good:</p><ol class="ovlist">' + top.map(function (x) {
+          return '<li class="ovrow' + (x.shade ? ' ' + x.shade : '') + '">' + (x.shade ? '<span class="tag">clearly '
+            + x.shade + '</span>' : '') + '<b>' + esc(x.town) + '</b> · ' + Math.round(x.share * 100) + '% good · typical '
+            + FMT.perHour(x.typical) + '/hr<small>' + plural(x.n, 'offer') + ' on ' + plural(x.days, 'day') + '</small></li>';
+        }).join('') + '</ol>';
+      }
+      var capped = typeof held.total === 'number' && held.total > held.offers.length;
+      host.innerHTML = list('pickup', 'Pickups paid best in') + list('dropoff', 'Drop-offs left you in')
+        + '<p class="hint">The towns printed on the cards, against this range\'s ' + Math.round((tw.share || 0) * 100)
+        + '% good; typical is ' + esc(phWords()) + '.' + (capped ? ' Over the newest ' + held.offers.length.toLocaleString()
+          + ' offers the list holds.' : '') + '</p>';
+      how('trOvWhere', 'Where (the Overview)', 'A town is the one the card printed at that end (the Targets lines\' rule), '
+        + 'from the offers the Offers list holds for this range. Listed from ' + tw.minN + ' offers on ' + tw.minDays
+        + ' days, by the share good; "clearly" where a 99% interval on the share, shared over the towns listed, leaves '
+        + 'out the range\'s share. A pickup is usually a restaurant with no town on the card, so pickups name a town '
+        + 'less often than drop-offs.');
+    }
+    function drawOvOutliers(rows) {
+      var vals = [];
+      rows.forEach(function (r) { if (r.ok && r.perHour !== null) vals.push(r.perHour); });
+      var ac = got.cap = T.axisCap(vals), p = $('trOvOutliers'), box2 = $('trOvOutList');
+      p.hidden = !ac.cap;
+      if (!ac.cap) { box2.hidden = true; box2.innerHTML = ''; return; }
+      p.innerHTML = '<button type="button" id="trOutlierGo" aria-expanded="' + (!box2.hidden) + '">↑ ' + plural(ac.above, 'offer')
+        + ' above ' + FMT.perHour(ac.cap) + '/hr</button> drawn at the edge of the charts, kept in every figure.';
+      $('trOutlierGo').onclick = function () {
+        box2.hidden = !box2.hidden;
+        this.setAttribute('aria-expanded', String(!box2.hidden));
+        if (!box2.hidden) box2.innerHTML = outlierTable(T.outliers(got.rows, ac.cap));
+      };
+      if (!box2.hidden) box2.innerHTML = outlierTable(T.outliers(rows, ac.cap));
+    }
+    var APP_NAME = { uber: 'Uber', doordash: 'DoorDash' };
+    function outlierTable(list) {
+      return '<table><thead><tr><th>when</th><th>app</th><th>pay</th><th>min</th><th>mi</th><th>$/hr</th></tr></thead><tbody>'
+        + list.slice(0, 50).map(function (b) {
+          return '<tr><td>' + esc(shortDay(b.day) + ' ' + clockWords(new Date(b.t))) + (b.reoffered ? ' ↻' : '')
+            + (b.taken ? ' ✓' : '') + '</td><td>' + (APP_NAME[b.app] || '—') + '</td><td>' + (b.pay === null ? '—' : FMT.pay(b.pay))
+            + '</td><td>' + (b.minutes === null ? '—' : Math.round(b.minutes)) + '</td><td>'
+            + (b.miles === null ? '—' : b.miles.toFixed(1)) + '</td><td>' + FMT.perHour(b.perHour) + '</td></tr>';
+        }).join('') + '</tbody></table><p class="hint">Pay before costs; $/hr ' + esc(afterCost()) + '. ↻ re-offered or '
+        + 'raised, ✓ you ticked it.' + (list.length > 50 ? ' The highest 50 of ' + list.length + '.' : '') + '</p>';
+    }
+    // The places report's link, asked once (/api/placeslink, as the Strategy
+    // tab's line asks it): When & where and Offers around you are the GPS view.
+    var placesAsked = false;
+    function placesLink() {
+      if (placesAsked) return;
+      placesAsked = true;
+      fetch('/api/placeslink', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (a) {
+        var href = a && a.ok === true && typeof a.href === 'string' ? a.href : '';
+        if (href !== 'places/#strategy' && !/^https?:\/\/[^\s"<>]+$/.test(href)) return;
+        var base = href.replace(/#.*$/, '');
+        $('trOvPlaces').setAttribute('href', base + '#whenwhere');
+        $('trToWw').setAttribute('href', base + '#whenwhere');
+        $('trOvWhereLink').hidden = false;
+      }).catch(function () {});
+    }
+    // A window pressed: "Every chart" opened on the grid in good per hour,
+    // the window's cells marked, and the panel looking at the window whole.
+    function openWindow(key) {
+      var p = key.split('-'), w = got.win && got.win[p[0]] && got.win[p[0]][Number(p[1])];
+      if (!w) return;
+      st.stat = 'goodRate';
+      cellPick = { dows: w.dows, hours: w.hours, cells: w.cells, name: w.name };
+      $('trMore').open = true;
+      if (moreDirty) drawMore(got.rows); else drawWhen(got.rows);
+      drawRuler(got.rows);
+      $('trGrid').after($('trCell'));
+      drawCell(got.rows);
+      // The grid opened where the window is, after its own first-hour scroll.
+      post(function () {
+        var tw = $('trGrid'), td = tw.querySelector('td.picked'), th = tw.querySelector('thead th');
+        if (td && th && tw.scrollWidth > tw.clientWidth) tw.scrollLeft = Math.max(0, td.offsetLeft - th.offsetWidth);
+        tw.scrollIntoView({ block: 'start' });
+      });
+      $('trCell').focus({ preventScroll: true });
+    }
+    $('trOvWhen').addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('button[data-win]') : null;
+      if (b && got) openWindow(b.getAttribute('data-win'));
+    });
+    function pressOut(which) {
+      if (which === 're') st.outRe = !st.outRe; else st.outSp = !st.outSp;
+      if (!got) return;
+      applyOut();
+      cellPick = null;
+      draw('all');
+    }
+    $('trOutRe').addEventListener('click', function () { pressOut('re'); });
+    $('trOutSpecial').addEventListener('click', function () { pressOut('sp'); });
+    document.addEventListener('offers:held', function (e) {
+      held = e && e.detail ? e.detail : null;
+      if (got && got.rows && showing()) drawOvWhere();
+    });
+
+    /* --- the owner's special days (round B) ----------------------------------
+       /api/specialdays: dates only, kept by this server so every page it
+       serves agrees. A press marks or unmarks one day and the answer is read
+       again, so the switch and the calendar's marks follow at once. */
+    function drawSpecial() {
+      var days = got ? got.marked : [];
+      $('trSpecialList').innerHTML = days.length ? 'Marked by you: ' + days.map(function (d) {
+        return '<span class="sday">' + esc(shortDay(d) + ' ' + d.slice(0, 4)) + '<button type="button" data-unmark="' + esc(d)
+          + '" aria-label="Unmark ' + esc(dayWords(d)) + '">×</button></span>';
+      }).join('') : '';
+    }
+    function sendSpecial(body) {
+      $('trSpecialSaid').textContent = 'Saving…';
+      fetch('/api/specialdays', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(function (r) { return r.json().catch(function () { return null; }); })
+        .then(function (a) {
+          if (!a || a.ok !== true || !Array.isArray(a.days)) {
+            $('trSpecialSaid').textContent = a && a.error ? 'Not saved: ' + a.error + '.' : 'Not saved.';
+            return;
+          }
+          $('trSpecialSaid').textContent = '';
+          if (!got) return;
+          got.marked = a.days;
+          applyOut();
+          draw('all');
+        }).catch(function () { $('trSpecialSaid').textContent = 'Cannot reach the server.'; });
+    }
+    $('trSpecialAdd').addEventListener('click', function () {
+      var v = $('trSpecialDate').value;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(v)) sendSpecial({ add: v });
+    });
+    $('trSpecialList').addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('button[data-unmark]') : null;
+      if (b) sendSpecial({ remove: b.getAttribute('data-unmark') });
+    });
+
+    /* --- one sentence under each chart (the UX review's N1, J1) ----------------
+       A chart's note shows its first sentence (and the chance line where its
+       squares are coloured); the rest — how it is worked out — goes to the
+       one "How this is measured" fold, under the chart's name. */
+    var HOW_ORDER = ['trOvWhen', 'trOvWhere', 'trGridNote', 'trHourNote', 'trCalNote', 'trTimeNote', 'trThirdsNote',
+                     'trSameNote', 'trDailyNote', 'trGoodNote', 'trWeekNote', 'trScatterNote'];
+    var HOW = Object.create(null);
+    function how(id, title, text) {
+      HOW[id] = { title: title, text: text };
+      post(function () {
+        $('trHowBody').innerHTML = HOW_ORDER.filter(function (k) { return HOW[k] && HOW[k].text; }).map(function (k) {
+          return '<h5>' + esc(HOW[k].title) + '</h5><p>' + esc(HOW[k].text) + '</p>';
+        }).join('');
+      });
+    }
+    function note(id, title, text) {
+      var chance = text.indexOf(CHANCE) >= 0;
+      var t = text.replace(CHANCE, '').replace(/\s+$/, '');
+      var m = /^([\s\S]*?[.!?])(\s+[\s\S]*)?$/.exec(t);
+      var first = m ? m[1] : t, rest = m && m[2] ? m[2].trim() : '';
+      $(id).textContent = first + (chance ? ' ' + CHANCE : '');
+      how(id, title, rest);
     }
     // A figure in the chosen stat: dollars an hour, or good offers an hour.
     function statFmt(v) {
@@ -7762,7 +8176,8 @@
     }
 
     function drawDaily(keys, line) {
-      var m = st.metric, name = T.METRIC_NAMES[m];
+      var m = st.metric, name = m === 'perHour' ? phWords() : m === 'pay' ? 'pay (before costs)'
+        : m === 'perMile' ? '$/mi (pay before costs)' : T.METRIC_NAMES[m];
       $('trDailyHead').textContent = (st.by === 'week' ? 'Each week' : 'Each day') + ' · ' + name;
       var med = line.map(function (e) { return e && e.metrics[m].n ? e.metrics[m].p50 : null; });
       var thin = line.map(function (e) { return !e || e.metrics[m].n < T.DAY_MIN; });
@@ -7774,6 +8189,7 @@
         series: [
           { vals: line.map(function (e) { return e ? e.apps.uber[m] : null; }), cls: 'uber' },
           { vals: line.map(function (e) { return e ? e.apps.doordash[m] : null; }), cls: 'dash' },
+          { vals: line.map(function (e, i) { return thin[i] ? null : e.metrics[m].p90; }), cls: 'p90' },
           { vals: med, cls: 'med', dots: 'dot', hollow: thin }
         ],
         bars: line.map(function (e) { return e ? e.n : 0; }),
@@ -7787,14 +8203,17 @@
         },
         pick: function (i) { if (line[i]) pickPeriod(keys[i]); }
       });
-      $('trDailyNote').textContent = 'Press a ' + (st.by === 'week' ? 'week' : 'day') + ' to list its offers. A hollow '
+      note('trDailyNote', 'Each day or week', 'Press a ' + (st.by === 'week' ? 'week' : 'day') + ' to list its offers. A hollow '
         + 'point rests on fewer than ' + T.DAY_MIN + ' counted offers and has no band; an app\'s line needs '
         + T.DAY_MIN + ' of its own. Offers with the app unread count in the bars and the median, not in an app\'s line. '
-        + 'Rows marked suspect or "pay unread" are counted in the bars and left out of every figure.';
+        + 'Rows marked suspect or "pay unread" are counted in the bars and left out of every figure.');
     }
 
     function drawHourly(rows) {
       var host = $('trHourly'), legend = $('trHourLegend');
+      var rv = got.reveal || (got.reveal = T.reveals(got.rows, got.runs));
+      $('trMonths').hidden = !rv.monthVsLast;
+      if (!rv.monthVsLast && st.months) { st.months = false; $('trMonths').setAttribute('aria-pressed', 'false'); }
       var labels = T.HOUR_ORDER.map(hourWords);
       var good = st.stat === 'goodRate', earned = st.stat === 'earned', rate = good || earned;
       var opt = function (extra) {
@@ -7812,9 +8231,9 @@
       // online, waiting included, and is not the figure the line is held to.
       // Never one per hour: the line is not tuned to the hour (Settled).
       var yours = !rate && typeof got.target === 'number'
-        ? { v: got.target, label: 'your line ' + FMT.perHour(got.target) } : null;
-      var yoursLegend = yours ? '<span><i class="yourline"></i>your line (' + esc(FMT.perHour(got.target))
-        + ', one figure)</span>' : '';
+        ? { v: got.target, label: 'panel target ' + FMT.perHour(got.target) + ' (not Good)' } : null;
+      var yoursLegend = yours ? '<span><i class="yourline"></i>panel target (' + esc(FMT.perHour(got.target))
+        + ', one figure; not Good)</span>' : '';
       var nn = function (e) {
         return good ? e.good + ' good in ' + (e.hours || 0).toFixed(1) + ' h'
           : earned ? e.takes + ' takes in ' + (e.hours || 0).toFixed(1) + ' h' : 'n=' + e.n;
@@ -7835,9 +8254,9 @@
               + statFmt(ca[i].value) + ' (' + nn(ca[i]) + ')';
           }
         });
-        $('trHourNote').textContent = 'Compare mode: period A dashed, B solid, by the hour the card came up. Bars: '
+        note('trHourNote', 'Hour of day', 'Compare mode: period A dashed, B solid, by the hour the card came up. Bars: '
           + (rate ? 'hours online' : 'offers') + ' in B. A hollow B point rests ' + floorWords + '; A\'s points are '
-          + 'all drawn hollow. Leave compare above the grid.';
+          + 'all drawn hollow. Leave compare above the grid.');
         return;
       }
       if (st.months) {
@@ -7858,9 +8277,9 @@
               + mw(mo.before) + ' ' + statFmt(b[i].value) + ' (' + nn(b[i]) + ')';
           }
         });
-        $('trHourNote').textContent = 'The newest month in the range against the month before it, by hour. Bars: '
+        note('trHourNote', 'Hour of day', 'The newest month in the range against the month before it, by hour. Bars: '
           + (rate ? 'hours online' : 'offers') + ' this month. A hollow point rests ' + floorWords + '.'
-          + (b.every(function (e) { return !e.n; }) ? ' The range holds nothing from the month before: press All.' : '');
+          + (b.every(function (e) { return !e.n; }) ? ' The range holds nothing from the month before: press All.' : ''));
         return;
       }
       var hs = T.hourly(rows, opt());
@@ -7891,17 +8310,16 @@
               + ' (n=' + e.n + ' on ' + e.days + ' days)');
         }
       });
-      $('trHourNote').textContent = 'Clock hour the card came up, 4am first so a night reads as one stretch. '
+      note('trHourNote', 'Hour of day', 'Clock hour the card came up, 4am first so a night reads as one stretch. '
         + (st.hourDays === 'weekend' ? 'Weekends are the driver\'s Saturday and Sunday: 1am on a Saturday is Friday night. '
            : st.hourDays === 'weekday' ? 'Weekdays are the driver\'s Monday to Friday: 1am on a Saturday is Friday night. ' : '')
         + (good ? 'Good offers (top ' + st.top + '%) over the minutes the rig was scanning in that hour, a run split '
            + 'across the hours it ran through. ' : '')
         + (earned ? 'The pay of the offers you ticked taken over every minute online in that hour, waiting included. '
-           + 'Your line is not drawn here: it is held against an offer\'s $/hr, not pay over time online. ' : '')
-        + (yours ? 'The dashed line is your line, the target the panel judges against now: one figure for every hour, '
+           + 'The panel target is not drawn here: it is held against an offer\'s $/hr, not pay over time online. ' : '')
+        + (yours ? 'The dashed line is the panel target, the one the panel judges against now — not Good: one figure for every hour, '
            + 'for reading against, not a line per hour. ' : '')
-        + 'A hollow point rests ' + floorWords + '. A picture of the record: the accept line is not tuned to the '
-        + 'hour (Settled).';
+        + 'A hollow point rests ' + floorWords + '.');
     }
 
     function drawGrid(rows) {
@@ -7913,7 +8331,8 @@
       for (var d = 0; d < 7; d++) {
         var cells = g.cells.slice(d * 24, d * 24 + 24);
         body += '<tr><td>' + T.WEEKDAYS[cells[0].dow] + '</td>' + cells.map(function (c) {
-          var picked = cellPick && cellPick.from === undefined && cellPick.dow === c.dow && cellPick.hour === c.hour
+          var picked = cellPick && cellPick.from === undefined && (cellPick.cells
+            ? cellPick.cells.indexOf(c.dow * 24 + c.hour) >= 0 : cellPick.dow === c.dow && cellPick.hour === c.hour)
             ? ' picked' : '';
           var press = ' data-cell="' + c.dow + '-' + c.hour + '" tabindex="0" role="button"';
           var where = T.WEEKDAYS[c.dow] + ' ' + hourWords(c.hour);
@@ -7953,9 +8372,9 @@
         }).join('') + '</tr></tfoot>';
       $('trGrid').innerHTML = '<table class="grid24"><thead>' + head + '</thead><tbody>' + body + '</tbody>' + foot + '</table>';
       post(function () { openAtFirst($('trGrid'), g.cells, function (c) { return !c.off; }); });
-      var note;
+      var nt;
       if (good) {
-        note = 'Each cell: good offers (top ' + st.top + '%, ≥ ' + (cut() === null ? '—' : money2(cut())) + '/hr) per hour '
+        nt = 'Each cell: good offers (top ' + st.top + '%, ≥ ' + (cut() === null ? '—' : money2(cut())) + '/hr) per hour '
           + 'the rig was scanning in that weekday and clock hour, and the good count under it. Shaded only where a 99% '
           + 'Poisson interval on the count, over the cell\'s hours, lies wholly above (green) or below (red) the range\'s '
           + (g.ref === null ? '—' : g.ref.toFixed(2)) + ' an hour, and only at ' + g.floorHours + ' hours online on '
@@ -7965,7 +8384,7 @@
           + 'rig was scanning, carrying included; the places report\'s When & where counts good per hour waited (each '
           + 'gap capped at 10 min, none while carrying): different hours, so the two figures differ by design.';
       } else if (earned) {
-        note = 'Each cell: the card\'s pay of the offers you ticked taken (' + (netOn() ? 'net of ' + money2(got.cpm)
+        nt = 'Each cell: the card\'s pay of the offers you ticked taken (' + (netOn() ? 'net of ' + money2(got.cpm)
           + '/mi' : 'gross') + ') over every minute the rig was scanning in that weekday and hour, waiting included, '
           + 'and the takes under it. A floor on what you earned: an offer nobody ticked is not counted as taken'
           + (g.unpaid ? ', and ' + g.unpaid + ' take' + (g.unpaid === 1 ? '' : 's') + ' whose pay was not read add nothing' : '')
@@ -7978,8 +8397,9 @@
           + (g.clamped ? ' ' + g.clamped + ' cell' + (g.clamped === 1 ? '' : 's') + ' holding a take that paid less than its '
              + 'miles cost ' + (g.clamped === 1 ? 'is' : 'are') + ' not shaded: the interval cannot weigh a loss.' : '');
       } else {
-        var w = st.stat === 'p50' ? 'median' : st.stat.toUpperCase();
-        note = 'Each cell: the ' + w + ' $/hr of the offers in that weekday and clock hour, and its n. Shaded only where '
+        var w = STAT_PLAIN[st.stat] || 'typical';
+        nt = 'Each cell: the ' + w + ' ' + phWords() + ' of the offers in that weekday and clock hour, and how many '
+          + 'offers under it. Shaded only where '
           + 'the 99% interval of its ' + w + ' lies wholly above (green) or below (red) the range\'s ' + w + ' of '
           + (g.ref === null ? '—' : FMT.perHour(g.ref)) + ', and only at ' + g.floor + ' offers on ' + g.floorDays
           + ' days; under that a cell is grey and shows its n. The interval is widened by how much a night\'s offers '
@@ -7989,9 +8409,9 @@
              : st.stat === 'p75' ? 'A P75\'s interval needs a few more offers than a median\'s; a cell short of them stays grey.'
              : 'The two were set together: with no difference at all, under 1 cell in 100 is shaded.');
       }
-      $('trGridNote').textContent = note + ' Hatched: off, no minute online and no card. Weekdays are the driver\'s '
+      note('trGridNote', 'Weekday × hour', nt + ' Hatched: off, no minute online and no card. Weekdays are the driver\'s '
         + '(4am to 4am). The last row: of the good offers in each hour, the share from Uber. Press a cell to look closer. '
-        + CHANCE;
+        + CHANCE);
       $('trGrid').onclick = function (e) {
         var td = e.target.closest ? e.target.closest('td[data-cell]') : null;
         if (td) openCell(td.getAttribute('data-cell'));
@@ -8056,14 +8476,14 @@
       post(function () { openAtFirst($('trGrid'), g.cells, function (c) { return !(c.a.off && c.b.off); }); });
       $('trGrid').onclick = null;
       $('trGrid').onkeydown = null;
-      $('trGridNote').textContent = 'B vs A: each cell B\'s ' + statWords() + ' minus A\'s, B\'s n (or hours) over A\'s '
+      note('trGridNote', 'Weekday × hour', 'B vs A: each cell B\'s ' + statWords() + ' minus A\'s, B\'s n (or hours) over A\'s '
         + 'under it. Green where B is clearly higher, red where clearly lower, only where both periods meet the grid\'s '
         + 'floor and a 99% interval on the difference leaves out zero: '
         + (good ? 'the two rates\' ratio, exact on the good counts, widened ×' + g.phi.toFixed(2) + ' for how the nights swing.'
            : earned ? 'each period\'s interval at 93% (a pay-weighted count, widened ×' + g.phi.toFixed(2)
              + ') must not overlap the other\'s, which is 99% or stricter.'
            : 'each period\'s order-statistic interval at 93% must not overlap the other\'s, which is 99% or stricter.')
-        + ' With no difference at all, under 1 cell in 100 is shaded. Hatched: off in both. ' + CHANCE;
+        + ' With no difference at all, under 1 cell in 100 is shaded. Hatched: off in both. ' + CHANCE);
     }
 
     function openCell(key) {
@@ -8094,7 +8514,9 @@
       $('trCell').innerHTML = '';
       [].forEach.call(box.querySelectorAll('td.picked, .tl i.picked'), function (x) { x.classList.remove('picked'); });
       if (was) {
-        var back = was.from !== undefined
+        var back = was.cells ? $('trGrid').querySelector('td[data-cell="' + Math.floor(was.cells[0] / 24) + '-'
+          + (was.cells[0] % 24) + '"]')
+          : was.from !== undefined
           ? $('trTime').querySelector('i[data-from="' + was.from + '"][data-hour="' + was.hour + '"]')
           : $('trGrid').querySelector('td[data-cell="' + was.dow + '-' + was.hour + '"]');
         if (back) back.focus();
@@ -8110,13 +8532,13 @@
     function drawCell(rows) {
       var box2 = $('trCell');
       if (!cellPick) { box2.hidden = true; box2.innerHTML = ''; return; }
-      var c = T.cellDetail(rows, got.runs, cellPick.dow, cellPick.hour,
-                           statOpts({ from: cellPick.from, to: cellPick.to }));
+      var c = cellPick.cells ? T.cellDetail(rows, got.runs, cellPick.dows, cellPick.hours, statOpts())
+        : T.cellDetail(rows, got.runs, cellPick.dow, cellPick.hour, statOpts({ from: cellPick.from, to: cellPick.to }));
       var good = st.stat === 'goodRate', earned = st.stat === 'earned';
-      var span = hourWords(c.hour) + '–' + hourWords((c.hour + 1) % 24);
-      var where = c.from ? (c.from === c.to ? dayWords(c.from) : shortDay(c.from) + ' – ' + shortDay(c.to)) + ', ' + span
+      var span = cellPick.cells ? '' : hourWords(c.hour) + '–' + hourWords((c.hour + 1) % 24);
+      var where = cellPick.cells ? cellPick.name : c.from ? (c.from === c.to ? dayWords(c.from) : shortDay(c.from) + ' – ' + shortDay(c.to)) + ', ' + span
         : ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][c.dow] + ' ' + span;
-      var s = '<div class="cphead"><h5 id="trCellHead">' + esc(where) + ' <em>· ' + c.offers + ' offers on ' + c.days
+      var s = '<div class="cphead"><h5 id="trCellHead">' + esc(where) + ' <em>· ' + plural(c.offers, 'offer') + ' on ' + c.days
         + ' days, ' + c.hours.toFixed(1) + ' hours online</em></h5>'
         + '<button type="button" class="cpclose" id="trCellClose" aria-label="Close this cell">×</button></div>';
       if (c.off) {
@@ -8131,7 +8553,10 @@
       var H = 86, L = 12, R = 16, base = 58;
       var vals = c.dots.map(function (d) { return d[0]; });
       var hi = Math.max.apply(null, vals.concat([c.cut || 0, 1]));
-      var sx = scale([0, hi], { min: 0 });
+      var capAt = got.cap && got.cap.cap && hi > got.cap.cap ? got.cap.cap : null;
+      if (capAt !== null) hi = Math.max(capAt, c.cut || 0);
+      var past = capAt === null ? [] : vals.filter(function (v) { return v > capAt; });
+      var sx = scale([0, hi], { min: 0, max: hi });
       var x = function (v) { return L + (v - sx.lo) / (sx.hi - sx.lo) * (W - L - R); };
       var svg = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="'
         + esc('Each offer\'s $/hr in ' + where + (c.cut !== null ? ', the ruler at ' + money2(c.cut) : '')) + '">';
@@ -8141,7 +8566,7 @@
       svg += '<line class="ax" x1="' + L + '" x2="' + (W - R) + '" y1="' + (base + 4) + '" y2="' + (base + 4) + '"/>';
       var stack = Object.create(null), inOrder = c.dots.slice().sort(function (a, b) { return a[0] - b[0]; });
       inOrder.forEach(function (d) {
-        var px = x(d[0]), bin = Math.round(px / 5), lvl = stack[bin] = (stack[bin] || 0) + 1;
+        var px = x(capAt !== null && d[0] > capAt ? capAt : d[0]), bin = Math.round(px / 5), lvl = stack[bin] = (stack[bin] || 0) + 1;
         var cy = base - ((lvl - 1) % 10) * 5;
         var cls = d[2] === 1 ? 'uberdot' : d[2] === 2 ? 'dashdot' : 'dot';
         svg += '<circle class="' + cls + '" cx="' + px.toFixed(1) + '" cy="' + cy + '" r="2.4" fill-opacity=".8"/>';
@@ -8151,15 +8576,22 @@
         svg += '<line class="ruler" x1="' + x(c.cut).toFixed(1) + '" x2="' + x(c.cut).toFixed(1) + '" y1="4" y2="'
           + (base + 6) + '"/>';
       }
+      if (past.length) {
+        svg += '<text class="capmark" x="' + (W - R) + '" y="12" text-anchor="end">↑ ' + past.length + ' above '
+          + FMT.perHour(capAt) + '</text>';
+      }
       s += '<div class="legend"><span><i class="uber" style="height:8px;width:8px;border-radius:4px"></i>Uber</span>'
         + '<span><i class="dash" style="height:8px;width:8px;border-radius:4px"></i>DoorDash</span>'
         + '<span><i class="ring"></i>you ticked taken (' + c.taken + ')</span>'
         + (c.cut !== null ? '<span><i class="ruler"></i>good: top ' + st.top + '%, ≥ ' + esc(money2(c.cut)) + '</span>' : '')
-        + '</div>' + svg + '</svg>';
-      s += '<div class="cpfig"><span>P50 <b>' + (c.p50 === null ? '—' : FMT.perHour(c.p50)) + '</b></span>'
-        + '<span>P75 <b>' + (c.p75 === null ? '—' : FMT.perHour(c.p75)) + '</b></span>'
-        + '<span>P90 <b>' + (c.p90 === null ? '—' : FMT.perHour(c.p90)) + '</b></span>'
-        + '<span>n=' + c.n + '</span><span>good ' + c.good + '</span>'
+        + '</div>' + svg + '</svg>'
+        + (past.length ? '<p class="outlier"><button type="button" id="trCellPast" aria-expanded="false">↑ '
+          + plural(past.length, 'offer') + ' above ' + FMT.perHour(capAt) + '/hr, drawn at the edge</button></p>'
+          + '<div class="tw" id="trCellPastList" hidden></div>' : '');
+      s += '<div class="cpfig"><span>Typical <b>' + (c.p50 === null ? '—' : FMT.perHour(c.p50)) + '</b></span>'
+        + '<span>Top quarter <b>' + (c.p75 === null ? '—' : FMT.perHour(c.p75)) + '</b></span>'
+        + '<span>Top tenth <b>' + (c.p90 === null ? '—' : FMT.perHour(c.p90)) + '</b></span>'
+        + '<span>' + esc(phWords()) + '</span><span>' + plural(c.n, 'offer') + ' with a $/hr</span><span>good ' + c.good + '</span>'
         + (good ? '<span>good/hr online <b>' + statFmt(c.value) + '</b></span>' : '')
         + '<span>earned/hr online' + (netOn() ? ' (net)' : '') + ' <b>' + (c.earnedRate === null ? '—'
           : FMT.perHour(c.earnedRate)) + '</b> <small>' + c.takes + ' takes, ' + FMT.pay(c.earned || 0)
@@ -8210,6 +8642,21 @@
         });
       }
       $('trCellClose').onclick = closeCell;
+      if (past.length) {
+        $('trCellPast').onclick = function () {
+          var l = $('trCellPastList');
+          l.hidden = !l.hidden;
+          this.setAttribute('aria-expanded', String(!l.hidden));
+          if (!l.hidden) {
+            l.innerHTML = outlierTable(T.outliers(rows, capAt).filter(function (b) {
+              return cellPick.cells ? cellPick.cells.indexOf(new Date(b.t).getHours() + 24 * dateOf(b.day).getDay()) >= 0
+                : (cellPick.dow === null || cellPick.dow === undefined || dateOf(b.day).getDay() === cellPick.dow)
+                  && new Date(b.t).getHours() === cellPick.hour
+                  && (!cellPick.from || b.day >= cellPick.from) && (!cellPick.to || b.day <= cellPick.to);
+            }));
+          }
+        };
+      }
     }
     function clockWords(d) {
       var h = d.getHours(), m = d.getMinutes();
@@ -8234,14 +8681,12 @@
       });
       var tot = gp.reduce(function (a, e) { return { good: a.good + e.good, hours: a.hours + (e.hours || 0) }; },
                           { good: 0, hours: 0 });
-      $('trGoodNote').textContent = '"Good" is the ruler above: an offer at or over '
-        + (cut() === null ? '—' : money2(cut())) + '/hr, the top ' + st.top + '% of this range. It used to be the target '
-        + 'the panel judged each offer against at the time; the target moved over the weeks, so that count weighed one '
-        + 'day against a different line from the next. One fixed line for the whole range compares them fairly. '
+      note('trGoodNote', 'Good offers per hour online', '"Good" is the ruler above: an offer at or over '
+        + (cut() === null ? '—' : money2(cut())) + '/hr, the top ' + st.top + '% of this range. One fixed line for the whole range, so an old day and a new one are counted alike. '
         + 'Hours online are the Runs tab\'s runs of scanning, first card to last, cut at 4am like the cards, so a '
         + 'run past 4am gives its small hours to the night before: '
         + tot.good + ' good offers over ' + tot.hours.toFixed(1) + ' hours in all. Grouped by day or week as pressed '
-        + 'under "How it\'s changing". Descriptive; it feeds nothing.';
+        + 'beside these charts.');
     }
 
     function drawSpread(keys, line) {
@@ -8308,9 +8753,9 @@
         var w = l === 'earlier' ? 'earlier' : MONTHS[Number(l.slice(5, 7)) - 1] + ' ' + l.slice(0, 4);
         return '<span><i style="background:' + colours[i] + ';height:8px;width:8px;border-radius:4px"></i>' + esc(w) + '</span>';
       }).join('');
-      $('trScatterNote').textContent = 'Each dot an offer: its pay against its card\'s miles, coloured by month. '
+      note('trScatterNote', 'Pay against miles', 'Each dot an offer: its pay against its card\'s miles, coloured by month. '
         + (sc.points.length < sc.of ? sc.points.length + ' of ' + sc.of + ' drawn, evenly through time. ' : '')
-        + (out ? out + ' beyond the 99th percentile of either are off the edge. ' : '') + '$/mi is for reading, not a rule.';
+        + (out ? out + ' beyond the 99th percentile of either are off the edge, kept in every figure. ' : '') + 'Pay before costs.');
     }
 
     function drawRate(rows) {
@@ -8360,13 +8805,12 @@
         + 'over that week\'s offers, read off as the price of a ' + rate.at.minutes + '-minute, ' + rate.at.miles
         + '-mile trip, with a 95% bootstrap interval. A week under ' + rate.minN + ' offers, or one whose minutes and '
         + 'miles move together too closely to tell apart, is "too thin" and drawn as no point. How the apps priced '
-        + 'what was offered; not a rule for what to take.';
+        + 'what was offered, pay before costs.';
     }
 
     function drawCompare(rows, fromInputs) {
       var a, b, wk = false;
-      if (fromInputs === 'week') { a = 'weekday'; b = 'weekend'; wk = true; }
-      else if (fromInputs) {
+      if (fromInputs) {
         a = { from: $('trAFrom').value || null, to: $('trATo').value || null };
         b = { from: $('trBFrom').value || null, to: $('trBTo').value || null };
       } else if ($('trAFrom').value && $('trBFrom').value && cmpRange === asked) {
@@ -8383,14 +8827,11 @@
       }
       // Compare mode (round three): Compare pressed with two date periods set
       // turns it on — the hour chart draws both and the grid can show B minus
-      // A — and Weekdays vs weekends, which the weekday x hour grid cannot
-      // set side by side, leaves it. A redraw keeps whichever is on.
+      // A. (The Weekdays vs weekends button that left it went in round B:
+      // the hour chart's chips set the two side by side.) A redraw keeps it.
       if (fromInputs === true) {
         st.cmp = a.from && b.from ? { a: a, b: b } : null;
         st.gridView = 'diff';
-        drawWhen(rows);
-      } else if (fromInputs === 'week' && st.cmp) {
-        st.cmp = null;
         drawWhen(rows);
       }
       var c = T.compare(rows, a, b, cut());
@@ -8404,13 +8845,13 @@
       };
       $('trCompare').innerHTML = '<table><thead><tr><th></th><th>' + esc(nameOf(a)) + '</th><th>' + esc(nameOf(b))
         + '</th></tr></thead><tbody>'
-        + row('offers', function (s) { return s.offers + ' <small>' + s.days + ' days</small>'; })
-        + row('counted', function (s) { return String(s.counted); })
+        + row('offers', function (s) { return s.offers + ' <small>' + plural(s.days, 'day') + '</small>'; })
+        + row('offers with a $/hr', function (s) { return String(s.counted); })
         + row('good (top ' + st.top + '%)', function (s) {
           return s.counted ? Math.round(s.good / s.counted * 100) + '% <small>' + s.good + '</small>' : '—';
         })
-        + row('median pay', med('pay')) + row('median $/hr', med('perHour')) + row('median $/mi', med('perMile'))
-        + row('median minutes', med('minutes')) + row('median miles', med('miles'))
+        + row('typical pay (before costs)', med('pay')) + row('typical ' + esc(phWords()), med('perHour'))
+        + row('typical $/mi', med('perMile')) + row('typical minutes', med('minutes')) + row('typical miles', med('miles'))
         + '</tbody></table>' + (wk ? '' : '<p class="hint">Driver days, both ends included. '
           + (st.cmp ? 'Compare mode is on: the hour chart above draws A dashed and B solid, and the grid shows B '
              + 'minus A. Leave it above the grid.' : 'Press Compare to draw both on the hour chart and B minus A on the '
@@ -8451,12 +8892,14 @@
               + ': off — no minute online and no card') + '"' : '') + '><em>' + dateOf(k).getDate() + '</em></div>';
             return;
           }
+          var spd = T.specialDayOf(k, got.marked);
           s += '<button type="button" class="tile ' + (d.enough ? (d.shade || '') : 'thin') + '" data-day="' + k + '" title="'
-            + esc(dayWords(k) + ': ' + d.n + ' offers, ' + statWords() + ' ' + statFmt(d.value) + ' (' + nWords(d) + ')'
+            + esc(dayWords(k) + (spd ? ' (' + spd + ')' : '') + ': ' + plural(d.n, 'offer') + ', ' + statWords() + ' ' + statFmt(d.value) + ' (' + nWords(d) + ')'
               + (d.hours ? ', ' + d.hours.toFixed(1) + ' hours online' : '')
               + (d.enough ? (d.shade ? ', ' + d.shade + ' the range\'s ' + statFmt(cal.ref) : '') : ', under the floor')
               + '; ' + waitWords(d) + '. Press to list its offers.') + '">'
-            + '<em>' + dateOf(k).getDate() + '</em><b>' + statFmt(d.value) + '</b>'
+            + '<em>' + dateOf(k).getDate() + '</em>' + (spd ? '<i class="sp" aria-label="' + esc(spd) + '">★</i>' : '')
+            + '<b>' + statFmt(d.value) + '</b>'
             + (d.enough ? '' : '<em>' + (good || earned ? (d.hours || 0).toFixed(1) + 'h' : 'n=' + d.counted) + '</em>')
             + '</button>';
         });
@@ -8470,6 +8913,7 @@
           + '</em></div>';
       });
       $('trCal').innerHTML = s + '</div>';
+      drawSpecial();
       $('trCal').onclick = function (e) {
         var b = e.target.closest ? e.target.closest('button[data-day]') : null;
         if (!b) return;
@@ -8487,7 +8931,7 @@
         + ordinal(dateOf(mo.now.through).getDate()) + '): ' + side(mo.now) + ' · '
         + (mo.before ? esc(mw(mo.before.month)) + ': ' + side(mo.before)
           : 'nothing of the month before in this range — press All to compare');
-      $('trCalNote').textContent = 'Each day: its ' + statWords() + ', counted against the one ruler above. '
+      note('trCalNote', 'Calendar', 'Each day: its ' + statWords() + ', counted against the one ruler above. '
         + 'Hatched: off, no card that day. Each day\'s title says how often a good offer came, from 2 hours online. '
         + (earned ? 'Earned is the pay of the offers you ticked taken over the day\'s hours online (a run past 4am '
            + 'gives its small hours to the night before, as its cards); a day is shaded where a 99% interval (each take weighted by its pay) lies wholly above '
@@ -8500,7 +8944,7 @@
            : 'Shaded by the grid\'s rule against the range\'s ' + statFmt(cal.ref) + '; a day under ' + cal.floor
            + ' counted offers, or too few for this figure\'s interval, is grey with its n. A week\'s figure is pooled over '
            + 'its offers and shaded on two days or more, as a grid cell.')
-        + ' Press a day to list its offers. ' + CHANCE;
+        + ' Press a day to list its offers. ' + CHANCE);
     }
     function ordinal(n) {
       var t = n % 100;
@@ -8512,6 +8956,9 @@
        over every month in the range. Shaded only once every third holds days
        of THIRDS_MONTHS months; under that, grey with n and days. */
     function drawThirds(rows) {
+      var rv = got.reveal || (got.reveal = T.reveals(got.rows, got.runs));
+      $('trThirdsBox').hidden = !rv.thirds;
+      if (!rv.thirds) return;
       var th = T.monthThirds(rows, got.runs, statOpts());
       var good = st.stat === 'goodRate', earned = st.stat === 'earned';
       var nOf = function (e) {
@@ -8527,13 +8974,13 @@
               + th.need + ' months in every third')) + '">' + statFmt(e.value) + '</td><td>' + esc(nOf(e)) + '</td><td>'
             + e.dates + '</td><td>' + e.months + '</td></tr>';
         }).join('') + '</tbody></table>';
-      $('trThirdsNote').textContent = 'The same figure in each third of the month, every month in the range together. '
+      note('trThirdsNote', 'Days of the month', 'The same figure in each third of the month, every month in the range together. '
         + 'A day-of-month effect (a payday, rent week) comes once a month, so it needs about three months to show at '
         + 'all: with one or two, each third is one or two paydays and whatever weekdays happened to fall in it. '
         + (th.gated ? 'Every third holds ' + th.need + ' months or more, so a third is shaded, by the grid\'s rule, where '
            + 'it clears the range\'s ' + statFmt(th.ref) + '.'
            : 'Not shaded: every third needs days from ' + th.need + ' months (now ' + th.thirds.map(function (e) {
-             return e.months; }).join(', ') + '). Press All for the longest record.') + ' ' + CHANCE;
+             return e.months; }).join(', ') + '). Press All for the longest record.') + ' ' + CHANCE);
     }
 
     /* --- the hour x date timeline (round three) -----------------------------------
@@ -8546,6 +8993,10 @@
        anything in it. Pressing a square opens the cell panel for its date(s)
        and hour. */
     function drawTimeline(rows) {
+      timeDirty = false;
+      var rv = got.reveal || (got.reveal = T.reveals(got.rows, got.runs));
+      $('trTimeBy').querySelector('button[data-tl="month"]').hidden = !rv.tlMonths;
+      if (!rv.tlMonths && st.tl === 'month') st.tl = 'week';
       var tl = T.timeline(rows, got.runs, statOpts({ by: st.tl }));
       var good = st.stat === 'goodRate', earned = st.stat === 'earned';
       [].forEach.call($('trTimeBy').querySelectorAll('button[data-tl]'), function (b) {
@@ -8610,13 +9061,13 @@
         var i = e.target.closest ? e.target.closest('i[data-from]') : null;
         if (i) { e.preventDefault(); openSquare(i); }
       };
-      $('trTimeNote').textContent = 'One row per ' + (tl.by === 'week' ? 'week (Monday 4am to Monday 4am)'
+      note('trTimeNote', 'Hour × date', 'One row per ' + (tl.by === 'week' ? 'week (Monday 4am to Monday 4am)'
         : tl.by === 'month' ? 'month (by the driver\'s day)' : 'driver day (4am to 4am)') + ', newest at the top; the clock '
         + 'hours across, 4am first. A square that meets the grid\'s floor prints its figure and is shaded by the grid\'s '
         + 'rule against the range\'s ' + statFmt(tl.ref) + '; under it the square is only tinted by its minutes online, '
         + 'with its figure and n in its title. One hour of one night can never meet the floor, so by days nearly every '
         + 'square is a tint: that is honest, not empty. Weeks and months pool enough to say more. Hatched: off. Press a '
-        + 'square to look closer. ' + CHANCE;
+        + 'square to look closer. ' + CHANCE);
     }
 
     /* --- one weekday over the weeks (round three) ------------------------------------
@@ -8627,6 +9078,19 @@
        GOOD_FLOOR_HOURS online for a rate); an off day is no point. Pressing a
        point lists that day's offers, as the calendar's tiles do. */
     function drawSame(rows) {
+      var rv = got.reveal || (got.reveal = T.reveals(got.rows, got.runs));
+      [].forEach.call($('trSameDow').querySelectorAll('button[data-dow]'), function (b) {
+        b.hidden = !rv.sameDow[Number(b.getAttribute('data-dow'))];
+      });
+      if (!rv.sameDow[st.sameDow]) {
+        var firstOk = [5, 6, 0, 4, 3, 2, 1].filter(function (d) { return rv.sameDow[d]; })[0];
+        if (firstOk === undefined) {
+          $('trSame').innerHTML = '';
+          $('trSameNote').textContent = 'Shown once the range holds ' + T.SAME_DOW_MIN + ' of a weekday with the rig on.';
+          return;
+        }
+        st.sameDow = firstOk;
+      }
       var sw = T.sameWeekday(rows, got.runs, st.sameDow, { cut: cut() });
       [].forEach.call($('trSameDow').querySelectorAll('button[data-dow]'), function (b) {
         b.setAttribute('aria-pressed', Number(b.getAttribute('data-dow')) === st.sameDow ? 'true' : 'false');
@@ -8665,10 +9129,10 @@
         });
       });
       var on = sw.days.filter(function (d) { return !d.off; }).length;
-      $('trSameNote').textContent = on + ' of ' + sw.days.length + ' ' + name + ' in the range had the rig on. Bars under '
+      note('trSameNote', 'One weekday over the weeks', on + ' of ' + sw.days.length + ' ' + name + ' in the range had the rig on. Bars under '
         + 'each: hours online that day (cut at 4am like the cards). A hollow point rests on fewer than '
         + T.DAY_MIN + ' offers (P90) or under ' + T.GOOD_FLOOR_HOURS + ' hours online (the two rates); an off day has no '
-        + 'point. Earned is the card\'s pay of the offers you ticked taken, gross. Press a point to list that day\'s offers.';
+        + 'point. Earned is the card\'s pay of the offers you ticked taken, gross. Press a point to list that day\'s offers.');
     }
 
     function drawShare(keys, line) {
@@ -8829,12 +9293,11 @@
           'suspect and pay-unread offers are in the counts above and out of every money figure; a re-read pay is used as re-read');
       }
       $('trWeekBody').innerHTML = html;
-      $('trWeekNote').textContent = 'Each line opens the view that explains it. Every figure is this tab\'s own, cut at '
+      note('trWeekNote', 'Week in review', 'Each line opens the view that explains it. Every figure is this tab\'s own, cut at '
         + 'the same clock hours (a week here is the hour × date chart\'s week row). Last week is set beside a rate, and '
         + 'an arrow drawn, only where both weeks have ' + floorWords + ' and the difference clears 99%; a count still '
         + 'running is set beside last week to the same day and hour. A slot is one evening, marked only where its '
-        + 'interval clears this range\'s good per hour at 99% shared over the slots. What happened, not advice: '
-        + 'nothing here reaches the verdict, the target or the rig.';
+        + 'interval clears this range\'s good per hour at 99% shared over the slots.');
     }
     function matchedTrip(e) { var m = (e && e.match) || {}; return m.status === 'matched' || m.status === 'picked'; }
     function paidRow(wr, row) {
@@ -8868,10 +9331,14 @@
                                                                         said: 'the week of ' + shortDay(st.week) } }));
         return;
       }
+      // Round B: the views it opens are under "Every chart", opened first
+      // (and drawn, if they never were) so the line lands on a drawn chart.
+      $('trMore').open = true;
+      if (moreDirty) drawMore(got.rows);
       if (where === 'quality') { $('trShape').open = true; to('trQuality'); return; }
       if (where === 'good') { st.stat = 'goodRate'; draw('stat'); to('trCalHead'); return; }
       if (where === 'gross' || where === 'net') { st.stat = 'earned'; st.net = where === 'net'; draw('stat'); to('trCalHead'); return; }
-      if (where === 'slots') { st.stat = 'goodRate'; st.tl = 'week'; draw('stat'); to('trTimeHead'); }
+      if (where === 'slots') { st.stat = 'goodRate'; st.tl = 'week'; $('trTimeFold').open = true; draw('stat'); to('trTimeHead'); }
     }
     $('trWeekBody').addEventListener('click', function (e) {
       var a = e.target.closest ? e.target.closest('a.wkline') : null;
@@ -8979,7 +9446,6 @@
       if (e.key === 'Escape') { e.preventDefault(); closeCell(); }
     });
     $('trCmpGo').addEventListener('click', function () { if (got && got.rows.length) drawCompare(got.rows, true); });
-    $('trCmpWk').addEventListener('click', function () { if (got && got.rows.length) drawCompare(got.rows, 'week'); });
 
     // The tab shown, the range pressed, the window resized.
     new MutationObserver(function () { refresh(); }).observe(app, { attributes: true, attributeFilter: ['data-view'] });
