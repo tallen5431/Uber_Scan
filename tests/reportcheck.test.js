@@ -129,6 +129,9 @@ ok('[privacy] the breakdown names no place, id or pay',
    !/Imaginary|Faketown|Mocksville|Elsewhere|Not Again|secret-ro|7\.13|9\.47|8\.21|8\.19|11\.37/.test(roText + JSON.stringify(how)));
 var srv = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
 var sw = /var REOFFER_WINDOW_MS = ([^;]+);/.exec(srv);
+var sg = /var REOFFER_GAP_MS = ([^;]+);/.exec(srv);
+eq('...and the gap', sg && sg[1].split('*').reduce(function (a, x) { return a * Number(x); }, 1), 60 * 1000);
+eq('pairs by gap: both of the invented pairs a minute or more apart', [how.pairs.withinAMinute, how.pairs.apart], [0, 2]);
 eq('the pair window is the server\'s own (server.js REOFFER_WINDOW_MS)', sw && sw[1].split('*').reduce(function (a, x) { return a * Number(x); }, 1), 30 * 60 * 1000);
 
 // A read the server cut, through the tool's own fetch (a fake server).

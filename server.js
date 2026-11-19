@@ -10026,6 +10026,7 @@ function latestPerOfferUncached(rows) {
  * default and says how many it takes out. */
 var REOFFER_SPAN_MS = 3 * 60 * 1000;
 var REOFFER_WINDOW_MS = 30 * 60 * 1000;
+var REOFFER_GAP_MS = 60 * 1000;     // a card is up well under a minute (see the pair half below)
 function placeKey(v) {
   return typeof v === 'string' ? v.toLowerCase().replace(/\s+/g, ' ').trim() : '';
 }
@@ -10054,7 +10055,17 @@ function markReoffered(out, readings) {
     if (typeof at !== 'number') return;
     var list = recent[key] || (recent[key] = []);
     while (list.length && at - list[0].at > REOFFER_WINDOW_MS) list.shift();
-    list.forEach(function (p) { if (p.o.id !== o.id) { p.o.reoffered = true; o.reoffered = true; } });
+    // ...and only once the card had LEFT the screen: the second card first
+    // seen more than REOFFER_GAP_MS after the first was last seen. The first
+    // run on the owner's journal (report_check's breakdown) found every mark
+    // from this half, the median pair 27 s apart, half of them the same pay
+    // and two thirds the same route: one card filed under two ids while it
+    // was still up, not an order coming round again. An order that comes
+    // back has to time out first.
+    var seenAt = typeof o.firstAt === 'number' ? o.firstAt : at;
+    list.forEach(function (p) {
+      if (p.o.id !== o.id && seenAt - p.at > REOFFER_GAP_MS) { p.o.reoffered = true; o.reoffered = true; }
+    });
     list.push({ at: at, o: o });
   });
 }

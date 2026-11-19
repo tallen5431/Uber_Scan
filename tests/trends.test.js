@@ -1230,6 +1230,10 @@ function offer(x) {
   lines.push(roRow('rb1', 2, ro + 95 * 60000, 20, { pickup: 'Other Grill', dropoff: '', firstAt: ro + 90 * 60000 }));  // came back
   lines.push(roRow('rq1', 1, ro + 120 * 60000, 20, { pickup: 'Quiet Deli', dropoff: '' }));
   lines.push(roRow('rq1', 2, ro + 120 * 60000 + 2000, 20, { pickup: 'Quiet Deli', dropoff: '', firstAt: ro + 120 * 60000 }));
+  // One card filed under two ids 25 s apart while it was still up (the owner's
+  // first breakdown: the median pair 27 s): not an order coming round again.
+  lines.push(roRow('rq2', 1, ro + 150 * 60000, 20, { pickup: 'Twin Diner', dropoff: '7 Mock Ave, Faketown' }));
+  lines.push(roRow('rq3', 1, ro + 150 * 60000 + 25000, 20, { pickup: 'Twin Diner', dropoff: '7 Mock Ave, Faketown' }));
   fs.writeFileSync(journal, lines.join('\n') + '\n');
   async function serve(lite) {
     var port = 20000 + Math.floor(Math.random() * 20000);
@@ -1314,8 +1318,8 @@ function offer(x) {
     var reo = {};
     jall.offers.forEach(function (o) { if (/^r[obq]/.test(o.id)) reo[o.id] = o.reoffered === true; });
     eq('[reoffered] the same trip twice in 30 min (both marked), another door not, the same trip 46 min on not; '
-       + 'one id back after 5 min marked, one read twice in 2 s not',
-       reo, { ro1: true, ro2: true, ro3: false, ro4: false, rb1: true, rq1: false });
+       + 'one id back after 5 min marked, one read twice in 2 s not, one card under two ids 25 s apart not',
+       reo, { ro1: true, ro2: true, ro3: false, ro4: false, rb1: true, rq1: false, rq2: false, rq3: false });
     ok('[reoffered] ...set only where true, so every other row is byte for byte what it was',
        jall.offers.filter(function (o) { return 'reoffered' in o; }).every(function (o) { return o.reoffered === true; }));
     var tall = JSON.parse((await get(full.port, '/api/trends?days=0')).body);

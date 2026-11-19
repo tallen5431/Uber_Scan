@@ -91,6 +91,7 @@ function tally(cells) {
  * key and window, and how many agree on miles and minutes, and how the pay
  * moved. Counts only, never the places the key is made of. */
 var REOFFER_WINDOW_MS = 30 * 60 * 1000;      // server.js REOFFER_WINDOW_MS (a check holds them equal)
+var REOFFER_GAP_MS = 60 * 1000;              // server.js REOFFER_GAP_MS: closer is one card under two ids
 function reofferKey(o) {
   function pk(v) { return typeof v === 'string' ? v.toLowerCase().replace(/\s+/g, ' ').trim() : ''; }
   var pick = pk(o.pickup), drop = pk(o.dropoff);
@@ -107,7 +108,7 @@ function reofferedHow(offers) {
     .slice().sort(function (a, b) { return a.at - b.at; });
   var recent = Object.create(null), inPair = Object.create(null);
   var pairs = { named: 0, unnamed: 0, sameMiles: 0, sameMinutes: 0, sameBoth: 0,
-                payUp: 0, paySame: 0, payDown: 0, gaps: [] };
+                payUp: 0, paySame: 0, payDown: 0, gaps: [], close: 0 };
   function pay(o) { return typeof o.pay === 'number' ? o.pay : null; }
   sorted.forEach(function (o) {
     var k = reofferKey(o);
@@ -132,6 +133,7 @@ function reofferedHow(offers) {
         if (b > a + 0.01) pairs.payUp += 1; else if (b < a - 0.01) pairs.payDown += 1; else pairs.paySame += 1;
       }
       pairs.gaps.push((o.at - prev.at) / 60000);
+      if ((typeof o.firstAt === 'number' ? o.firstAt : o.at) - prev.at <= REOFFER_GAP_MS) pairs.close += 1;
     }
     list.push(o);
   });
@@ -145,7 +147,8 @@ function reofferedHow(offers) {
              sameMiles: pairs.sameMiles, sameMinutes: pairs.sameMinutes, sameBoth: pairs.sameBoth,
              sameBothShare: share(pairs.sameBoth, total),
              payUp: pairs.payUp, paySame: pairs.paySame, payDown: pairs.payDown,
-             gapMedianMin: g.length ? r2(g[Math.floor((g.length - 1) / 2)]) : null }
+             gapMedianMin: g.length ? r2(g[Math.floor((g.length - 1) / 2)]) : null,
+             withinAMinute: pairs.close, apart: total - pairs.close }
   };
 }
 
@@ -363,6 +366,8 @@ function format(res) {
              + ' (' + q.sameBothShare + '%), miles only ' + (q.sameMiles - q.sameBoth) + ', minutes only '
              + (q.sameMinutes - q.sameBoth) + '; pay up ' + q.payUp + ', same ' + q.paySame + ', down ' + q.payDown
              + '; median gap ' + q.gapMedianMin + ' min');
+    out.push('  pairs inside a minute (one card under two ids, not marked since the gap rule) ' + q.withinAMinute
+             + ', a minute or more apart (re-offered) ' + q.apart);
   }
   out.push('');
   out.push('timings here:');
