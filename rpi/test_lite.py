@@ -399,6 +399,21 @@ try:
         eq('[lite] /api/lite says so', _info.get('lite'), True)
         ok_('[lite] ...and lists the NucBox among what is off',
             any('NucBox' in w for w in _info.get('off') or []))
+        # The offline shell on a lite rig (sw.js ASSETS, one Cache.addAll):
+        # what /api/lite says it shuts is refused, and every other entry is
+        # served, so the worker's install no longer fails whole.
+        _sw = open(os.path.join(ROOT, 'sw.js')).read()
+        _assets = re.findall(r"^\s*'([^']+)',", _sw[_sw.index('var ASSETS'):_sw.index('];', _sw.index('var ASSETS'))], re.M)
+        _shut = _info.get('shut') or []
+        ok_('[lite] /api/lite names the shell pages it shuts, each one in ASSETS',
+            _shut and all(a in _assets for a in _shut))
+        for _a in _assets:
+            _s = raw(_lb, '/' + _a.lstrip('./'))[0]
+            if _a in _shut:
+                eq('[lite] shell page %s is shut' % _a, _s, 404)
+            else:
+                ok_('[lite] shell file %s is served (%d)' % (_a, _s), _s in (200, 302))
+        ok_('[lite] sw.js leaves out what /api/lite shuts', 'j.shut' in _sw and 'shellList()' in _sw)
         for _method, _path, _data in SHUT:
             _s, _body, _h = raw(_lb, _path, _data, _method)
             _j = as_json(_body) or {}

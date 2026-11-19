@@ -92,6 +92,14 @@ var OFF = [
   [/^\/map\.html$/, 'Map view']
 ];
 
+// The shell's pages (sw.js ASSETS, as it spells them) that OFF refuses, for
+// /api/lite's `shut`. The offline worker's install is one Cache.addAll, which
+// fails whole on one 404: a phone on a lite rig's Wi-Fi had no offline shell
+// at all, because map.html and shift.html are shut here. sw.js leaves these
+// out when /api/lite names them; rpi/test_lite.py holds that each is refused
+// and that every other ASSETS entry is served.
+var SHUT_PAGES = ['map.html', 'shift.html'];
+
 // What lite says it keeps, for /api/lite — the same list as lite/README.md.
 var KEEPS = ['camera and aim', 'calibration', 'Set box', 'settings',
              'the reader and every money-safety rule',
@@ -121,7 +129,7 @@ function answer(lite, req, res, send) {
   }
   var json = { 'Content-Type': 'application/json; charset=utf-8' };
   if (pathname === '/api/lite') {
-    send(res, 200, JSON.stringify(lite ? { lite: true, page: PAGE, off: OFF_NAMES, keeps: KEEPS }
+    send(res, 200, JSON.stringify(lite ? { lite: true, page: PAGE, off: OFF_NAMES, keeps: KEEPS, shut: SHUT_PAGES }
                                        : { lite: false }), json);
     return true;
   }

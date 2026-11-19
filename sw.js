@@ -24,7 +24,7 @@
  * install would not have put it back: a phone with no signal would have lost
  * the scanner entirely, in the name of shipping a scanner fix.
  */
-var SHELL = 'uberscan-shell-v55';   // v55: trends.js and earnings.js joined it
+var SHELL = 'uberscan-shell-v56';   // v56: a lite rig's shut pages left out (shellList)
 
 /* Bumped only when the vendored engine itself changes, which is rare and
  * deliberate. Held apart from the shell so that shipping app code never costs
@@ -155,9 +155,23 @@ function keepShell(req, url, res) {
  * changed on every request would otherwise refresh the shell forever. */
 var refreshing = null;
 
+/* The shell this server can serve. A lite rig shuts map.html and shift.html
+ * (lite/lite.js), and Cache.addAll fails whole on one 404, so on a lite rig's
+ * Wi-Fi the shell never installed at all. /api/lite names what it shuts; a
+ * full rig says lite: false, and no answer (offline, an old server) is the
+ * whole list, as it always was. */
+function shellList() {
+  return fetch('api/lite', { cache: 'no-store' }).then(function (r) {
+    return r.ok ? r.json() : null;
+  }).then(function (j) {
+    var shut = j && j.lite === true && Array.isArray(j.shut) ? j.shut : [];
+    return ASSETS.filter(function (a) { return shut.indexOf(a) < 0; });
+  }, function () { return ASSETS; });
+}
+
 function refreshShell(c) {
   if (!refreshing) {
-    refreshing = c.addAll(ASSETS).then(function () { refreshing = null; },
+    refreshing = shellList().then(function (list) { return c.addAll(list); }).then(function () { refreshing = null; },
                                        function (err) { refreshing = null; throw err; });
   }
   return refreshing;
@@ -177,7 +191,7 @@ function wholeShell(c, req, seen) {
 self.addEventListener('install', function (e) {
   e.waitUntil(
     caches.open(SHELL)
-      .then(function (c) { return c.addAll(ASSETS); })
+      .then(function (c) { return shellList().then(function (list) { return c.addAll(list); }); })
       .then(function () { return self.skipWaiting(); })
   );
 });
