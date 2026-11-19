@@ -15726,8 +15726,19 @@ function route(req, res) {
                     { 'Content-Type': 'application/json; charset=utf-8' });
       }
       var tfloor = tsince || (tdays > 0 ? Date.now() - tdays * 86400000 : 0);
-      send(res, 200, JSON.stringify(trendsOut(rows, tfloor, tdays)),
-           { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      var tbody = JSON.stringify(trendsOut(rows, tfloor, tdays));
+      var thead = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store',
+                    'Vary': 'Accept-Encoding' };
+      // Gzipped where the browser says it can take it (the reporting
+      // review's T9): the answer is seven columns of digits, 1.3 MB for a 3x
+      // record, and the phone on the rig's Wi-Fi or a VPN waited on it.
+      // Level 1: the columns compress about fivefold at the fastest level,
+      // and the Pi's CPU is the scarcer thing (lite never reaches here).
+      if (/\bgzip\b/.test(String(req.headers['accept-encoding'] || '')) && tbody.length > 1024) {
+        thead['Content-Encoding'] = 'gzip';
+        return send(res, 200, require('zlib').gzipSync(tbody, { level: 1 }), thead);
+      }
+      send(res, 200, tbody, thead);
     });
   }
 

@@ -427,6 +427,25 @@ function offer(x) {
   ok('...with no effect and a 40% night-to-night swing, phi ' + phiNo.toFixed(2) + ' keeps chance shading low ('
      + noShaded + ' of 300)', phiNo > 1.3 && noShaded <= 9);
 
+  /* --- unpack's clock, worked once per day and hour (the reporting review's T5) --- */
+  (function () {
+    var rr = [];
+    // Every 7 minutes across both clock changes of 2026-27, and a row out of order.
+    [[new Date(2026, 9, 31, 20).getTime(), new Date(2026, 10, 1, 8).getTime()],
+     [new Date(2027, 2, 13, 20).getTime(), new Date(2027, 2, 14, 8).getTime()]].forEach(function (sp) {
+      for (var t = sp[0]; t <= sp[1]; t += 7 * 60000) rr.push({ t: t, app: 1, pay: 5, perHour: 20, minutes: 15, miles: 3, flags: 1 });
+    });
+    rr.push({ t: new Date(2026, 10, 1, 1, 30).getTime(), app: 1, pay: 5, perHour: 20, minutes: 15, miles: 3, flags: 1 });
+    var got = T.readRows(rr), bad = 0;
+    got.forEach(function (r) {
+      var day = T.dayKeyOf(r.t), d = new Date(r.t);
+      if (r.day !== day || r.hour !== d.getHours() || r.week !== T.weekKeyOf(day) || r.month !== day.slice(0, 7)
+          || r.dow !== new Date(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)), 12).getDay()) bad += 1;
+    });
+    eq('T5: a day and hour worked once and reused give each row its own clock, across both changes and out of order',
+       [got.length, bad], [rr.length, 0]);
+  }());
+
   /* --- a quantile's interval and the nights (the reporting review's S1) --- */
   eq('S1: at phi_q 1 the widened interval is the plain one; at 2 its ranks are n=30\'s scaled onto 60 (8 -> 16, 23 -> 46)',
      [T.quantCIw(Array.from({ length: 60 }, function (_, i) { return i + 1; }), 0.5, 0.01, 1),
@@ -985,6 +1004,19 @@ function offer(x) {
     for (var j2 = 0; j2 < 6000; j2++) if (now - 20 * 86400000 + j2 * 240000 >= now - 7 * 86400000) inSeven += 1;
     ok('...the range is an honest span: 7 days holds the last 7 days\' offers (' + j7.total + ' of ' + inSeven + ')',
        Math.abs(j7.total - inSeven) <= 2);
+    // T9: gzipped where the browser asks, the same answer underneath.
+    var gz = await new Promise(function (resolve, reject) {
+      http.get({ host: '127.0.0.1', port: full.port, path: '/api/trends?days=30', headers: { 'Accept-Encoding': 'gzip, deflate' } },
+        function (res) {
+          var parts = [];
+          res.on('data', function (c) { parts.push(c); });
+          res.on('end', function () { resolve({ enc: res.headers['content-encoding'], vary: res.headers.vary, buf: Buffer.concat(parts) }); });
+        }).on('error', reject);
+    });
+    var gzBody = require('zlib').gunzipSync(gz.buf).toString('utf8');
+    eq('T9: /api/trends is gzipped for a browser that takes it, a fraction of the size, the same rows underneath',
+       [gz.enc, gz.vary, gz.buf.length < ans.body.length / 3, JSON.stringify(JSON.parse(gzBody).rows) === JSON.stringify(j1.rows)],
+       ['gzip', 'Accept-Encoding', true, true]);
     // R2 (the reporting review): /api/journal's `until` lists only the older
     // offers, so a reader past `limit` can page back; the window's figures stay.
     var untilAt = now - 10 * 86400000;
@@ -1021,6 +1053,19 @@ function offer(x) {
     ok('F3: good per hour online is said apart from When & where\'s good per hour waited',
        /When & where counts good per hour waited \(each \'\s*\+ '\s*gap capped at 10 min, none while carrying\)/.test(page)
        || /good per hour waited \(each/.test(page));
+    ok('T1/T2/T7: a press redraws what reads it (ruler, By week, resize), "When to drive" first and the rest after a '
+       + 'paint; the folded shape of offers only once open; the CSVs built on their own click',
+       /ruler: \{ first: \['ruler', 'when', 'good'\], rest: \['week', 'same', 'compare'\] \}/.test(page)
+       && /by: \{ first: \['good'\], rest: \['daily', 'spread', 'share', 'shape'\] \}/.test(page)
+       && /draw\('ruler'\)/.test(page) && /draw\('by'\)/.test(page) && /draw\('resize'\)/.test(page)
+       && /requestAnimationFrame\(function \(\) \{ setTimeout\(later, 0\); \}\)/.test(page)
+       && /\$\('trShape'\)\.addEventListener\('toggle'/.test(page) && /if \(\$\('trShape'\)\.open\) drawShape\(\); else shapeDirty = true;/.test(page)
+       && /\$\('trCsvDays'\)\.addEventListener\('click', csvClick\)/.test(page) && !/\n      csvs\(rows, per\);/.test(page));
+    ok('T4/T6/T8: the periods worked out once per answer and by-day or by-week, widths read before any write, scroll '
+       + 'reads after them, and no title on a day timeline\'s thin square',
+       /function periodsOf\(by\)/.test(page) && /var pb = periodsOf\(st\.by\);\s+drawDaily\(pb\.keys, pb\.line\);/.test(page)
+       && /function readWidths\(\)/.test(page) && /post\(function \(\) \{ openAtFirst/.test(page)
+       && /tl\.by === 'day' \? '' : ' title="'/.test(page));
     ok('...the ruler offers 10, 20, 30 and 50, opens on 20, and says it is for reading only',
        /data-top="10"[\s\S]*data-top="20" aria-pressed="true"[\s\S]*data-top="30"[\s\S]*data-top="50"/.test(page)
        && /never\s+reaches the verdict/.test(page));

@@ -434,22 +434,43 @@
 
   /* Rows back from columns, each given its day, week, weekday and hour on the
    * reader's own clock — the clock the page's day headers are on. */
+  /* The day, week, month and weekday of a row are its driver day's, and
+   * the rows come oldest first, so they are worked out once per driver day
+   * and the clock hour once per hour (the reporting review's T5): a Date
+   * and four string builds a row was 40 ms of 12,000 rows on a laptop and
+   * four times that on the phone. A row outside the day or hour last seen
+   * (or out of order) is worked out afresh, so the answer is the same. */
   function unpack(p) {
     var c = (p && p.cols) || {};
     var n = (c.t || []).length, out = new Array(n);
+    var dLo = Infinity, dHi = -Infinity, day = null, week = null, month = null, dow = null;
+    var hLo = Infinity, hHi = -Infinity, hour = null;
     for (var i = 0; i < n; i++) {
       var ms = c.t[i] * 1000;
       var f = c.flags[i] | 0;
       var pay = c.pay[i], mi = c.miles[i];
-      var day = dayKeyOf(ms);
-      out[i] = withClock({
+      if (!(ms >= dLo && ms < dHi)) {
+        day = dayKeyOf(ms); week = weekKeyOf(day); month = day.slice(0, 7);
+        var dd = dateOfKey(day);
+        dow = dd.getDay();
+        dLo = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate(), DAY_STARTS_AT).getTime();
+        dHi = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate() + 1, DAY_STARTS_AT).getTime();
+      }
+      if (!(ms >= hLo && ms < hHi)) {
+        var hd = new Date(ms);
+        hour = hd.getHours();
+        hLo = ms - (hd.getMinutes() * 60000 + hd.getSeconds() * 1000 + hd.getMilliseconds());
+        hHi = hLo + 3600000;
+      }
+      out[i] = {
         t: ms, app: c.app[i] === 1 ? 'uber' : c.app[i] === 2 ? 'doordash' : null,
         pay: pay, perHour: c.perHour[i], minutes: c.minutes[i], miles: mi,
         perMile: pay !== null && mi !== null && mi >= 0.1 ? pay / mi : null,
         ok: !!(f & F_OK), good: !!(f & F_GOOD), suspect: !!(f & F_SUSPECT),
         corrected: !!(f & F_CORRECTED), unread: !!(f & F_UNREAD),
-        boost: f & F_BOOST_KNOWN ? !!(f & F_BOOST) : null, taken: !!(f & F_TAKEN)
-      }, day);
+        boost: f & F_BOOST_KNOWN ? !!(f & F_BOOST) : null, taken: !!(f & F_TAKEN),
+        day: day, week: week, month: month, dow: dow, hour: hour
+      };
     }
     return out;
   }
@@ -468,7 +489,24 @@
 
   /* --- the numbers -------------------------------------------------------- */
 
-  function sorted(xs) { return xs.slice().sort(function (a, b) { return a - b; }); }
+  // Numbers sorted in a Float64Array, by the engine's own numeric sort (the
+  // reporting review's T3): every list sorted here is finite numbers
+  // (valuesOf keeps no other), and a compare function per pair was most of
+  // a quantile's cost. Indexed and measured like an array by everything here.
+  function sorted(xs) {
+    var a = new Float64Array(xs.length);
+    for (var i = 0; i < xs.length; i++) a[i] = xs[i];
+    return a.sort();
+  }
+  // The whole range's $/hr, sorted ONCE per set of rows: the ruler, every
+  // view's reference quantile and the calendar each sorted all of it again.
+  var rangeMemo = { rows: null, n: -1, s: null };
+  function rangeSorted(rows) {
+    if (rangeMemo.rows !== rows || rangeMemo.n !== rows.length) {
+      rangeMemo = { rows: rows, n: rows.length, s: sorted(valuesOf(rows, 'perHour')) };
+    }
+    return rangeMemo.s;
+  }
   // Linear between the two straddling values, as the page's percentile().
   function q(s, share) {
     if (!s.length) return null;
@@ -789,9 +827,10 @@
    * Breaking ties by time or id would call one of two equal offers good. */
   function ruler(rows, top) {
     var t = TOPS.indexOf(Number(top)) >= 0 ? Number(top) : TOP_DEFAULT;
-    var v = valuesOf(rows, 'perHour');
-    var cut = v.length ? r2(q(sorted(v), 1 - t / 100)) : null;
-    var over = cut === null ? 0 : v.filter(function (x) { return x >= cut; }).length;
+    var v = rangeSorted(rows);
+    var cut = v.length ? r2(q(v, 1 - t / 100)) : null;
+    var over = 0;
+    if (cut !== null) for (var i = v.length - 1; i >= 0 && v[i] >= cut; i--) over += 1;
     return { top: t, cut: cut, n: v.length, over: over };
   }
   function isGood(r, cut) {
@@ -822,38 +861,51 @@
    * every offer counted, the quartiles and P90 of each metric over the rows
    * the money counts, the per-app medians and counts, the data-quality
    * counts, the app share and the boost share. */
+  // One pass over each period's rows (the reporting review's T4): the five
+  // metrics, the two apps' five, the quality, share and boost counts were
+  // twenty-odd filters a period. The same figures.
   function periods(rows, by) {
     var g = groupBy(rows, function (r) { return by === 'week' ? r.week : r.day; });
     return g.keys.sort().map(function (k) {
       var list = g.by[k];
       var e = { key: k, n: list.length, counted: 0, metrics: {}, apps: {}, quality: null, share: null, boost: null };
-      METRICS.forEach(function (m) { e.metrics[m] = quarts(valuesOf(list, m)); });
-      e.counted = list.filter(function (r) { return r.ok; }).length;
+      var vals = {}, appVals = { uber: {}, doordash: {} }, appN = { uber: 0, doordash: 0 };
+      METRICS.forEach(function (m) { vals[m] = []; appVals.uber[m] = []; appVals.doordash[m] = []; });
+      var counted = 0, sus = 0, cor = 0, unr = 0, bk = 0, by2 = 0, good = 0;
+      for (var i = 0; i < list.length; i++) {
+        var r = list[i], av = r.app === 'uber' || r.app === 'doordash' ? appVals[r.app] : null;
+        if (av) appN[r.app] += 1;
+        if (r.ok) {
+          counted += 1;
+          for (var j = 0; j < METRICS.length; j++) {
+            var v = r[METRICS[j]];
+            if (v !== null && v !== undefined && isFinite(v)) { vals[METRICS[j]].push(v); if (av) av[METRICS[j]].push(v); }
+          }
+        }
+        // Three counts that do not overlap: every "pay unread" row is suspect
+        // too (server.js withPay), so `suspect` here is suspect for any OTHER
+        // reason, and a strip stacking the three adds up to the offers it marks.
+        if (r.suspect && !r.unread) sus += 1;
+        if (r.corrected) cor += 1;
+        if (r.unread) unr += 1;
+        if (r.boost !== null && r.boost !== undefined) { bk += 1; if (r.boost) by2 += 1; }
+        if (r.good) good += 1;
+      }
+      METRICS.forEach(function (m) { e.metrics[m] = quarts(vals[m]); });
+      e.counted = counted;
       APPS.forEach(function (a) {
-        var mine = list.filter(function (r) { return r.app === a; });
-        var ap = { n: mine.length };
+        var ap = { n: appN[a] };
         METRICS.forEach(function (m) {
-          var v = valuesOf(mine, m);
+          var v = appVals[a][m];
           ap[m] = v.length >= DAY_MIN ? r2(q(sorted(v), 0.5)) : null;
           ap[m + 'N'] = v.length;
         });
         e.apps[a] = ap;
       });
-      // Three counts that do not overlap: every "pay unread" row is suspect
-      // too (server.js withPay), so `suspect` here is suspect for any OTHER
-      // reason, and a strip stacking the three adds up to the offers it marks.
-      e.quality = {
-        suspect: list.filter(function (r) { return r.suspect && !r.unread; }).length,
-        corrected: list.filter(function (r) { return r.corrected; }).length,
-        unread: list.filter(function (r) { return r.unread; }).length
-      };
-      var known = list.filter(function (r) { return r.app; }).length;
-      e.share = { uber: list.filter(function (r) { return r.app === 'uber'; }).length,
-                  doordash: list.filter(function (r) { return r.app === 'doordash'; }).length,
-                  unknown: list.length - known };
-      var bk = list.filter(function (r) { return r.boost !== null; });
-      e.boost = bk.length ? { known: bk.length, yes: bk.filter(function (r) { return r.boost; }).length } : null;
-      e.good = list.filter(function (r) { return r.good; }).length;
+      e.quality = { suspect: sus, corrected: cor, unread: unr };
+      e.share = { uber: appN.uber, doordash: appN.doordash, unknown: list.length - appN.uber - appN.doordash };
+      e.boost = bk ? { known: bk, yes: by2 } : null;
+      e.good = good;
       return e;
     });
   }
@@ -891,7 +943,23 @@
    * cards in those minutes are counted too (unlike hoursBy, whose question is
    * a sitting, not a clock hour). The edge is found on the local clock, from
    * the zone's offset at that moment. */
+  // The pieces of the last few run lists asked for, by identity, length and
+  // ends: a draw asks for the same runs' pieces a dozen times (T1/T3).
+  // Nothing here writes to a piece, so the same object is handed back.
+  var piecesMemo = [];
   function onlinePieces(runs) {
+    var list = runs || [], n = list.length;
+    var a0 = n ? list[0] && list[0][0] : null, b1 = n ? list[n - 1] && list[n - 1][1] : null;
+    for (var mi = 0; mi < piecesMemo.length; mi++) {
+      var m = piecesMemo[mi];
+      if (m.runs === runs && m.n === n && m.a0 === a0 && m.b1 === b1) return m.out;
+    }
+    var res = piecesOf(runs);
+    piecesMemo.unshift({ runs: runs, n: n, a0: a0, b1: b1, out: res });
+    if (piecesMemo.length > 4) piecesMemo.length = 4;
+    return res;
+  }
+  function piecesOf(runs) {
     var out = Object.create(null);
     (runs || []).forEach(function (sp) {
       if (!sp || !(sp[1] > sp[0])) return;
@@ -1093,8 +1161,8 @@
   function refOf(stat, rows, tab) {
     if (stat === 'goodRate') return tab.refRate;
     if (stat === 'earned') return tab.refEarn;
-    var all = valuesOf(rows, 'perHour');
-    return all.length ? q(sorted(all), STAT_P[stat] || 0.5) : null;
+    var all = rangeSorted(rows);
+    return all.length ? q(all, STAT_P[stat] || 0.5) : null;
   }
   function statOf(s) { return STATS.indexOf(s) >= 0 ? s : 'p50'; }
   function cpmOf(opts) { return opts && opts.net && typeof opts.costPerMile === 'number' ? opts.costPerMile : null; }
@@ -1208,7 +1276,7 @@
     var tab = opts.table || sliceTable(rows, opts.runs, { cut: opts.cut, cpm: cpmOf(opts), keep: opts.keep });
     var byCell = Object.create(null);
     sliceList(tab).forEach(function (s) { (byCell[s.dow * 24 + s.hour] || (byCell[s.dow * 24 + s.hour] = [])).push(s); });
-    var ref = refOf(stat, rows.filter(function (r) { return !opts.keep || opts.keep(r); }), tab);
+    var ref = refOf(stat, opts.keep ? rows.filter(opts.keep) : rows, tab);
     var ph = phis(Object.keys(byCell).map(function (c) { return byCell[c]; }), isQ(stat) ? ref : null);
     var ctx = { stat: stat, ref: ref, phi: ph, wMean: tab.wMean, minDays: FLOOR_DAYS };
     var cells = [];
@@ -1280,8 +1348,8 @@
     opts = opts || {};
     var stat = statOf(opts.stat);
     var p = STAT_P[stat] || 0.5, cut = opts.cut, cpm = cpmOf(opts);
-    var all = valuesOf(rows, 'perHour');
-    var refQ = all.length ? q(sorted(all), p) : null;
+    var all = rangeSorted(rows);
+    var refQ = all.length ? q(all, p) : null;
     var hours = onlineHoursBy(runs, 'day');
     var totalH = 0, totalK = 0;
     Object.keys(hours).forEach(function (k) { totalH += hours[k]; });
@@ -1298,7 +1366,7 @@
       : stat === 'earned' && totalH > 0 ? tk.earned / totalH : null;
     var ref = stat === 'goodRate' || stat === 'earned' ? refRate : refQ;
     var g = groupBy(rows, function (r) { return r.day; });
-    var refMed = all.length ? q(sorted(all), 0.5) : null;
+    var refMed = all.length ? q(all, 0.5) : null;
     var days = g.keys.sort().map(function (k) {
       var list = g.by[k];
       var v = valuesOf(list, 'perHour'), s = sorted(v);
@@ -1623,7 +1691,8 @@
     [A, B].forEach(function (S) { Object.keys(S.byCell).forEach(function (c) { groups.push(S.byCell[c]); }); });
     var tk = A.tab.totals.takes + B.tab.totals.takes;
     var wMean = tk ? (A.tab.totals.wSum + B.tab.totals.wSum) / tk : null;
-    var refAll = refOf(stat, rows, sliceTable(rows, runs, { cut: opts.cut, cpm: cpm }));
+    // A quantile's reference needs no table; only a rate's builds one.
+    var refAll = refOf(stat, rows, isQ(stat) ? null : sliceTable(rows, runs, { cut: opts.cut, cpm: cpm }));
     var ph = phis(groups, isQ(stat) ? refAll : null);
     var ctx = { stat: stat, ref: refAll === null ? 0 : refAll, phi: ph, wMean: wMean, minDays: FLOOR_DAYS };
     var cells = [];
