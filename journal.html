@@ -12,8 +12,11 @@
 <script src="advice.js"></script>
 <!-- The deciding behind the map sheet: the geocoder, the one-request-a-second
      rule, the box drawn around where the car was. Shared with map.html rather
-     than copied into it, and it is a few kB of plain script — Leaflet, which
-     is not, is fetched only if somebody presses one of the map controls. -->
+     than copied into it. It is not small — over 300 kB of plain script, the
+     largest script this page loads, parsed on every open (it said "a few kB"
+     here once, and was a hundred times that) — but it is same-origin and in
+     the offline shell. Leaflet is fetched only if somebody presses one of
+     the map controls. -->
 <script src="map-view.js"></script>
 <style>
   /* live.html is a screen glanced at while driving and is sized to fill the
@@ -595,7 +598,7 @@
        reading along it. */
     #app { padding-left: 14px; padding-right: 14px;
            max-width: 1180px; margin-left: auto; margin-right: auto; }
-    #headline, .hint, .note, .advice p, #nothing, .empty-msg, .offer .why {
+    #headline, .hint, .note, .advice p, #nothing, .offer .why {
       max-width: 72ch; margin-left: auto; margin-right: auto;
     }
     h2 { font-size: 16px; }
@@ -7828,7 +7831,6 @@
       Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
       return o;
     }
-    function rateStat() { return st.stat === 'goodRate' || st.stat === 'earned'; }
     function drawNet() {
       var on = st.stat === 'earned', known = typeof got.cpm === 'number';
       $('trNet').hidden = !on || !known;

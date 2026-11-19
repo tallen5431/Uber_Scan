@@ -4111,6 +4111,8 @@ The last two rows are the honest cost: on a record whose nights swing like the o
 
 **The offers page's tabs said nothing of what they opened, and could only be reached by tabbing through all seven.** Each tab is a `role="tab"` button with no `aria-controls`, so a screen reader announced "tab, 1 of 7" and nothing of its panel; and none of the arrow-key movement a tablist promises. Each tab now names its `tab-*` panel (All names all six), the picked tab is the row's one Tab stop, and the arrows, Home and End move the pick over the tabs that are shown (lite hides Trends), wrapping at the ends, the focus with it. Check: rpi/test_offerspage.py, the panels named and there, and seven presses walked; journal.html as it was fails both (no panel named, the arrows moving nothing).
 
+**Dead weight on the pages, and a comment that put map-view.js at "a few kB" when it is over 300 kB (the review of the pages).** journal.html's `rateStat()` was called by nothing; `.empty-msg` in its parked-reading rule styles an element only ui.js makes, on the keypad page (the rule in styles.css that ui.js uses stays); map.html's `.pin-label` and styles.css's `.key.flash` matched nothing any page writes. Each re-grepped across every page, script and suite before it went. The comment over journal.html's `<script src="map-view.js">` now says what the file costs: over 300 kB, the largest script the page loads, parsed on every open.
+
 ### The advice
 
 **The page said where to draw the line and never what holding one costs.**

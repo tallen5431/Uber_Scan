@@ -479,7 +479,6 @@ html, body {
 .key.next { background: #1d3a6b; color: #cfe1ff; }
 .key.log  { background: #24303d; color: var(--text); }
 .key:active { transform: scale(.95); filter: brightness(1.5); }
-.key.flash { filter: brightness(1.6); }
 
 /* ---------- Bottom bar ---------- */
 /* Equal slots for however many buttons the page has, rather than a fixed three
