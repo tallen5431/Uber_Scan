@@ -583,6 +583,18 @@ function nbx() {
   ok('the page builds, with its banner', /Offered, not earned/.test(page)
      && /ranks only places near where you already wait/.test(page));
   ok('...Leaflet pinned at map.html\'s version', /unpkg\.com\/leaflet@1\.9\.4\/dist\/leaflet\.js/.test(page));
+  // ...and by its digests, map-view.js's own (needLeaflet's): loaded bare, a
+  // CDN serving anything else ran its script in a page holding the record.
+  var MVd = require('../map-view.js').LEAFLET_SRI;
+  eq('...its stylesheet and script carry map-view.js\'s digests, as CORS fetches',
+     [(page.match(/<link rel="stylesheet" href="https:\/\/unpkg\.com\/leaflet[^>]*>/) || [''])[0],
+      (page.match(/<script src="https:\/\/unpkg\.com\/leaflet[^>]*>/) || [''])[0]],
+     ['<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="'
+        + MVd['https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'] + '" crossorigin="anonymous">',
+      '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="'
+        + MVd['https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'] + '" crossorigin="anonymous">']);
+  ok('...which are sha256 digests, not empty', /^sha256-[A-Za-z0-9+\/]{43}=$/.test(MVd['https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'])
+     && /^sha256-[A-Za-z0-9+\/]{43}=$/.test(MVd['https://unpkg.com/leaflet@1.9.4/dist/leaflet.js']));
   ok('...OSM\'s tiles, as map.html draws them', /tile\.openstreetmap\.org\/\{z\}\/\{x\}\/\{y\}\.png/.test(page));
   ok('...and the hour filter', /id="when"/.test(page));
   ok('no dropoff text is on the page', page.indexOf('Ombre') < 0 && page.indexOf('742') < 0);

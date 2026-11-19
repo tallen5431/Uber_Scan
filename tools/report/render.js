@@ -9,6 +9,7 @@ var fs = require('fs');
 var path = require('path');
 
 var A = require('../../advice.js');
+var MV = require('../../map-view.js');
 // What $/hr to expect and what holding out paid (the Strategy tab), shared
 // with the end-of-shift report so the two print one answer.
 var S = require('../strategy.js');
@@ -197,6 +198,19 @@ function banner(r) {
   return lines.map(function (l) { return '<p>' + l + '</p>'; }).join('\n');
 }
 
+/* Leaflet off unpkg, pinned by the digests map-view.js's needLeaflet checks
+ * (MV.LEAFLET_SRI, one copy): the page holds the record's places and
+ * figures, and a CDN that served anything else — compromised, or a man in
+ * the middle — gets no script run in it. The page loaded it bare until the
+ * reporting review's round 2. crossorigin because a browser checks an
+ * integrity only on a CORS fetch; unpkg answers with Allow-Origin *. */
+var LEAFLET_CSS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+var LEAFLET_JS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+function pinnedAt(url) {
+  if (!MV.LEAFLET_SRI[url]) throw new Error('map-view.js pins no digest for ' + url);
+  return ' integrity="' + MV.LEAFLET_SRI[url] + '" crossorigin="anonymous"';
+}
+
 function html(r) {
   // The page's data is the report, plus which tabs the Hours picker reaches
   // (GROUPS' fourth field), so the script does not keep a second list.
@@ -349,7 +363,7 @@ function html(r) {
   return '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
     + '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
     + '<title>Strategy &amp; Places Report</title>\n'
-    + '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">\n'
+    + '<link rel="stylesheet" href="' + LEAFLET_CSS + '"' + pinnedAt(LEAFLET_CSS) + '>\n'
     + '<style>\n' + PAGE_CSS + '\n</style>\n</head>\n<body>\n<main>\n'
     + '<header class="head"><h1>Strategy &amp; places report</h1>\n'
     + '<p class="sub">' + esc(span) + ' · ' + r.coverage.offers + ' offers the rig stands behind, '
@@ -361,7 +375,7 @@ function html(r) {
     + TABS.map(function (t) { return SEC[t[0]] || ''; }).join('')
     + '</main>\n<div id="tip" hidden></div>\n'
     + '<script type="application/json" id="data">' + data + '</script>\n'
-    + '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>\n'
+    + '<script src="' + LEAFLET_JS + '"' + pinnedAt(LEAFLET_JS) + '></script>\n'
     + '<script>\n' + PAGE_JS + '\n</script>\n</body>\n</html>\n';
 }
 
