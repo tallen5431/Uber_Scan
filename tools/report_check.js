@@ -190,8 +190,10 @@ function check(journal, trends, opts) {
   // 4. Every Trends view, every figure: cells at the floor and coloured.
   var cpm = trends && typeof trends.costPerMile === 'number' ? trends.costPerMile : null;
   var lastDay = rows.length ? rows[rows.length - 1].day : null;
-  var B = lastDay ? { from: T.addDays(lastDay, -6), to: lastDay } : null;
-  var Aw = lastDay ? { from: T.addDays(lastDay, -13), to: T.addDays(lastDay, -7) } : null;
+  // Compare's default periods, the last 28 days against the 28 before (it
+  // was a week against a week, and this tally showed 0 cells could ever pass).
+  var B = lastDay ? { from: T.addDays(lastDay, -27), to: lastDay } : null;
+  var Aw = lastDay ? { from: T.addDays(lastDay, -55), to: T.addDays(lastDay, -28) } : null;
   var figures = T.STATS.map(function (s) { return { stat: s, net: false }; });
   if (cpm !== null) figures.push({ stat: 'earned', net: true });
   res.views = figures.map(function (f) {
@@ -210,7 +212,7 @@ function check(journal, trends, opts) {
     v.thirds = tally(th.thirds); v.thirds.gated = th.gated;
     if (B) {
       var cmp = T.gridCompare(rows, runs, Aw, B, o);
-      v.compareLastTwoWeeks = tally(cmp.cells);
+      v.compareLast4Weeks = tally(cmp.cells);
     }
     if (g.clamped !== undefined) v.clampedCells = g.clamped;
     return v;
@@ -324,7 +326,7 @@ function format(res) {
   res.views.forEach(function (v) {
     out.push('  ' + v.figure + (v.clampedCells ? ' (' + v.clampedCells + ' grid cells holding a loss, never coloured)' : ''));
     ['grid', 'calendarDays', 'calendarWeeks', 'timelineDay', 'timelineWeek', 'timelineMonth', 'thirds',
-     'compareLastTwoWeeks'].forEach(function (k) {
+     'compareLast4Weeks'].forEach(function (k) {
       var x = v[k];
       if (!x) return;
       out.push('    ' + (k + ':').padEnd(21) + x.enough + ' / ' + (x.above + x.below) + ' (' + x.above + ' above, ' + x.below

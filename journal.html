@@ -8483,7 +8483,11 @@
            : earned ? 'each period\'s interval at 93% (a pay-weighted count, widened ×' + g.phi.toFixed(2)
              + ') must not overlap the other\'s, which is 99% or stricter.'
            : 'each period\'s order-statistic interval at 93% must not overlap the other\'s, which is 99% or stricter.')
-        + ' With no difference at all, under 1 cell in 100 is shaded. Hatched: off in both. ' + CHANCE);
+        + ' With no difference at all, under 1 cell in 100 is shaded. Hatched: off in both. '
+        + (g.cells.some(function (c) { return c.enough; }) ? ''
+           : 'No cell here can be shaded: a cell needs ' + T.FLOOR_DAYS + ' days in each period, and a period under two '
+             + 'weeks holds each weekday once. Compare four weeks or more, or use the hour chart, which pools the weekdays. ')
+        + CHANCE);
     }
 
     function openCell(key) {
@@ -8819,10 +8823,15 @@
         b = { from: $('trBFrom').value || null, to: $('trBTo').value || null };
       } else {
         cmpRange = asked;
-        // The last seven driver days in the range against the seven before.
+        // The last 28 driver days in the range against the 28 before. It was
+        // seven against seven, and the grid's floor is two days a cell: a
+        // week holds each weekday once, so the B vs A grid could never shade
+        // a cell (report_check on the owner's record: 0 of 168, every time).
+        // Four of each weekday a side can meet it; a week against a week is
+        // the week card's job, and the hour chart pools the weekdays.
         var last = rows[rows.length - 1].day;
-        b = { from: T.addDays(last, -6), to: last };
-        a = { from: T.addDays(last, -13), to: T.addDays(last, -7) };
+        b = { from: T.addDays(last, -27), to: last };
+        a = { from: T.addDays(last, -55), to: T.addDays(last, -28) };
         $('trAFrom').value = a.from; $('trATo').value = a.to; $('trBFrom').value = b.from; $('trBTo').value = b.to;
       }
       // Compare mode (round three): Compare pressed with two date periods set
