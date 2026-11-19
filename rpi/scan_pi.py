@@ -5160,17 +5160,25 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None, map_label=None):
     the panel — the scanner sees the navigation screen and the verdict clears —
     so a button saying only "took it" would be marking something the driver can
     no longer see.
+
+    The figures it shares with the row and the panel's reading come from one
+    place, JR.figures, so the three cannot name two distances for one card.
+    Two differences from the row are deliberate and kept here: `minutes` is
+    the card's own (below), and `billedMinutes` falls back to the card's
+    printed minutes on a line with no verdict, so a deadline card still
+    publishes something the button can name.
     """
+    fig = JR.figures(parsed, rate, whole, verdict_only=True)
     print(json.dumps({'offer': {
         'id': offer_id,
-        'pay': parsed.get('pay'),
+        'pay': fig['pay'],
         # The card's own minutes, not the billed ones: a figure with the
         # driver's pickup pad added would not match the card they are trying to
         # remember. `or`, not a two-argument `get` — `rate` always carries the
         # key and it is `None` on a card that stated no duration, so the default
         # would never have been reached.
         'minutes': rate.get('cardMinutes') or parsed.get('minutes'),
-        'perHour': round(rate['perHour'], 2) if rate.get('ready') else None,
+        'perHour': fig['perHour'],
         # Everything server.js builds the order in the car out of when the driver
         # marks this offer as taken. It read six fields off this object and was
         # sent four, so the order in the car had no distance, no running cost
@@ -5186,9 +5194,10 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None, map_label=None):
         # under. There is no `billedMinutes` key in what rate() gives back — in
         # either port — so this line read a name nothing produces and took the
         # fallback every single time, publishing the CARD's minutes as the
-        # billed ones. Twenty-eight lines below, emit() gets it right
-        # (`round(rate['minutes'], 1)`), and so does journal.py; only this path
-        # — the one that feeds the pair arithmetic — was reading the wrong key.
+        # billed ones. emit() got it right (`round(rate['minutes'], 1)`), and
+        # so did journal.py; only this path — the one that feeds the pair
+        # arithmetic — was reading the wrong key. All three now take it from
+        # JR.figures, so there is one spelling of it left to get wrong.
         #
         # server.js stores it as `holding.minutes`, which is `totalA` in
         # Advice.stack: the number a held job's pay is prorated over. A Shop &
@@ -5213,10 +5222,10 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None, map_label=None):
         # are zero on all 3,065 rows, so billed and card minutes are equal
         # throughout. 131 of those rows carry an item count, which is the shape
         # it fires on the moment a shopping allowance is set.
-        'billedMinutes': rate.get('minutes', parsed.get('minutes')),
-        'miles': rate.get('miles', parsed.get('miles')),
-        'cost': (round(rate['cost'], 2)
-                 if rate.get('ready') and rate.get('cost') is not None else None),
+        'billedMinutes': (fig['billedMinutes'] if fig['billedMinutes'] is not None
+                          else parsed.get('minutes')),
+        'miles': fig['miles'],
+        'cost': fig['cost'],
         'dropoff': parsed.get('dropoff'),
         'pickup': parsed.get('pickup'),
         # ...and the store's door DoorDash's stops card printed under that
@@ -5294,7 +5303,7 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None, map_label=None):
         #
         # Not a verdict to be mistaken for one: the message still carries no
         # `ready`, so it can neither replace a verdict nor stand in for one.
-        'state': rate.get('state'),
+        'state': fig['state'],
         # What the card says about its own size, for whatever measures a pin
         # against the card's distance: a straight line from where the car was
         # cannot be longer than the road, but only on a figure that counts the
@@ -5302,19 +5311,23 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None, map_label=None):
         # the row was written from, not worked out again: `whole` is
         # OP.is_whole's answer the loop already holds, `hasTotal`, `legs` and
         # `toPickupMiles` are the window's merge, and the two `miles*` flags
-        # are the parser's own word for a distance it repaired or doubted.
+        # are the reader's own word for a distance it repaired or doubted —
+        # rate()'s word, through JR.figures, as the row's are: on a deadline
+        # card rate() is where a lost decimal is put back, and taking them from
+        # parse() said "24 mi read as 2.4" was not corrected while `miles`
+        # beside them was the corrected 2.4.
         # Read by map-view.js MapView.cardYardstick, which decides whether
         # Map view may hold this card against a pin, and copied onto the
         # order in the car by server.js cardOf. `toPickupMiles` is carried and
         # deliberately NOT read there: the approach leg alone leaves only the
         # half mile of slack for the car moving between the platform's
         # measurement and this fix, and that motion has not been measured.
-        'whole': bool(whole),
+        'whole': fig['whole'],
         'hasTotal': bool(parsed.get('hasTotal')),
         'legs': parsed.get('legs'),
         'toPickupMiles': parsed.get('toPickupMiles'),
-        'milesUncertain': bool(parsed.get('milesUncertain')),
-        'milesCorrected': bool(parsed.get('milesCorrected')),
+        'milesUncertain': fig['milesUncertain'],
+        'milesCorrected': fig['milesCorrected'],
         'earlyLook': says_early_look(parsed),
         'multiOrder': says_multi_order(parsed),
         'manyDropoffs': says_many_dropoffs(parsed),
@@ -5354,12 +5367,20 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None, map_label=None):
 
 def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
          clipped=False, crop_from='drawn'):
-    """One JSON object per line, flushed, so a parent process sees reads live."""
+    """One JSON object per line, flushed, so a parent process sees reads live.
+
+    The figures it shares with the row and the offer line come from
+    JR.figures. Two differences are deliberate and kept here: `minutes` is the
+    card's printed figure (`cardMinutes` beside it is what the verdict was
+    made over), and `whole` is None when the caller did not say, which the
+    panel reads as "not asked" rather than as a fragment.
+    """
+    fig = JR.figures(parsed, rate, whole, verdict_only=True)
     payload = {
         'track': tracker.status() if tracker is not None else None,
         'ready': rate['ready'],
         'locked': locked,
-        'state': rate['state'],
+        'state': fig['state'],
         # Which figure is impossible, so the page can name it rather than just
         # refusing to say anything. The numbers below are still sent: the driver
         # is looking at the same card and is the one who can tell which of them
@@ -5390,21 +5411,21 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
         #
         # It is also what Advice.stack needs to apply the same cap to a pair.
         'uncosted': bool(rate.get('uncosted')),
-        'perHour': round(rate['perHour'], 2) if rate['ready'] else None,
+        'perHour': fig['perHour'],
         # Both rates, and the time they were both divided by. The card's own
         # minutes are below as `minutes`, for checking against the phone; these
         # are what the arithmetic actually used, which differ once `pad` or
         # `secondsPerItem` is set. Sending both is what lets the page show a
         # sum that adds up instead of one it has to guess at.
         'grossPerHour': round(rate['grossPerHour'], 2) if rate['ready'] else None,
-        'billedMinutes': round(rate['minutes'], 1) if rate['ready'] else None,
+        'billedMinutes': fig['billedMinutes'],
         # `is not None`, not truthiness: this is a number that can legitimately
         # be zero, and now that it is net of running costs it can be negative
         # too. Testing it for truth turned "you break exactly even per mile"
         # into "--".
         'perMile': (round(rate['perMile'], 2)
                     if rate.get('perMile') is not None else None),
-        'pay': parsed['pay'],
+        'pay': fig['pay'],
         # ...and how much of it the card says was Boost+ or Peak Pay, for the
         # panel's "incl. $2.93 Boost" (offer_parser boost_of). A label: no
         # verdict, rate or rule reads it.
@@ -5451,17 +5472,17 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
         # had no time to check it against and rate() recovers a lost decimal
         # there, so taking it from parsed would put 24 miles on the panel
         # beside a rate worked out over 2.4.
-        'miles': rate.get('miles', parsed['miles']),
+        'miles': fig['miles'],
         'items': parsed['items'],
         # DoorDash's printed stop count. See OP.parse's `stops`.
         'stops': parsed.get('stops'),
-        'milesCorrected': rate.get('milesCorrected', parsed['milesCorrected']),
-        'milesUncertain': rate.get('milesUncertain', parsed['milesUncertain']),
+        'milesCorrected': fig['milesCorrected'],
+        'milesUncertain': fig['milesUncertain'],
         # What was taken off the top, and at what rate. Without these the page
         # cannot explain its own headline: a driver who works out 7.09 over 34
         # minutes gets $12.51/hr and the screen says $10.61, with nothing on it
         # saying that 3.6 miles of running costs came out first.
-        'cost': round(rate['cost'], 2) if rate.get('ready') else None,
+        'cost': fig['cost'],
         'costPerMile': rate.get('costPerMile'),
         'ms': round(ms['total']),
         'text': (parsed.get('text') or '')[:200],
@@ -5477,7 +5498,7 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
         # page was left to infer a finished reading from `locked` and drew a
         # plain ACCEPT on a card missing half its journey, which reads as a much
         # better offer than it is.
-        'whole': None if whole is None else bool(whole),
+        'whole': None if whole is None else fig['whole'],
         # Whether this read found a payout flush against the top of the box
         # and threw the whole parse away for it (pipeline.money_is_clipped).
         # The one case where the rig KNOWS the box cut a card, and the reading

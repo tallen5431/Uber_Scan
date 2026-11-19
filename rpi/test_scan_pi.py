@@ -2141,6 +2141,35 @@ eq('...and the card\'s own yardstick fields',
    [7.6, True, True, 1, None, False, True])
 eq('...and that the card said it was an Early look, even as OCR spelled it',
    placed.get('earlyLook', 'absent'), True)
+# ...and the two `miles*` flags are rate()'s, beside rate()'s distance. On a
+# deadline card rate() is where a lost decimal is put back: "24 mi" with 20
+# minutes to the deadline is 2.4 mi, corrected. The line took `miles` from
+# rate() and the flags from parse(), so it said 2.4 miles and "not corrected",
+# while the row and the panel's reading said corrected — and Map view's
+# yardstick trusts a distance the reader did not repair.
+_dl = SP.OP.parse('$18.00 Guaranteed (incl. tip) 24 mi Deliver by 6:25 PM')
+_dl_rate = SP.OP.rate(_dl, {'nowMinutes': 18 * 60 + 5})
+_dl_line = said(lambda: SP.emit_offer('x', _dl, _dl_rate, whole=True))['offer']
+_dl_read = said(lambda: SP.emit(_dl_rate, _dl, {'total': 900}, True, whole=True))
+_dl_row = SP.JR.row_for(_dl, _dl_rate, 1, offer_id='x', whole=True)
+_dl_keys = ('pay', 'miles', 'milesCorrected', 'milesUncertain', 'perHour', 'cost',
+            'billedMinutes', 'state', 'whole')
+eq('a deadline card\'s lost decimal is put back and the offer line says it was corrected',
+   (_dl['miles'], _dl['milesCorrected'], _dl_line['miles'], _dl_line['milesCorrected']),
+   (24.0, False, 2.4, True))
+eq('...and the line, the reading and the row state the same figures for it',
+   ([_dl_line[k] for k in _dl_keys], [_dl_read[k] for k in _dl_keys]),
+   ([_dl_row[k] for k in _dl_keys], [_dl_row[k] for k in _dl_keys]))
+# The differences that stay, on purpose: the reading and the line give the
+# card's own minutes (the line through `cardMinutes`), and neither states a
+# rate, a cost or a billed time beside no verdict, where a row stores what a
+# hand-built rate carried.
+_hand = {'perHour': 20.0, 'cost': 1.5, 'minutes': 21.0, 'state': 'go'}
+_hand_line = said(lambda: SP.emit_offer('x', {'pay': 9.0, 'minutes': 21.0}, _hand))['offer']
+eq('...a rate with no verdict states no rate or cost on the line, and the row keeps them',
+   ((_hand_line['perHour'], _hand_line['cost'], _hand_line['billedMinutes']),
+    [SP.JR.figures({'pay': 9.0}, _hand)[k] for k in ('perHour', 'cost', 'billedMinutes')]),
+   ((None, None, 21.0), [20.0, 1.5, 21.0]))
 _refused = dict(_where, err=129.2, ok=False, why='rough')
 _rough = said(lambda: SP.emit_offer('x', _card, _rated, where=_refused, whole=True))['offer']
 eq('a fix the gate refused still rides, with the gate\'s answer',
