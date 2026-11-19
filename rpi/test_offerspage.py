@@ -2314,6 +2314,46 @@ const TEXT = (sel) => {
     await page.close();
     await ctx.close();
   }
+
+  // /api/status at the page's start, counted at the network: the orders in
+  // the car (askInCar) and the ◂ Live link were asked with a fetch apiece,
+  // the same bytes twice on every open. One answer for both now, and it is
+  // still read for the link: a copy with no camera hides it.
+  stage = 'one ask of /api/status';
+  {
+    const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
+    const page = await ctx.newPage();
+    let asks = 0;
+    await page.route('**/api/status', (route) => {
+      asks++;
+      return route.fulfill({ status: 200, contentType: 'application/json',
+                             body: JSON.stringify({ scanner: { enabled: false }, holding: null }) });
+    });
+    await page.goto(base + '/journal.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForTimeout(1500);
+    out.statusAsks = { asks: asks,
+                       liveHidden: await page.evaluate(() => document.getElementById('toLive').hidden) };
+    // The tabs, from the keyboard: each names a panel that is there, and the
+    // arrows, Home and End move the pick, focus with it, one Tab stop.
+    out.tabKeys = { controls: await page.evaluate(() => [].map.call(
+      document.querySelectorAll('#tabs button[role="tab"]'), (b) => [b.getAttribute('data-view'),
+        (b.getAttribute('aria-controls') || '').split(' ').filter(Boolean)
+          .every((id) => !!document.getElementById(id) && document.getElementById(id).getAttribute('role') === 'tabpanel'),
+        (b.getAttribute('aria-controls') || '').split(' ').filter(Boolean).length])) };
+    const picked = () => page.evaluate(() => {
+      const on = document.querySelector('#tabs button[aria-selected="true"]');
+      return [on && on.getAttribute('data-view'), document.activeElement === on,
+              document.querySelectorAll('#tabs button[tabindex="0"]').length];
+    });
+    await page.focus('#tabs button[data-view="today"]');
+    out.tabKeys.steps = [];
+    for (const k of ['ArrowRight', 'ArrowRight', 'ArrowLeft', 'End', 'ArrowRight', 'ArrowLeft', 'Home']) {
+      await page.keyboard.press(k);
+      out.tabKeys.steps.push([k].concat(await picked()));
+    }
+    await page.close();
+    await ctx.close();
+  }
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch((e) => { console.log(JSON.stringify(
@@ -2415,6 +2455,24 @@ try:
         crashed(got['__crashed'])
     if got.get('skip'):
         skip(got['skip'])
+
+    # --- one ask of /api/status at the start -------------------------------
+    _sa = got.get('statusAsks') or {}
+    eq('journal.html asks /api/status once as it opens, for the car and the ◂ Live link both',
+       _sa.get('asks'), 1)
+    ok_('...and the answer still hides ◂ Live on a copy with no camera', _sa.get('liveHidden'))
+    _tk = got.get('tabKeys') or {}
+    eq('each tab names the panel it shows, a panel that is there (All names all six)',
+       _tk.get('controls'),
+       [['today', True, 1], ['offers', True, 1], ['money', True, 1], ['strategy', True, 1],
+        ['runs', True, 1], ['trends', True, 1], ['all', True, 6]])
+    eq('the arrows, End and Home move the pick along the tabs, wrapping, the focus with it '
+       'and one Tab stop for the row',
+       _tk.get('steps'),
+       [['ArrowRight', 'offers', True, 1], ['ArrowRight', 'money', True, 1],
+        ['ArrowLeft', 'offers', True, 1], ['End', 'all', True, 1],
+        ['ArrowRight', 'today', True, 1], ['ArrowLeft', 'all', True, 1],
+        ['Home', 'today', True, 1]])
 
     # --- the page reached its own data ---------------------------------------
     for name in FEEDS:
