@@ -181,6 +181,23 @@ var GPS_TIMED = 'drop (gps-timed)';
 
 function round2(v) { return v === null || v === undefined ? null : Math.round(v * 100) / 100; }
 
+/* The least and greatest of a list, by a loop. Math.min.apply and
+ * Math.max.apply pass the list as arguments, on the stack, and past about
+ * 125,000 values that throws "Maximum call stack size exceeded": the span,
+ * Gone quiet and --gps all took one over every offer, so a record that size
+ * would have stopped the report. Infinity / -Infinity for none and NaN if
+ * any is NaN, as the two Math calls give. */
+function minOf(xs) {
+  var m = Infinity;
+  for (var i = 0; i < xs.length; i++) if (xs[i] < m || xs[i] !== xs[i]) { m = xs[i]; if (m !== m) break; }
+  return m;
+}
+function maxOf(xs) {
+  var m = -Infinity;
+  for (var i = 0; i < xs.length; i++) if (xs[i] > m || xs[i] !== xs[i]) { m = xs[i]; if (m !== m) break; }
+  return m;
+}
+
 // advice.js's own LCG (shuffled), for intervals that come out the same twice.
 function rng(seed) {
   var s = seed >>> 0;
@@ -2221,7 +2238,7 @@ function quietTable(rows, key, label, diffs, what) {
   var pool = rows.filter(counted);
   var times = pool.map(seenAt).filter(isFinite);
   if (!times.length) return { cols: [], rows: [], cut: null };
-  var end = Math.max.apply(null, times), cut = end - QUIET_DAYS * 864e5;
+  var end = maxOf(times), cut = end - QUIET_DAYS * 864e5;
   var before = pool.filter(function (o) { return seenAt(o) < cut; });
   var recent = pool.filter(function (o) { return seenAt(o) >= cut; });
   var outB = A.outingsIn(before), outR = A.outingsIn(recent);
@@ -2229,7 +2246,7 @@ function quietTable(rows, key, label, diffs, what) {
   var out = Object.keys(by).filter(function (k) { return by[k].length >= DESC_MIN_N; }).map(function (k) {
     var list = by[k];
     var b = list.filter(function (o) { return seenAt(o) < cut; }).length, r = list.length - b;
-    var last = Math.max.apply(null, list.map(seenAt));
+    var last = maxOf(list.map(seenAt));
     var expected = outB ? round2(b / outB * outR) : null;
     var countP = b >= MIN_N && outR >= QUIET_MIN_OUTINGS && expected >= QUIET_MIN_EXPECTED
       ? Math.round(poissonLE(r, expected) * 1000) / 1000 : null;
@@ -3343,7 +3360,7 @@ function analyse(offers, taken, placed, dropAt, opts) {
   var times = counts.map(function (o) { return o.at; }).filter(isFinite);
   return {
     made: opts.now || Date.now(),
-    span: times.length ? [Math.min.apply(null, times), Math.max.apply(null, times)] : null,
+    span: times.length ? [minOf(times), maxOf(times)] : null,
     outings: A.outingsIn(counts),
     minN: typeof opts.minN === 'number' ? opts.minN : MIN_N,
     dropMinN: DROP_MIN_N, minOutings: MIN_OUTINGS, alpha: ALPHA, shuffles: SHUFFLES,
@@ -5881,8 +5898,15 @@ var PAGE_JS = String(function page() {
       if (A0.centre) { lats.push(A0.centre.lat); lons.push(A0.centre.lon); }
       if (!lats.length) { el.innerHTML = '<p class="note" style="padding:12px">No dot in this slot.</p>'; }
       else {
-        var la0 = Math.min.apply(null, lats), la1 = Math.max.apply(null, lats);
-        var lo0 = Math.min.apply(null, lons), lo1 = Math.max.apply(null, lons);
+        // A loop, not Math.min.apply: an Any-day slot holds a dot for every
+        // offer, past the ~125,000 arguments the stack takes (minOf's note).
+        var la0 = Infinity, la1 = -Infinity, lo0 = Infinity, lo1 = -Infinity;
+        for (var di = 0; di < lats.length; di++) {
+          if (lats[di] < la0) la0 = lats[di];
+          if (lats[di] > la1) la1 = lats[di];
+          if (lons[di] < lo0) lo0 = lons[di];
+          if (lons[di] > lo1) lo1 = lons[di];
+        }
         var kx = Math.cos((la0 + la1) / 2 * Math.PI / 180);
         var spanX = Math.max((lo1 - lo0) * kx, 0.01), spanY = Math.max(la1 - la0, 0.01);
         var sc = Math.min((Wd - 40) / spanX, (Hd - 40) / spanY);
@@ -6430,7 +6454,7 @@ async function main(argv) {
   var spanTimes = offers.filter(counted).map(seenAt).filter(isFinite);
   var fx = null, presses = null;
   if (o.gps && spanTimes.length) {
-    fx = gpsFixes(o.gps, Math.min.apply(null, spanTimes) - 3600e3, Math.max.apply(null, spanTimes) + 3600e3);
+    fx = gpsFixes(o.gps, minOf(spanTimes) - 3600e3, maxOf(spanTimes) + 3600e3);
     var tp = timePresses(taken, fx.fixes);
     taken = tp.taken;
     presses = tp.stats;
@@ -6605,7 +6629,7 @@ module.exports = {
   pickupKind: pickupKind, placePickup: placePickup, placeDropoff: placeDropoff, storeLabel: storeLabel,
   printedDoor: printedDoor, placeRow: placeRow, heldEndsOf: heldEndsOf, afterFor: afterFor,
   AFTER_GPS_WIDEN_MI: AFTER_GPS_WIDEN_MI,
-  placesOf: placesOf, cellOf: cellOf, bootCI: bootCI, cells: cells, coverage: coverage,
+  placesOf: placesOf, cellOf: cellOf, bootCI: bootCI, minOf: minOf, maxOf: maxOf, cells: cells, coverage: coverage,
   nextTake: nextTake, timelineOf: timelineOf, tripsOf: tripsOf, dropTable: dropTable,
   analyse: analyse, summary: summary, testLine: testLine, html: html, csvOf: csvOf, dropCsv: dropCsv,
   paidSection: paidSection, loadEarnings: loadEarnings,

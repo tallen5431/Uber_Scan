@@ -1194,6 +1194,12 @@ function offer(x) {
      && /offers are netted at the cost set when each was seen/.test(pageSrc)
      && /Gross \(before costs\)/.test(pageSrc) && /'pay \(before costs\)'/.test(pageSrc));
 
+  // The every-offer CSV named its file off Math.min/max.apply over every
+  // offer's time, which throws past ~125,000 arguments, and no file came.
+  var eoSrc = pageSrc.slice(pageSrc.indexOf('T.offersCsv(data.offers'), pageSrc.indexOf("'every-offer' +"));
+  ok('[every offer csv] its first and last times are a loop, not Math.min/max.apply over every offer',
+     eoSrc.length > 100 && /for \(var ti = 0; ti < times\.length/.test(eoSrc) && !/Math\.(min|max)\.apply/.test(eoSrc.replace(/\/\/[^\n]*/g, '')));
+
   var dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trends-'));
   var journal = path.join(dir, 'journal.jsonl');
   var now = Date.now();

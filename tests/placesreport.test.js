@@ -834,6 +834,20 @@ function nbx() {
   var busyRow = rowOf(P.quietTable(busyQ, function (o) { return o.town; }, function (k) { return k; }, {}, 'town'), 'Brimhaven');
   eq('...so a town sending its 60 a day all along is not gone quiet (expected ' + busyRow.expected + ', got '
      + busyRow.recent + ', p ' + busyRow.countP + ')', [busyRow.flag, busyRow.countP > 0.4], ['', true]);
+  // The second review: Math.max.apply over every offer passes them all as
+  // arguments, and past ~125,000 the stack overflows; the span, Gone quiet
+  // and --gps each took one. 130,000 cards in one town, a record that size.
+  var hugeQ = [];
+  for (var hq = 0; hq < 130000; hq++) hugeQ.push(card({ id: 'hq' + hq, at: day(1 + Math.floor(hq / 3200), 18) + (hq % 3200) * 1000, town: 'Brimhaven' }));
+  var hugeRow = null, hugeErr = null;
+  try { hugeRow = rowOf(P.quietTable(hugeQ, function (o) { return o.town; }, function (k) { return k; }, {}, 'town'), 'Brimhaven'); }
+  catch (e) { hugeErr = e.message; }
+  eq('...and 130,000 offers do not overflow the stack (' + (hugeErr || 'read') + ')', [hugeErr, hugeRow && hugeRow.last,
+     hugeRow && hugeRow.before + hugeRow.recent], [null, '2026-04-10', 130000]);
+  var spread = []; for (var sp = 0; sp < 200000; sp++) spread.push((sp * 7919) % 200003);
+  eq('...minOf and maxOf, the loop that replaces Math.min/max.apply: 200,000 values, none, and a NaN as Math gives',
+     [P.minOf(spread), P.maxOf(spread), P.minOf([]), P.maxOf([]), isNaN(P.minOf([3, NaN, 1])), isNaN(P.maxOf([NaN, 3]))],
+     [0, 200002, Infinity, -Infinity, true, true]);
 
   eq('ISO weeks: 1 Jan 2026 is in its first', P.isoWeek('2026-01-01'), '2026-W01');
   eq('...and 1 Jan 2027 in 2026\'s fifty-third', P.isoWeek('2027-01-01'), '2026-W53');

@@ -160,13 +160,14 @@ function check(journal, trends, opts) {
   var runs = ((trends && trends.runs) || []).map(function (s) { return [s[0] * 1000, s[1] * 1000]; });
   var res = { made: opts.now || Date.now() };
 
-  // 1. What was read.
+  // 1. What was read. Every offer's time: P.minOf / maxOf, a loop, where
+  // Math.min.apply overflows the stack past ~125,000 (places_report's note).
   var ats = offers.map(function (o) { return typeof o.firstAt === 'number' ? o.firstAt : o.at; })
     .filter(function (t) { return typeof t === 'number' && isFinite(t); });
   res.journal = { offers: offers.length, total: journal ? journal.total : null, pages: journal && journal.pages || 1,
                   truncated: !!(journal && journal.truncated), driverDays: A.outingsIn(offers),
-                  first: ats.length ? T.dayKeyOf(Math.min.apply(null, ats)) : null,
-                  last: ats.length ? T.dayKeyOf(Math.max.apply(null, ats)) : null };
+                  first: ats.length ? T.dayKeyOf(P.minOf(ats)) : null,
+                  last: ats.length ? T.dayKeyOf(P.maxOf(ats)) : null };
   var rDays = Object.create(null);
   rows.forEach(function (r) { rDays[r.day] = 1; });
   res.trends = { rows: rows.length, counted: rows.filter(function (r) { return r.ok; }).length,
@@ -285,7 +286,7 @@ function check(journal, trends, opts) {
   // newest offer was weeks before the day it ran: a rig that has stopped
   // syncing home looks exactly like a driver who has not driven, and only the
   // owner can say which.
-  var newest = ats.length ? Math.max.apply(null, ats) : null;
+  var newest = ats.length ? P.maxOf(ats) : null;
   res.journal.daysSinceNewest = newest === null ? null : Math.floor((res.made - newest) / 86400000);
 
   // 10. How long the main computations take here.

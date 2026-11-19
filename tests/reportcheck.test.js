@@ -153,6 +153,12 @@ eq('the pair window is the server\'s own (server.js REOFFER_WINDOW_MS)', sw && s
   try { RC.parseArgs(['--since', 'March']); } catch (e) { threw = e.message; }
   eq('...and refuses a date it cannot read', threw, '--since is YYYY-MM-DD');
 
+  // Every offer's time through Math.min/max.apply overflowed the stack past
+  // ~125,000 offers (the reporting code's second review); places_report's
+  // minOf / maxOf loop instead.
+  var rcSrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'tools', 'report_check.js'), 'utf8');
+  ok('nothing spreads every offer onto the stack: no Math.min/max.apply', !/Math\.(min|max)\.apply/.test(rcSrc.replace(/\/\/[^\n]*/g, '')));
+
   console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED' : '\nAll ' + pass + ' report-check checks passed');
   process.exitCode = fail ? 1 : 0;
 }()).catch(function (e) {
