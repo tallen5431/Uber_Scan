@@ -10551,7 +10551,11 @@ if (isFinite(_clockAfterEnv) && _clockAfterEnv > 0) {
  * the whole server down from inside a file callback.
  *
  * Named here because it was written out four times and the place that needed it
- * most did not have it — see /api/journal/newest. */
+ * most did not have it — see /api/journal/newest. ...and then the number went
+ * on being written out by hand beside the name: six clamps on `since` and
+ * `until` (/api/journal and its CSV, /api/journal/notes, /api/trends,
+ * /api/today, /api/earnings) until the server review (Nov 2026). Every one
+ * says the name now, and rpi/test_lint.py holds the number to this line. */
 var CLOCK_BELIEVABLE_UNTIL = 4102444800000;
 
 /* ...and how far ahead of THIS machine's own clock a row may be stamped.
@@ -15171,7 +15175,7 @@ function route(req, res) {
   // like /api/journal/newest: the same VPN, the same driver's own data.
   if (req.method === 'GET' && req.url.split('?')[0] === '/api/journal/notes') {
     var sinceNotes = clampNumber((url.parse(req.url, true).query || {}).since,
-                                 0, 4102444800000, 0);
+                                 0, CLOCK_BELIEVABLE_UNTIL, 0);
     return readJournal(function (rows, readErr) {
       if (!rows) {
         return send(res, 200, JSON.stringify({
@@ -15799,12 +15803,12 @@ function route(req, res) {
     // "today": a trailing 24 hours folds last night's shift into this morning's
     // figures, and only the browser knows where the driver is and therefore
     // when their day began.
-    var since = clampNumber(q.since, 0, 4102444800000, 0);
+    var since = clampNumber(q.since, 0, CLOCK_BELIEVABLE_UNTIL, 0);
     // ...and an end, for a reader that must page past `limit` (the places
     // report, the reporting review's R2): only the offers LISTED stop before
     // `until`; the window, its takes, records and every figure over it are
     // the same as without it, so a second page is only older offers.
-    var until = clampNumber(q.until, 0, 4102444800000, 0);
+    var until = clampNumber(q.until, 0, CLOCK_BELIEVABLE_UNTIL, 0);
     var withHidden = q.hidden === '1';
     return readJournal(function (rows, readErr, torn) {
       // This one may degrade — a driver looking at the offers page is better
@@ -16019,7 +16023,7 @@ function route(req, res) {
     }
     var tq2 = url.parse(req.url, true).query || {};
     var tdays = clampNumber(tq2.days, 0, 3650, 30);
-    var tsince = clampNumber(tq2.since, 0, 4102444800000, 0);
+    var tsince = clampNumber(tq2.since, 0, CLOCK_BELIEVABLE_UNTIL, 0);
     return readJournal(function (rows, readErr) {
       if (!rows) {
         return send(res, 503, JSON.stringify({ ok: false, unreadable: readErr && readErr.code || 'unknown' }),
@@ -16056,7 +16060,7 @@ function route(req, res) {
     // their day began. 4am, in their timezone, is journal.html's boundary and
     // the one the page sends.
     if (!isFinite(sinceMs) || sinceMs < CLOCK_BELIEVABLE_AFTER
-        || sinceMs > 4102444800000) {
+        || sinceMs > CLOCK_BELIEVABLE_UNTIL) {
       return send(res, 400, JSON.stringify({
         ok: false,
         error: 'since must be an epoch-ms moment in this century'
@@ -16714,7 +16718,7 @@ function earningsRoute(req, res) {
 
   if (pathname === '/api/earnings' && (req.method === 'GET' || req.method === 'HEAD')) {
     var days = clampNumber(q.days, 0, 3650, EARNINGS_DAYS_DEFAULT);
-    var since = clampNumber(q.since, 0, 4102444800000, 0);
+    var since = clampNumber(q.since, 0, CLOCK_BELIEVABLE_UNTIL, 0);
     var floor = since || (days > 0 ? Date.now() - days * 86400000 : 0);
     return readJournal(function (rows, readErr) {
       earningsShots(function (shots) {

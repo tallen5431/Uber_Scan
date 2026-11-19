@@ -1384,6 +1384,11 @@ eq('server.js works a median out by percentileOf, not by hand (`.length % 2 ?`)'
 eq('server.js reads each rpi/config.json switch through settingOn, not its own copy of the reader',
    (re.findall(r'cfg\.settings\.\w+ === true', _srv_code), len(re.findall(r'^function settingOn\(', _srv, re.M))),
    ([], 1))
+# ...and 1 Jan 2100 is CLOCK_BELIEVABLE_UNTIL, written out once: six clamps
+# had gone on spelling the number beside the name.
+eq('server.js writes 4102444800000 once, as CLOCK_BELIEVABLE_UNTIL',
+   re.findall(r'[^\n]*\b4102444800000\b[^\n]*', _srv_code),
+   ['var CLOCK_BELIEVABLE_UNTIL = 4102444800000;'])
 
 # --- what a new session reads first: CLAUDE.md --------------------------------
 #
