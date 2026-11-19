@@ -427,6 +427,61 @@ function offer(x) {
   ok('...with no effect and a 40% night-to-night swing, phi ' + phiNo.toFixed(2) + ' keeps chance shading low ('
      + noShaded + ' of 300)', phiNo > 1.3 && noShaded <= 9);
 
+  /* --- a quantile's interval and the nights (the reporting review's S1) --- */
+  eq('S1: at phi_q 1 the widened interval is the plain one; at 2 its ranks are n=30\'s scaled onto 60 (8 -> 16, 23 -> 46)',
+     [T.quantCIw(Array.from({ length: 60 }, function (_, i) { return i + 1; }), 0.5, 0.01, 1),
+      T.quantRanks(30, 0.5, 0.01),
+      T.quantCIw(Array.from({ length: 60 }, function (_, i) { return i + 1; }), 0.5, 0.01, 2)],
+     [T.quantCI(Array.from({ length: 60 }, function (_, i) { return i + 1; }), 0.5, 0.01), [8, 23], [16, 46]]);
+  eq('S1: rho_q by hand: one group, two above in one night and none in the other (S 8, A 2, B 2: 3) is capped at 1; '
+     + 'nights alike are 0; and the design effect 1 + (m - 1) rho with m = sum n^2 / sum n',
+     [T.qRho([[[20, 20], [5, 5]]], 10), T.qRho([[[5, 20], [5, 20]], [[20, 5], [20, 5]]], 10),
+      T.qPhiOf([10, 30], 0.1)], [1, 0, 3.4000000000000004]);
+  // 300 no-effect cells on four nights of 12 offers, the owner's spread
+  // around $13.95, each night's whole hour shifted by a 20% swing in log
+  // $/hr: the plain interval shades by chance far past 1 in 100, the
+  // widened one about 1 in 100 or fewer.
+  var r7 = rng(29), qCells = [];
+  function nz() { var u = 0; while (!u) u = r7(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * r7()); }
+  for (var qc = 0; qc < 300; qc++) {
+    var qn = [];
+    for (var qd = 0; qd < 4; qd++) {
+      var sh = 0.2 * nz(), vs = [];
+      for (var qo = 0; qo < 12; qo++) vs.push(13.95 * Math.exp(0.398 * nz() + sh));
+      qn.push(vs);
+    }
+    qCells.push(qn);
+  }
+  var rhoQ = T.qRho(qCells, 13.95), plainQ = 0, wideQ = 0;
+  qCells.forEach(function (ns) {
+    var all = [].concat.apply([], ns);
+    if (T.shadeQ(all, 4, 13.95, 0.5, 2).shade) plainQ += 1;
+    if (T.shadeQ(all, 4, 13.95, 0.5, 2, T.qPhiOf(ns.map(function (v) { return v.length; }), rhoQ)).shade) wideQ += 1;
+  });
+  ok('S1: with no effect and a 20% night swing, rho_q ' + rhoQ.toFixed(3) + ' keeps the medians\' chance shading low ('
+     + wideQ + ' of 300; ' + plainQ + ' unwidened)', rhoQ > 0.05 && wideQ <= 6 && plainQ >= 15);
+
+  /* --- earned net with a take that lost money (the reporting review's S4) --- */
+  // 300 evenings, a take an hour; in Saturday's 7pm hour the takes alternate
+  // $60 over 20 mi (+$46 net at $0.70/mi) and $5 over 57 mi (-$34.90): the
+  // interval weighs the loser as 0 and drew "above" at $6.49 against $11.80.
+  (function () {
+    var rr = [], sp = [], flip = 0;
+    for (var d = 0; d < 300; d++) {
+      var day = new Date(2026, 6, 1 + d), a0 = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 18).getTime();
+      sp.push([a0, a0 + 4 * 3.6e6]);
+      for (var t = a0, i = 0; t <= a0 + 4 * 3.6e6; t += 600000, i++) {
+        var take = i % 6 === 3, dt = new Date(t), sat = dt.getDay() === 6 && dt.getHours() === 19, pay = 12, miles = 0;
+        if (sat && take) { flip ^= 1; pay = flip ? 60 : 5; miles = flip ? 20 : 57; }
+        rr.push({ t: t, app: 2, pay: pay, perHour: 20, minutes: 20, miles: miles, flags: 1 | (take ? 128 : 0) });
+      }
+    }
+    var G = T.grid(T.readRows(rr), { stat: 'earned', runs: sp, cut: 30, net: true, costPerMile: 0.7 });
+    var c = G.cells.filter(function (x) { return x.dow === 6 && x.hour === 19; })[0];
+    eq('S4: a cell holding a take that paid less than its miles cost is printed and never shaded, and counted',
+       [c.value < G.ref, c.clamped, c.enough, c.shade, c.ci, G.clamped >= 1], [true, true, true, null, null, true]);
+  }());
+
   /* --- the calendar as week rows --- */
   var cw = [];
   ['2026-02-26', '2026-02-27', '2026-03-03', '2026-03-10', '2026-03-12'].forEach(function (dk, i) {
@@ -816,7 +871,7 @@ function offer(x) {
   eq('...a week on one night only is under the week\'s floor (2 h on 2 days): no comparison drawn at all',
      [sOne.now.enough, sOne.cmp.good, sOne.cmp.gross, sOne.prev.goodRate], [false, null, null, 6]);
   eq('...and the earnings of two weeks with no take at all are not compared into a difference',
-     sLow.cmp.gross, { prev: 0, shade: null });
+     sLow.cmp.gross, { prev: 0, shade: null, clamped: false });
   eq('...a range that starts mid-week says the week is only part of one',
      [T.weekReview(wkR, wkRun, '2026-03-16', { cut: 25, first: '2026-03-17' }).now.partStart,
       T.weekReview(wkR, wkRun, '2026-03-16', { cut: 25, first: '2026-03-16' }).now.partStart], [true, false]);
@@ -944,6 +999,9 @@ function offer(x) {
        && /a floor: only your ✓ or Took counts as taken/.test(page) && /that evening, clearly/.test(page)
        && /No slot clearly better or worse/.test(page) && /matched to an order in this week/.test(page)
        && /now: Date\.now\(\) \}\)/.test(page));
+    ok('S7: every coloured view says about 1 coloured square in 100 can be chance; the grid says its quantile is widened',
+       (page.match(/\+ CHANCE|\+ ' ' \+ CHANCE/g) || []).length === 5
+       && /About 1 coloured square in 100 can be chance\./.test(page) && /move together \(a slow night/.test(page));
     ok('...the ruler offers 10, 20, 30 and 50, opens on 20, and says it is for reading only',
        /data-top="10"[\s\S]*data-top="20" aria-pressed="true"[\s\S]*data-top="30"[\s\S]*data-top="50"/.test(page)
        && /never\s+reaches the verdict/.test(page));

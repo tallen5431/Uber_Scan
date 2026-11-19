@@ -7496,6 +7496,9 @@
       return p === 'weekday' ? 'Weekdays' : p === 'weekend' ? 'Weekends'
         : (p.from ? shortDay(p.from) : 'start') + ' – ' + (p.to ? shortDay(p.to) : 'end');
     }
+    // Said under every view whose squares are coloured (the reporting
+    // review's S7): each is held to 99%, and a screen holds dozens of them.
+    var CHANCE = 'About 1 coloured square in 100 can be chance.';
     // "A good offer about every N min", at the good floor, or why not.
     function waitWords(e) {
       if (!e) return '';
@@ -7713,7 +7716,8 @@
             + (good ? c.good + ' good in ' + c.hours.toFixed(1) + ' hours online'
                : earned ? c.takes + ' takes, ' + FMT.pay(c.earned) + ', in ' + c.hours.toFixed(1) + ' hours online'
                : c.n + ' offers') + ' on ' + c.days + ' days; ' + waitWords(c)
-            + (c.shade ? ' — ' + c.shade + ' the range\'s ' + statFmt(g.ref) : '') + '. Press to look closer.';
+            + (c.shade ? ' — ' + c.shade + ' the range\'s ' + statFmt(g.ref) : '')
+            + (earned && c.clamped ? ' — not shaded: a take here paid less than its miles cost' : '') + '. Press to look closer.';
           return '<td class="' + (c.shade || '') + picked + '"' + press + ' title="' + esc(tip) + '">' + statFmt(c.value)
             + '<small>' + (good ? c.good : earned ? c.takes + 'tk' : c.n) + '</small></td>';
         }).join('') + '</tr>';
@@ -7750,20 +7754,24 @@
           + 'tab; this is the card. Shaded only where a 99% interval (each take weighted by its pay, widened ×'
           + g.phi.toFixed(2) + ' for how the nights swing) lies wholly above or below the range\'s '
           + (g.ref === null ? '—' : FMT.perHour(g.ref)) + ' an hour, at ' + g.floorHours + ' hours online on ' + g.floorDays
-          + ' days. Takes are few, so few cells clear it.';
+          + ' days. Takes are few, so few cells clear it.'
+          + (g.clamped ? ' ' + g.clamped + ' cell' + (g.clamped === 1 ? '' : 's') + ' holding a take that paid less than its '
+             + 'miles cost ' + (g.clamped === 1 ? 'is' : 'are') + ' not shaded: the interval cannot weigh a loss.' : '');
       } else {
         var w = st.stat === 'p50' ? 'median' : st.stat.toUpperCase();
         note = 'Each cell: the ' + w + ' $/hr of the offers in that weekday and clock hour, and its n. Shaded only where '
           + 'the 99% interval of its ' + w + ' lies wholly above (green) or below (red) the range\'s ' + w + ' of '
           + (g.ref === null ? '—' : FMT.perHour(g.ref)) + ', and only at ' + g.floor + ' offers on ' + g.floorDays
-          + ' days; under that a cell is grey and shows its n. '
+          + ' days; under that a cell is grey and shows its n. The interval is widened by how much a night\'s offers '
+          + 'move together (a slow night lowers the whole hour), so a busy cell is not shaded off one night. '
           + (st.stat === 'p90' ? 'A P90\'s interval needs 51 offers before it has a top at all, so a P90 cell under that '
              + 'stays grey, whatever its figure.'
              : st.stat === 'p75' ? 'A P75\'s interval needs a few more offers than a median\'s; a cell short of them stays grey.'
              : 'The two were set together: with no difference at all, under 1 cell in 100 is shaded.');
       }
       $('trGridNote').textContent = note + ' Hatched: off, no minute online and no card. Weekdays are the driver\'s '
-        + '(4am to 4am). The last row: of the good offers in each hour, the share from Uber. Press a cell to look closer.';
+        + '(4am to 4am). The last row: of the good offers in each hour, the share from Uber. Press a cell to look closer. '
+        + CHANCE;
       $('trGrid').onclick = function (e) {
         var td = e.target.closest ? e.target.closest('td[data-cell]') : null;
         if (td) openCell(td.getAttribute('data-cell'));
@@ -7835,7 +7843,7 @@
            : earned ? 'each period\'s interval at 93% (a pay-weighted count, widened ×' + g.phi.toFixed(2)
              + ') must not overlap the other\'s, which is 99% or stricter.'
            : 'each period\'s order-statistic interval at 93% must not overlap the other\'s, which is 99% or stricter.')
-        + ' With no difference at all, under 1 cell in 100 is shaded. Hatched: off in both.';
+        + ' With no difference at all, under 1 cell in 100 is shaded. Hatched: off in both. ' + CHANCE;
     }
 
     function openCell(key) {
@@ -8272,7 +8280,7 @@
            : 'Shaded by the grid\'s rule against the range\'s ' + statFmt(cal.ref) + '; a day under ' + cal.floor
            + ' counted offers, or too few for this figure\'s interval, is grey with its n. A week\'s figure is pooled over '
            + 'its offers and shaded on two days or more, as a grid cell.')
-        + ' Press a day to list its offers.';
+        + ' Press a day to list its offers. ' + CHANCE;
     }
     function ordinal(n) {
       var t = n % 100;
@@ -8305,7 +8313,7 @@
         + (th.gated ? 'Every third holds ' + th.need + ' months or more, so a third is shaded, by the grid\'s rule, where '
            + 'it clears the range\'s ' + statFmt(th.ref) + '.'
            : 'Not shaded: every third needs days from ' + th.need + ' months (now ' + th.thirds.map(function (e) {
-             return e.months; }).join(', ') + '). Press All for the longest record.');
+             return e.months; }).join(', ') + '). Press All for the longest record.') + ' ' + CHANCE;
     }
 
     /* --- the hour x date timeline (round three) -----------------------------------
@@ -8382,7 +8390,7 @@
         + 'rule against the range\'s ' + statFmt(tl.ref) + '; under it the square is only tinted by its minutes online, '
         + 'with its figure and n in its title. One hour of one night can never meet the floor, so by days nearly every '
         + 'square is a tint: that is honest, not empty. Weeks and months pool enough to say more. Hatched: off. Press a '
-        + 'square to look closer.';
+        + 'square to look closer. ' + CHANCE;
     }
 
     /* --- one weekday over the weeks (round three) ------------------------------------
