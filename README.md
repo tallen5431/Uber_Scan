@@ -1181,7 +1181,9 @@ the cutoffs as Trends and the report each work them out, for every Trends
 view and figure the cells meeting the floors and the cells coloured, hours
 online by the one rule, the takes by each view's rule with the weeks they
 disagree, each cost per mile on the rows and its dates, the share of offers
-re-read, suspect or unread, and how long the main computations took. Nothing
+re-read, suspect, unread or re-offered (and which half of the re-offered rule
+marked them, and whether its same-trip pairs agree on miles and minutes), how
+many days old the newest offer is, and how long the main computations took. Nothing
 is written; nothing on the rig runs it.
 
 ## What the server will not serve

@@ -96,6 +96,41 @@ var leaks = [];
 });
 eq('[privacy] nothing printed or in --json is an id, a text, a place, a coordinate or one trip\'s pay', leaks, []);
 
+// Which half of the re-offered rule marked what (the first real run marked
+// more than expected). Invented: one order offered again 5 min later, same route, pay up;
+// two different orders from one grill to one town 10 min apart, the miles
+// far apart; one card that left the screen and came back, alone.
+function ro(id, min, pay, miles, minutes, drop, extra) {
+  return Object.assign({ id: id, at: at(24, 18, min), pay: pay, miles: miles, minutes: minutes, app: 'uber',
+                         pickup: 'Imaginary Grill', dropoff: drop, reoffered: true, perHour: 20 }, extra || {});
+}
+var roOffers = [
+  ro('secret-ro-1', 0, 7.13, 4.1, 18, 'Faketown'), ro('secret-ro-2', 5, 9.47, 4.2, 19, 'Faketown'),
+  ro('secret-ro-3', 40, 8.21, 3.0, 15, 'Mocksville'), ro('secret-ro-4', 50, 8.19, 7.4, 27, 'Mocksville'),
+  ro('secret-ro-5', 90, 11.37, 5.0, 20, 'Elsewhere Plaza'),
+  ro('secret-ro-6', 95, 12.53, 5.0, 20, 'Not Again Lane', { reoffered: undefined })
+];
+var roRes = RC.check({ offers: roOffers, total: 6, truncated: false, taken: [], records: [] },
+                     { ok: true, rows: T.pack(T.rowsOf(roOffers)), costPerMile: 0.3, runs: [] },
+                     { now: at(30, 12), boots: 20 });
+var how = roRes.pay.reofferedHow;
+eq('re-offered by: four in same-trip pairs, one by its id coming back alone',
+   [how.marked, how.byPair, how.bySpanOnly], [5, 4, 1]);
+eq('...the pairs: two keyed on a printed dropoff, one agreeing on miles and minutes, pay up once and down once, '
+   + 'the median gap the shorter, 5 min',
+   [how.pairs.total, how.pairs.named, how.pairs.sameBoth, how.pairs.payUp, how.pairs.paySame, how.pairs.payDown,
+    how.pairs.gapMedianMin], [2, 2, 1, 1, 0, 1, 5]);
+var roText = RC.format(roRes);
+ok('...and said in the words, with how old the newest offer is (5 days: a stopped sync looks like no driving)',
+   /re-offered by: same trip under two ids 4, one id back on screen only 1/.test(roText)
+   && /agreeing on miles \(±0\.2\) and minutes \(±2\) 1 \(50%\)/.test(roText)
+   && /newest:  5 days before today/.test(roText));
+ok('[privacy] the breakdown names no place, id or pay',
+   !/Imaginary|Faketown|Mocksville|Elsewhere|Not Again|secret-ro|7\.13|9\.47|8\.21|8\.19|11\.37/.test(roText + JSON.stringify(how)));
+var srv = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
+var sw = /var REOFFER_WINDOW_MS = ([^;]+);/.exec(srv);
+eq('the pair window is the server\'s own (server.js REOFFER_WINDOW_MS)', sw && sw[1].split('*').reduce(function (a, x) { return a * Number(x); }, 1), 30 * 60 * 1000);
+
 // A read the server cut, through the tool's own fetch (a fake server).
 (async function () {
   var fake = async function (u) {

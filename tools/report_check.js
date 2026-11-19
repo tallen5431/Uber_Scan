@@ -24,7 +24,10 @@
  *   - the share of offers with the pay re-read, suspect, pay unread, and
  *     re-offered (the server's fold marks it, round B) or raised where a
  *     row marks it;
- *   - whether the journal read was cut, and how many pages it took;
+ *   - which half of the server's re-offered rule marked each card, and
+ *     whether the same-trip pairs agree on miles and minutes;
+ *   - whether the journal read was cut, how many pages it took, and how
+ *     many days old its newest offer is;
  *   - how long the main computations took here.
  *
  * NEVER a place, a coordinate, a card's text, an id or one trip's amount:
@@ -76,6 +79,76 @@ function tally(cells) {
 
 /* Every figure, off the two answers already read. `journal` is
  * places_report's loadJournal answer, `trends` /api/trends's. */
+/* Which half of server.js markReoffered marked the re-offered cards, and
+ * what the pairs look like. The first real run marked more offers than
+ * undeliverable orders coming round should account for, and the suspicion is the
+ * pair half: where a card's dropoff is printed as a town, two different
+ * orders from one busy restaurant to one town inside half an hour are keyed
+ * as one trip. The same order offered again keeps its route, so its card
+ * miles and minutes barely move (the leg to the pickup is the only part that
+ * can) and its pay holds or rises; two different orders seldom agree on
+ * both. So: the pairs this key finds, re-found here with the server's own
+ * key and window, and how many agree on miles and minutes, and how the pay
+ * moved. Counts only, never the places the key is made of. */
+var REOFFER_WINDOW_MS = 30 * 60 * 1000;      // server.js REOFFER_WINDOW_MS (a check holds them equal)
+function reofferKey(o) {
+  function pk(v) { return typeof v === 'string' ? v.toLowerCase().replace(/\s+/g, ' ').trim() : ''; }
+  var pick = pk(o.pickup), drop = pk(o.dropoff);
+  if (!pick) return null;
+  if (drop) return { key: (o.app || '') + '|' + pick + '|' + drop, named: true };
+  if (typeof o.minutes === 'number' && typeof o.miles === 'number') {
+    return { key: (o.app || '') + '|' + pick + '||' + o.minutes + '|' + o.miles, named: false };
+  }
+  return null;
+}
+function reofferedHow(offers) {
+  var marked = offers.filter(function (o) { return o && o.reoffered === true; });
+  var sorted = offers.filter(function (o) { return o && typeof o.at === 'number'; })
+    .slice().sort(function (a, b) { return a.at - b.at; });
+  var recent = Object.create(null), inPair = Object.create(null);
+  var pairs = { named: 0, unnamed: 0, sameMiles: 0, sameMinutes: 0, sameBoth: 0,
+                payUp: 0, paySame: 0, payDown: 0, gaps: [] };
+  function pay(o) { return typeof o.pay === 'number' ? o.pay : null; }
+  sorted.forEach(function (o) {
+    var k = reofferKey(o);
+    if (!k) return;
+    var list = recent[k.key] || (recent[k.key] = []);
+    while (list.length && o.at - list[0].at > REOFFER_WINDOW_MS) list.shift();
+    // Each card against the one just before it under the same key: one pair
+    // per step, so a chain of three is two pairs, as a driver would count
+    // "offered again" twice.
+    var prev = null;
+    for (var i = list.length - 1; i >= 0; i--) { if (list[i].id !== o.id) { prev = list[i]; break; } }
+    if (prev) {
+      inPair[o.id] = 1; inPair[prev.id] = 1;
+      pairs[k.named ? 'named' : 'unnamed'] += 1;
+      var sm = typeof o.miles === 'number' && typeof prev.miles === 'number' && Math.abs(o.miles - prev.miles) <= 0.2;
+      var sn = typeof o.minutes === 'number' && typeof prev.minutes === 'number' && Math.abs(o.minutes - prev.minutes) <= 2;
+      if (sm) pairs.sameMiles += 1;
+      if (sn) pairs.sameMinutes += 1;
+      if (sm && sn) pairs.sameBoth += 1;
+      var a = pay(prev), b = pay(o);
+      if (a !== null && b !== null) {
+        if (b > a + 0.01) pairs.payUp += 1; else if (b < a - 0.01) pairs.payDown += 1; else pairs.paySame += 1;
+      }
+      pairs.gaps.push((o.at - prev.at) / 60000);
+    }
+    list.push(o);
+  });
+  var g = pairs.gaps.sort(function (x, y) { return x - y; });
+  var total = pairs.named + pairs.unnamed;
+  return {
+    marked: marked.length,
+    byPair: marked.filter(function (o) { return inPair[o.id]; }).length,
+    bySpanOnly: marked.filter(function (o) { return !inPair[o.id]; }).length,
+    pairs: { total: total, named: pairs.named, unnamed: pairs.unnamed,
+             sameMiles: pairs.sameMiles, sameMinutes: pairs.sameMinutes, sameBoth: pairs.sameBoth,
+             sameBothShare: share(pairs.sameBoth, total),
+             payUp: pairs.payUp, paySame: pairs.paySame, payDown: pairs.payDown,
+             gapMedianMin: g.length ? r2(g[Math.floor((g.length - 1) / 2)]) : null }
+  };
+}
+
 function check(journal, trends, opts) {
   opts = opts || {};
   var times = [], time = timer(times);
@@ -201,6 +274,14 @@ function check(journal, trends, opts) {
               reoffered: reoffer, raised: raised,
               marked: { reoffered: reoffer > 0, raised: raised > 0 } };
   ['corrected', 'suspect', 'payUnread', 'reoffered', 'raised'].forEach(function (k) { res.pay[k + 'Share'] = share(res.pay[k], offers.length); });
+  res.pay.reofferedHow = reofferedHow(offers);
+
+  // 9. How old the newest offer is. The first real run read a copy whose
+  // newest offer was weeks before the day it ran: a rig that has stopped
+  // syncing home looks exactly like a driver who has not driven, and only the
+  // owner can say which.
+  var newest = ats.length ? Math.max.apply(null, ats) : null;
+  res.journal.daysSinceNewest = newest === null ? null : Math.floor((res.made - newest) / 86400000);
 
   // 10. How long the main computations take here.
   if (lastDay) {
@@ -223,6 +304,9 @@ function format(res) {
   out.push('journal: ' + j.offers + ' offers of ' + j.total + ' in the window, ' + j.driverDays + ' driver days, '
            + (j.first || '—') + ' to ' + (j.last || '—') + '; read in ' + j.pages + ' page' + (j.pages === 1 ? '' : 's')
            + (j.truncated ? ' — CUT: the server would not page past its limit' : ', not cut'));
+  if (typeof j.daysSinceNewest === 'number' && j.daysSinceNewest >= 3) {
+    out.push('newest:  ' + j.daysSinceNewest + ' days before today — not driven since, or the rig has stopped syncing home');
+  }
   out.push('trends:  ' + t.rows + ' rows (' + t.counted + ' with money), ' + t.driverDays + ' driver days, ' + t.runs
            + ' runs, ' + (t.first || '—') + ' to ' + (t.last || '—'));
   out.push('gps:     ' + res.gps.fixed + ' of ' + res.gps.offers + ' offers carry a gated fix (' + res.gps.share + '%)');
@@ -270,6 +354,16 @@ function format(res) {
            + (p.marked.reoffered ? p.reoffered + ' (' + p.reofferedShare + '%)' : 'none marked by the fold')
            + ', raised ' + (p.marked.raised ? p.raised + ' (' + p.raisedShare + '%)' : 'not marked apart (a raise is '
              + 'a re-offer)'));
+  var h = p.reofferedHow;
+  if (h && h.marked) {
+    var q = h.pairs;
+    out.push('  re-offered by: same trip under two ids ' + h.byPair + ', one id back on screen only ' + h.bySpanOnly);
+    out.push('  same-trip pairs: ' + q.total + ' (' + q.named + ' keyed on a printed dropoff, ' + q.unnamed
+             + ' on pickup + minutes + miles); agreeing on miles (±0.2) and minutes (±2) ' + q.sameBoth
+             + ' (' + q.sameBothShare + '%), miles only ' + (q.sameMiles - q.sameBoth) + ', minutes only '
+             + (q.sameMinutes - q.sameBoth) + '; pay up ' + q.payUp + ', same ' + q.paySame + ', down ' + q.payDown
+             + '; median gap ' + q.gapMedianMin + ' min');
+  }
   out.push('');
   out.push('timings here:');
   res.times.forEach(function (x) { out.push('  ' + String(x.ms).padStart(8) + ' ms  ' + x.what); });
