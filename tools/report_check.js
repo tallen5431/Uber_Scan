@@ -22,7 +22,8 @@
  *     Tooks, section 7's Took-or-✓), and the weeks where they disagree;
  *   - each cost per mile the rows carry, and the dates it ran over;
  *   - the share of offers with the pay re-read, suspect, pay unread, and
- *     re-offered or raised where a row marks it;
+ *     re-offered (the server's fold marks it, round B) or raised where a
+ *     row marks it;
  *   - whether the journal read was cut, and how many pages it took;
  *   - how long the main computations took here.
  *
@@ -263,8 +264,12 @@ function format(res) {
   var p = res.pay;
   out.push('pay: re-read ' + p.corrected + ' (' + p.correctedShare + '%), suspect ' + p.suspect + ' (' + p.suspectShare
            + '%), pay unread ' + p.payUnread + ' (' + p.payUnreadShare + '%), re-offered '
-           + (p.marked.reoffered ? p.reoffered + ' (' + p.reofferedShare + '%)' : 'not marked on the record')
-           + ', raised ' + (p.marked.raised ? p.raised + ' (' + p.raisedShare + '%)' : 'not marked on the record'));
+           // Round B: the server's fold marks re-offered cards (server.js
+           // markReoffered), so none is now a count, not a gap in the record;
+           // a raise is one of its shapes, not marked apart.
+           + (p.marked.reoffered ? p.reoffered + ' (' + p.reofferedShare + '%)' : 'none marked by the fold')
+           + ', raised ' + (p.marked.raised ? p.raised + ' (' + p.raisedShare + '%)' : 'not marked apart (a raise is '
+             + 'a re-offer)'));
   out.push('');
   out.push('timings here:');
   res.times.forEach(function (x) { out.push('  ' + String(x.ms).padStart(8) + ' ms  ' + x.what); });
