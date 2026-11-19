@@ -12813,11 +12813,12 @@ function send(res, status, body, headers) {
   res.end(body);
 }
 
-// Every JSON answer, said once. Fifty-four handlers spelled this out whole —
+// Every JSON answer, said once. Fifty-five answers spelled this out whole —
 // the stringify and the same Content-Type literal — and a copy that dropped the
 // charset, or put a header before it, would have been one route answering
 // differently from its neighbours with nothing to say so. `extra` rides after
-// the type, as the copies that added a Cache-Control had it.
+// the type, as the copies that added a Cache-Control had it. (EARNINGS_JSON's
+// two keep their named set: it is one set, not a copy.)
 function sendJson(res, status, obj, extra) {
   send(res, status, JSON.stringify(obj),
        Object.assign({ 'Content-Type': 'application/json; charset=utf-8' }, extra || {}));
@@ -14464,8 +14465,7 @@ function journalRoute(req, res, p) {
       };
       var finish = function (body) {
         release();
-        send(res, 200, body,
-             { 'Content-Type': 'application/json; charset=utf-8' });
+        sendJson(res, 200, body);
       };
       if (err) return fail(err.message);
       readJournal(function (existing, readErr) {
@@ -14498,9 +14498,9 @@ function journalRoute(req, res, p) {
           fresh.push(JSON.stringify(row));
         });
         if (!fresh.length) {
-          return finish(JSON.stringify({ ok: true, added: 0,
-                                         malformed: malformed,
-                                         have: existing.length }));
+          return finish({ ok: true, added: 0,
+                          malformed: malformed,
+                          have: existing.length });
         }
         // Appended, like the scanner does it: O_APPEND, one write, so a reader
         // part way through never sees half a row.
@@ -14528,9 +14528,9 @@ function journalRoute(req, res, p) {
           }
           console.log('journal ingest: +' + fresh.length + ' row(s), '
                       + (existing.length + fresh.length) + ' total');
-          finish(JSON.stringify({ ok: true, added: fresh.length,
-                                  malformed: malformed,
-                                  have: existing.length + fresh.length }));
+          finish({ ok: true, added: fresh.length,
+                   malformed: malformed,
+                   have: existing.length + fresh.length });
           });
         });
       }, failedRequest(req, res, release));

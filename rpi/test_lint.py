@@ -1389,6 +1389,32 @@ eq('server.js reads each rpi/config.json switch through settingOn, not its own c
 eq('server.js writes 4102444800000 once, as CLOCK_BELIEVABLE_UNTIL',
    re.findall(r'[^\n]*\b4102444800000\b[^\n]*', _srv_code),
    ['var CLOCK_BELIEVABLE_UNTIL = 4102444800000;'])
+# ...and every JSON answer through sendJson: fifty-four handlers spelled out
+# the stringify and the Content-Type literal, and one that dropped the charset
+# would have answered unlike its neighbours with nothing to say so (the
+# server's second round, Nov 2026). send() is handed that type in sendJson.
+_json_sends = [_m for _m in re.findall(r'\bsend\(res,[^;]*;', _srv_code) if 'application/json' in _m]
+eq('server.js hands send() the JSON Content-Type in one place, sendJson',
+   (len(_json_sends), bool(_json_sends) and 'JSON.stringify(obj)' in _json_sends[0]), (1, True))
+# ...and the path as asked worked out once, in route(): it was read off the
+# URL 26 times, once a door, and again by four of the routes it hands off to.
+eq("server.js works out the path as asked once (req.url.split('?')[0])",
+   len(re.findall(r"req\.url\.split\('\?'\)\[0\]", _srv_code)), 1)
+# ...and route()'s order, which the split out of markRoute and journalRoute had
+# to keep: every door that takes a POST is asked before the gate that refuses
+# all but GET and HEAD, the journal's sync doors with them, and the journal's
+# pages after the path is decoded, so the two calls of journalRoute sit on
+# either side of both.
+_route = _srv_code[_srv_code.index('function route(req, res) {'):]
+_route = _route[:_route.index('\n}\n')]
+_gate = _route.find("if (req.method !== 'GET' && req.method !== 'HEAD')")
+_decode = _route.find('decodeURIComponent(parsed.pathname)')
+eq('route() asks every POST door, and the journal\'s sync doors, before its GET-only gate, '
+   'and the journal\'s pages after the decode',
+   (_gate > 0 and all(_m.start() < _gate for _m in re.finditer(r"req\.method === 'POST'", _route)),
+    0 < _route.find('return journalRoute(req, res, p);') < _gate < _decode
+    < _route.find('return journalRoute(req, res, pathname);')),
+   (True, True))
 
 # --- what a new session reads first: CLAUDE.md --------------------------------
 #
