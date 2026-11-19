@@ -18,6 +18,7 @@ var https = require('https');
 var fs = require('fs');
 var path = require('path');
 var url = require('url');
+var zlib = require('zlib');
 
 var os = require('os');
 var spawn = require('child_process').spawn;
@@ -58,10 +59,11 @@ var HOST = process.env.HOST || '0.0.0.0';
 var SSL_DIR = path.join(ROOT, 'ssl');
 // The lite edition (lite/lite.js, CLAUDE.md): the camera, the reader and one
 // big card, with the NucBox, the reports and the uploads shut. One bit, read
-// once here; asked by name at four places only — the handler's first line,
-// the NucBox's bases (NBX), the startup banner and /api/trends (the offers
-// page's Trends tab, refused in lite's own words) — so the full rig's code is
-// the lite rig's code everywhere else, every money rule included.
+// once here; asked by name at a few places only — the handler's first line,
+// the NucBox's bases (NBX), the startup banner, /api/trends (the offers
+// page's Trends tab, refused in lite's own words) and gzip (gzipFor and its
+// two callers: none under lite) — so the full rig's code is the lite rig's
+// code everywhere else, every money rule included.
 var Lite = require('./lite/lite.js');
 var LITE = Lite.on(ROOT, process.env);
 
@@ -15794,7 +15796,10 @@ function route(req, res) {
         if (total > offers.length) {
           head['X-Uber-Scan-Truncated'] = offers.length + ' of ' + total;
         }
-        return send(res, 200, toCsv(offers), head);
+        // Gzipped for a browser off this machine that takes it (gzipFor):
+        // 8.6 MB of CSV for an invented 12,000-offer record is 1.1 MB at
+        // level 1, 38 ms of CPU on the container the suites run on.
+        return sendGzipped(req, res, 200, toCsv(offers), head, 1);
       }
       // What the rig watched go past, over the same window. Summed here rather
       // than shipped row by row: there is one of these every couple of minutes
@@ -15825,7 +15830,10 @@ function route(req, res) {
       var records = orderRecords(rows, floor);
       var window = pairs.filter(function (r) { return !floor || (r.at || 0) >= floor; })
                         .sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
-      send(res, 200, JSON.stringify({ count: offers.length, total: total,
+      // Gzipped at level 1 for a browser off this machine (gzipFor), as
+      // /api/trends is: 4.7 MB for 30 days of an invented 12,000-offer
+      // record is 0.58 MB, 19 ms of CPU (11.3 MB for All: 1.37 MB, 43 ms).
+      sendGzipped(req, res, 200, JSON.stringify({ count: offers.length, total: total,
                                       truncated: total > offers.length,
                                       days: days, hidden: hidden,
                                       watched: watched,
@@ -15883,7 +15891,7 @@ function route(req, res) {
                                       keepPlaces: typeof scanner.keepPlaces === 'boolean'
                                         ? scanner.keepPlaces : null,
                                       offers: offers }),
-           { 'Content-Type': 'application/json; charset=utf-8' });
+                  { 'Content-Type': 'application/json; charset=utf-8' }, 1);
     });
   }
 
@@ -15910,18 +15918,14 @@ function route(req, res) {
       }
       var tfloor = tsince || (tdays > 0 ? Date.now() - tdays * 86400000 : 0);
       var tbody = JSON.stringify(trendsOut(rows, tfloor, tdays));
-      var thead = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store',
-                    'Vary': 'Accept-Encoding' };
       // Gzipped where the browser says it can take it (the reporting
       // review's T9): the answer is seven columns of digits, 1.3 MB for a 3x
       // record, and the phone on the rig's Wi-Fi or a VPN waited on it.
       // Level 1: the columns compress about fivefold at the fastest level,
-      // and the Pi's CPU is the scarcer thing (lite never reaches here).
-      if (/\bgzip\b/.test(String(req.headers['accept-encoding'] || '')) && tbody.length > 1024) {
-        thead['Content-Encoding'] = 'gzip';
-        return send(res, 200, require('zlib').gzipSync(tbody, { level: 1 }), thead);
-      }
-      send(res, 200, tbody, thead);
+      // and the Pi's CPU is the scarcer thing (lite never reaches here). Not
+      // for the Pi's own browser since the server review (gzipFor).
+      sendGzipped(req, res, 200, tbody, { 'Content-Type': 'application/json; charset=utf-8',
+                                          'Cache-Control': 'no-store' }, 1);
     });
   }
 
@@ -17130,6 +17134,98 @@ function holdsTag(req, tag) {
   });
 }
 
+/* ---------- gzip, for a browser that is not this machine (the server review)
+ *
+ * The offers page's /api/journal is 4.7 MB of JSON for 30 days of a busy
+ * record (11.3 MB for All), its CSV 8.6 MB, and the shell files are text
+ * that gzips to about a third; all of it went out as it was, to a phone on the
+ * car's Wi-Fi or the copy at home over a VPN. /api/trends was gzipped by the
+ * reporting review (T9) and nothing else was. Now: the static text files,
+ * compressed once per file version and kept, and /api/journal and its CSV at
+ * level 1 per answer, as /api/trends is.
+ *
+ * NOT FOR LOOPBACK. The Pi's own panel and the lite kiosk are a browser on the
+ * same machine: no wire to save, and the Pi's CPU is the thing the camera
+ * needs. Measured on the container the suites run on, /api/journal?days=30
+ * at level 1 is 19 ms of CPU for each answer, All 43 ms; on a Pi it is
+ * several times that, for nothing. GZIP_LOOPBACK=1 compresses there too, for the suites, which can
+ * only reach the server on loopback.
+ *
+ * NOT UNDER LITE, at all: lite is a kiosk on the Pi with a phone on the same
+ * Wi-Fi for its settings, and has nothing large to send — /api/trends is
+ * shut, the offers page is a reading aid lite never needs to be quick at —
+ * so the CPU and the memory of the kept copies buy nothing on a Zero 2 W. */
+var GZIP_LOOPBACK = process.env.GZIP_LOOPBACK === '1';
+// The types worth compressing: text, and the JSON and SVG shapes of it. Not
+// the pictures, which are compressed already, nor `.gz` (TYPES, above).
+var GZIP_TYPES = /^(?:text\/|application\/(?:javascript|json|manifest\+json|x-ndjson)|image\/svg\+xml)/;
+
+function fromLoopback(req) {
+  var a = (req.socket && req.socket.remoteAddress) || '';
+  return a === '::1' || /^(?:::ffff:)?127\./.test(a);
+}
+
+// Whether this answer may go gzipped: the browser takes it (and has not said
+// q=0), the caller is not this machine, and this is not lite.
+function gzipFor(req) {
+  if (LITE) return false;
+  var took = String(req.headers['accept-encoding'] || '');
+  if (!/(?:^|,)\s*gzip\s*(?:;|,|$)/i.test(took) || /(?:^|,)\s*gzip\s*;\s*q\s*=\s*0(?:\.0*)?\s*(?:,|$)/i.test(took)) {
+    return false;
+  }
+  return GZIP_LOOPBACK || !fromLoopback(req);
+}
+
+/* An answer worked out per request (/api/journal, its CSV, /api/trends),
+ * gzipped where gzipFor says, on the thread pool rather than this thread:
+ * 11 MB at level 1 is tens of milliseconds the event stream to the panel
+ * would otherwise wait behind. Vary on every one of them but lite's, so no
+ * cache between the two hands a gzipped answer to a browser that did not ask. */
+function sendGzipped(req, res, status, body, headers, level) {
+  headers = Object.assign({}, headers);
+  if (!LITE) headers.Vary = 'Accept-Encoding';
+  if (body.length <= 1024 || !gzipFor(req)) return send(res, status, body, headers);
+  zlib.gzip(body, { level: level || 1 }, function (err, buf) {
+    if (err) return send(res, status, body, headers);
+    headers['Content-Encoding'] = 'gzip';
+    send(res, status, buf, headers);
+  });
+}
+
+/* The static files, compressed once per version (the ETag: size and mtime)
+ * and kept, so a reload asks zlib nothing. Bounded twice: a file over
+ * STATIC_GZ_FILE_MAX is streamed as it is (the OCR engine's 3.9 MB scripts,
+ * which sw.js keeps cache-first and a phone fetches once), and the copies
+ * kept together stay under STATIC_GZ_KEEP, the oldest dropped first. The
+ * shell's text files are 2.7 MB and 0.88 MB gzipped, so the bound is a
+ * ceiling, not a working size. Level 6, zlib's default: 97 ms for all of
+ * them, once a deploy. */
+var STATIC_GZ_FILE_MAX = 1024 * 1024;
+var STATIC_GZ_KEEP = 4 * 1024 * 1024;
+var staticGz = new Map();          // file -> {tag, buf}, oldest first
+var staticGzBytes = 0;
+
+function staticGzip(file, tag, done) {
+  var hit = staticGz.get(file);
+  if (hit && hit.tag === tag) return done(null, hit.buf);
+  fs.readFile(file, function (readErr, raw) {
+    if (readErr) return done(readErr);
+    zlib.gzip(raw, function (err, buf) {
+      if (err) return done(err);
+      var was = staticGz.get(file);
+      if (was) { staticGzBytes -= was.buf.length; staticGz.delete(file); }
+      staticGz.set(file, { tag: tag, buf: buf });
+      staticGzBytes += buf.length;
+      while (staticGzBytes > STATIC_GZ_KEEP && staticGz.size > 1) {
+        var oldest = staticGz.keys().next().value;
+        staticGzBytes -= staticGz.get(oldest).buf.length;
+        staticGz.delete(oldest);
+      }
+      done(null, buf);
+    });
+  });
+}
+
 function serveFile(req, res, file, type) {
   fs.stat(file, function (err, stat) {
     if (err || !stat.isFile()) {
@@ -17141,7 +17237,21 @@ function serveFile(req, res, file, type) {
       'Cache-Control': 'no-cache',
       'ETag': tag
     };
+    // The gzipped copy is another representation, so it has a tag of its own:
+    // a browser that kept one and asks for the other must not get a 304.
+    var squeezable = !LITE && GZIP_TYPES.test(headers['Content-Type']);
+    if (squeezable) headers.Vary = 'Accept-Encoding';
+    var gz = squeezable && stat.size > 1024 && stat.size <= STATIC_GZ_FILE_MAX && gzipFor(req);
+    if (gz) headers.ETag = tag = tag.slice(0, -1) + '-gz"';
     if (holdsTag(req, tag)) return send(res, 304, '', headers);
+    if (gz) {
+      return staticGzip(file, tag, function (gzErr, buf) {
+        if (gzErr) return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });
+        headers['Content-Encoding'] = 'gzip';
+        headers['Content-Length'] = buf.length;
+        send(res, 200, req.method === 'HEAD' ? '' : buf, headers);
+      });
+    }
     headers['Content-Length'] = stat.size;
     if (req.method === 'HEAD') return send(res, 200, '', headers);
 

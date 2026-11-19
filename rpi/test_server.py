@@ -15681,6 +15681,73 @@ try:
        (200, 200, b'<p>second build</p>', True))
 finally:
     stop(proc)
+
+# Gzip, for a browser that is not this machine: the shell's text files
+# (compressed once per version, with a tag of their own), /api/journal and
+# its CSV, and /api/trends. Never for loopback — the Pi's own panel and the
+# lite kiosk pay no CPU for a wire they do not have — and never under lite.
+# This suite can only reach the server on loopback, so GZIP_LOOPBACK=1 stands
+# in for the phone; the rule itself is checked without it.
+import gzip as _gzip
+write(_svj, [offer(i, NOW - 3600000 + i * 60000) for i in range(30)])
+_GZ = {'Accept-Encoding': 'gzip, deflate, br'}
+proc, base = start({'SCANNER': '0'}, _svj)
+try:
+    _l1 = _hget(base, '/live.html', _GZ)
+    _j1 = _hget(base, '/api/journal?days=1', _GZ)
+    _t1 = _hget(base, '/api/trends?days=1', _GZ)
+    eq('[serve] on loopback (the Pi\'s own panel) nothing is gzipped, asked or not: a file, /api/journal, '
+       '/api/trends', (_l1[2].get('content-encoding'), _l1[1] == _live_bytes, _j1[2].get('content-encoding'),
+                       _t1[2].get('content-encoding')), (None, True, None, None))
+    eq('[serve] ...and each says it varies on Accept-Encoding, for whatever cache sits between',
+       (_l1[2].get('vary'), _j1[2].get('vary'), _t1[2].get('vary')), ('Accept-Encoding',) * 3)
+finally:
+    stop(proc)
+proc, base = start({'SCANNER': '0', 'GZIP_LOOPBACK': '1'}, _svj)
+try:
+    _plain = _hget(base, '/live.html')
+    _gz1 = _hget(base, '/live.html', _GZ)
+    _gztag = _gz1[2].get('etag') or ''
+    eq('[serve] a browser off this machine gets the file gzipped, the same bytes underneath, a tag of its own',
+       (_gz1[2].get('content-encoding'), _gzip.decompress(_gz1[1]) == _live_bytes if _gz1[1][:2] == b'\x1f\x8b'
+        else False, len(_gz1[1]) < len(_live_bytes) / 2, _gztag.endswith('-gz"'),
+        _gztag != _plain[2].get('etag'), _gz1[2].get('cache-control')),
+       ('gzip', True, True, True, True, 'no-cache'))
+    _gz2 = _hget(base, '/live.html', dict(_GZ, **{'If-None-Match': _gztag}))
+    eq('[serve] ...asked again with that tag: a 304, kept copy and all (no-cache still)',
+       (_gz2[0], len(_gz2[1]), _gz2[2].get('content-encoding')), (304, 0, None))
+    eq('[serve] ...but the plain copy\'s tag is not the gzipped one\'s, nor the other way round',
+       (_hget(base, '/live.html', dict(_GZ, **{'If-None-Match': _plain[2].get('etag') or ''}))[0],
+        _hget(base, '/live.html', {'If-None-Match': _gztag})[0]), (200, 200))
+    eq('[serve] ...and gzip;q=0 is a no, not a yes',
+       _hget(base, '/live.html', {'Accept-Encoding': 'gzip;q=0, deflate'})[2].get('content-encoding'), None)
+    eq('[serve] a picture is not gzipped (it is compressed already)',
+       _hget(base, '/icons/icon-192.png', _GZ)[2].get('content-encoding'), None)
+    _jp = _hget(base, '/api/journal?days=1')
+    _jg = _hget(base, '/api/journal?days=1', _GZ)
+    _cp = _hget(base, '/api/journal.csv?days=1')
+    _cg = _hget(base, '/api/journal.csv?days=1', _GZ)
+
+    def _gunz(b):
+        return _gzip.decompress(b) if b[:2] == b'\x1f\x8b' else b''
+    _jgu = _gunz(_jg[1])
+    eq('[serve] /api/journal gzipped for it: the same 30 offers underneath',
+       (_jg[2].get('content-encoding'), len(json.loads(_jgu or b'{}').get('offers') or []),
+        json.loads(_jgu or b'{}').get('offers') == json.loads(_jp[1]).get('offers')), ('gzip', 30, True))
+    eq('[serve] ...and its CSV, byte for byte, with its download headers',
+       (_cg[2].get('content-encoding'), _gunz(_cg[1]) == _cp[1], _cg[2].get('content-disposition')),
+       ('gzip', True, _cp[2].get('content-disposition')))
+finally:
+    stop(proc)
+proc, base = start({'SCANNER': '0', 'GZIP_LOOPBACK': '1', 'LITE': '1'}, _svj)
+try:
+    _ll = _hget(base, '/live.html', _GZ)
+    _lj = _hget(base, '/api/journal?days=1', _GZ)
+    eq('[serve] lite gzips nothing (a Zero 2 W\'s CPU, for a kiosk with nothing large to send), and has no Vary',
+       (_ll[2].get('content-encoding'), _lj[2].get('content-encoding'), _ll[2].get('vary'),
+        _lj[2].get('vary'), bool(_ll[2].get('etag'))), (None, None, None, None, True))
+finally:
+    stop(proc)
 shutil.rmtree(_svdir, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
