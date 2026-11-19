@@ -8083,14 +8083,31 @@ const framed = (page) => page.waitForFunction(
     await page.click('#viewMode');
     await page.clock.runFor(500);
     const waiting = await said();
-    await page.clock.runFor(16000);
+    // The reading again half way, as the rig sends one, so the card is still
+    // fresh (READ_STALE_MS is 16 s) when the wait is up.
+    const reading = Object.assign({}, READINGS.deducted, { places: ['Chipotle (Barrett Pkwy)', 'Canton Rd, Marietta'] });
+    await page.clock.runFor(8000);
+    await push(reading);
+    await page.clock.runFor(8000);
     await page.waitForFunction(() => /^no signal/.test(((n) => (n.title
       || n.textContent))(document.getElementById('viewNote'))), null, { timeout: 5000 }).catch(() => {});
     out.hungLeaflet = { waiting: waiting, said: await said(), first: cdn };
-    const beforePress = cdn;
+    // ⛶ Map round again tries again: loading, and once its own wait is up,
+    // no signal again with <head> as it was. Not counted at the network: the
+    // first request is still hanging there, and the browser hands a second
+    // tag for the same URL that same request rather than asking again.
+    const head = () => page.evaluate(() => document.head.querySelectorAll('script[src*="unpkg"]').length);
+    await push(reading);
     for (let i = 0; i < 3; i++) { await page.click('#viewMode'); await page.clock.runFor(150); }
     await page.clock.runFor(300);
-    out.hungLeaflet.pressed = cdn - beforePress;
+    out.hungLeaflet.again = { said: await said(), tags: await head() };
+    await page.clock.runFor(8000);
+    await push(reading);
+    await page.clock.runFor(8000);
+    await page.waitForFunction(() => /^no signal/.test(((n) => (n.title
+      || n.textContent))(document.getElementById('viewNote'))), null, { timeout: 5000 }).catch(() => {});
+    out.hungLeaflet.againSaid = await said();
+    out.hungLeaflet.againTags = await head();
     await page.close();
     await ctx.close();
   }
@@ -9383,8 +9400,13 @@ try:
         'loading the map' in (_hl.get('waiting') or '') and _hl.get('first') == 2)
     ok_('[no Leaflet] ...and once the wait is up it is no signal, not loading for ever (%r)'
         % _hl.get('said'), (_hl.get('said') or '').startswith('no signal'))
-    eq('[no Leaflet] ...and ⛶ Map round again asks again rather than joining the load that '
-       'never answered', _hl.get('pressed'), 2)
+    _ha = _hl.get('again') or {}
+    ok_('[no Leaflet] ...and ⛶ Map round again tries again rather than finding the panel busy '
+        'for good: loading the map (%r), its script in <head> (%r)' % (_ha.get('said'), _ha.get('tags')),
+        'loading the map' in (_ha.get('said') or '') and _ha.get('tags') == 1)
+    ok_('[no Leaflet] ...and no signal again once that wait is up (%r), <head> left as it was'
+        % _hl.get('againSaid'),
+        (_hl.get('againSaid') or '').startswith('no signal') and _hl.get('againTags') == 0)
 
     # --- the view between offers ---------------------------------------------
     _bw = got.get('between') or {}
