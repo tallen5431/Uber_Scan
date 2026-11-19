@@ -15879,6 +15879,66 @@ finally:
     stop(proc)
 shutil.rmtree(_tfdir, ignore_errors=True)
 
+# A throw inside a readJournal callback reached uncaughtException, which keeps
+# the server up and answers nothing: the page waited until it gave up. Each
+# request's callback now answers 500 with a log line, giving back any lock it
+# holds. The faults are invented, through a preload: Advice.trustworthy on one
+# offer (/api/today, /api/journal), Earnings.fold (the earnings lock's
+# /api/earnings/pick, asked twice: a lock kept would leave the second
+# waiting), and Advice.runs, which the Trends answer swallowed without a word.
+_BREAK = ("var A = require(%r); var tw = A.trustworthy;\n"
+          "A.trustworthy = function (o) { if (o && o.id === 'off9') throw new Error('invented fault'); "
+          "return tw.apply(this, arguments); };\n"
+          "var E = require(%r); E.fold = function () { throw new Error('invented fold fault'); };\n"
+          % (os.path.join(ROOT, 'advice.js'), os.path.join(ROOT, 'earnings.js')))
+_BREAK_RUNS = ("require(%r).runs = function () { throw new Error('invented runs fault'); };\n"
+               % os.path.join(ROOT, 'advice.js'))
+
+
+def _within(base, path, body=None, seconds=4):
+    """Status, or 'no answer' where none came inside `seconds`."""
+    data = None if body is None else json.dumps(body).encode('utf-8')
+    req = urllib.request.Request(base + path, data=data,
+                                 headers={'Content-Type': 'application/json'} if data else {})
+    try:
+        with urllib.request.urlopen(req, timeout=seconds) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except Exception:
+        return 'no answer'
+
+
+_brdir = tempfile.mkdtemp()
+_brj = os.path.join(_brdir, 'offers.jsonl')
+write(_brj, [offer(i, NOW - 3600000 + i * 60000) for i in range(10)])
+proc, base, _brlog = _logged({'SCANNER': '0'}, _brj, preload=_BREAK)
+try:
+    eq('[thrown] a fault inside the journal\'s callback answers 500 at once: /api/today, /api/journal',
+       (_within(base, '/api/today?since=%d' % (NOW - 7200000)), _within(base, '/api/journal?days=1')),
+       (500, 500))
+    eq('[thrown] ...under the earnings lock too, and the lock is given back: asked twice, two answers',
+       (_within(base, '/api/earnings/pick', {'key': 'k1', 'match': 'none'}),
+        _within(base, '/api/earnings/pick', {'key': 'k1', 'match': 'none'})), (500, 500))
+    time.sleep(0.2)
+    _brl = _brlog()
+    eq('[thrown] ...each said in the log, naming the request, and the server still answers',
+       ('request failed: GET /api/today' in _brl, 'request failed: GET /api/journal' in _brl,
+        'request failed: POST /api/earnings/pick' in _brl, _within(base, '/api/status')),
+       (True, True, True, 200))
+finally:
+    stop(proc)
+proc, base, _brlog = _logged({'SCANNER': '0'}, _brj, preload=_BREAK_RUNS)
+try:
+    _brt = get(base, '/api/trends?days=1')
+    time.sleep(0.2)
+    eq('[thrown] Trends without its runs (Advice.runs failing) still draws, and now says why',
+       (_brt.get('ok'), _brt.get('runs'), 'trends: the runs of scanning could not be worked out' in _brlog()),
+       (True, [], True))
+finally:
+    stop(proc)
+shutil.rmtree(_brdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

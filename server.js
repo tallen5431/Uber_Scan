@@ -9628,7 +9628,13 @@ function trendsOut(rows, floor, days) {
     Advice.runs(Advice.usable(offers), Advice.SHOWN_AT).forEach(function (g) {
       spans.push([Math.round(g[0].at / 1000), Math.round(g[g.length - 1].at / 1000)]);
     });
-  } catch (e) { spans = []; }
+  } catch (e) {
+    // The tab draws without its runs (hours online unknown) rather than not
+    // at all — but said, since the server review: it was swallowed, and a
+    // fault in Advice.runs would have read as a record with no scanning.
+    console.error('trends: the runs of scanning could not be worked out: ' + e.message);
+    spans = [];
+  }
   var newest = null, costed = null;
   for (var i = offers.length - 1; i >= 0 && !(newest && costed); i--) {
     if ((offers[i].at || 0) > Date.now()) continue;
@@ -10378,21 +10384,48 @@ function nextLocked(name) {
 
 var readWaiters = null;
 
-function readJournal(done) {
-  if (readWaiters) { readWaiters.push(done); return; }
-  readWaiters = [done];
+/* `failed(e)`, where given, is told of a throw in `done` instead of the
+ * process. Every request that reads the journal gives one (failedRequest,
+ * below), since the server review (Nov 2026): the throw went to
+ * uncaughtException, which logs and keeps the server up, and the request
+ * that caused it was never answered — the handler's own catch (handler)
+ * cannot see into a callback — so the page waited on it until the browser
+ * gave up. Measured with an invented fault in Advice.trustworthy: /api/today
+ * and /api/journal answered nothing for as long as the client would wait. */
+function readJournal(done, failed) {
+  var w = { done: done, failed: failed };
+  if (readWaiters) { readWaiters.push(w); return; }
+  readWaiters = [w];
   readJournalNow(function (rows, err, torn) {
     var waiting = readWaiters;
     readWaiters = null;
-    waiting.forEach(function (fn) {
+    waiting.forEach(function (one) {
       // A throw in one caller must not starve the others now that they share a
       // read. Rethrown on its own tick so it still reaches the process the way
       // it did when every caller had a read of its own — swallowed here, a
       // fault in one endpoint would become silence in all of them.
-      try { fn(rows, err, torn); }
-      catch (e) { setImmediate(function () { throw e; }); }
+      try { one.done(rows, err, torn); }
+      catch (e) {
+        if (one.failed) {
+          try { one.failed(e); return; } catch (e2) { e = e2; }
+        }
+        setImmediate(function () { throw e; });
+      }
     });
   });
+}
+
+/* ...the `failed` for a request: the handler's own words for a throw (a log
+ * line naming the request, and a 500), the lock the request holds given
+ * back first, so the next upload is not stranded behind it. A reply already
+ * begun is ended where it stands. */
+function failedRequest(req, res, release) {
+  return function (e) {
+    console.error('request failed: ' + req.method + ' ' + req.url + ' — ' + ((e && e.stack) || e));
+    if (release) release();
+    if (res.headersSent) { res.end(); return; }
+    send(res, 500, 'server error', { 'Content-Type': 'text/plain' });
+  };
 }
 
 function readJournalNow(done) {
@@ -10702,7 +10735,7 @@ function shiftSummary(rows, since) {
 // answer, keyed the same way, and does not reach into the other.
 var shiftCache = null;
 
-function todaySummary(since, done) {
+function todaySummary(since, done, failed) {
   // Whether this machine's own clock can be believed at all. The browser cannot
   // check it — the browser's clock is fine, it is the rig's that is not — and
   // every figure below is a window on a timeline the rig may not yet know it is
@@ -10775,7 +10808,7 @@ function todaySummary(since, done) {
         shiftCache = { size: size, stamp: stamp, since: since, answer: answer };
       }
       answered(answer);
-    });
+    }, failed);
   });
 }
 
@@ -14835,7 +14868,7 @@ function route(req, res) {
                                   have: existing.length + fresh.length }));
           });
         });
-      });
+      }, failedRequest(req, res, release));
       });
     });
   }
@@ -15158,7 +15191,7 @@ function route(req, res) {
       });
       send(res, 200, JSON.stringify({ ok: true, notes: notes }),
            { 'Content-Type': 'application/json; charset=utf-8' });
-    });
+    }, failedRequest(req, res));
   }
 
   if (req.method === 'GET' && req.url.split('?')[0] === '/api/journal/newest') {
@@ -15257,7 +15290,7 @@ function route(req, res) {
                                       offersSince: wantWindow ? offersSince : undefined,
                                       can: SYNC_CAN }),
            { 'Content-Type': 'application/json; charset=utf-8' });
-    });
+    }, failedRequest(req, res));
   }
 
   /* The driver's cost per mile — ONE key, and deliberately not "the settings".
@@ -15968,7 +16001,7 @@ function route(req, res) {
                                         ? scanner.keepPlaces : null,
                                       offers: offers }),
                   { 'Content-Type': 'application/json; charset=utf-8' }, 1);
-    });
+    }, failedRequest(req, res));
   }
 
   // The offers page's Trends tab (trends.js; the owner, Nov 2026): every offer
@@ -16002,7 +16035,7 @@ function route(req, res) {
       // for the Pi's own browser since the server review (gzipFor).
       sendGzipped(req, res, 200, tbody, { 'Content-Type': 'application/json; charset=utf-8',
                                           'Cache-Control': 'no-store' }, 1);
-    });
+    }, failedRequest(req, res));
   }
 
   // What the shift adds up to so far, for the one line of it the driving screen
@@ -16032,7 +16065,7 @@ function route(req, res) {
     return todaySummary(sinceMs, function (answer) {
       send(res, 200, JSON.stringify(answer),
            { 'Content-Type': 'application/json; charset=utf-8' });
-    });
+    }, failedRequest(req, res));
   }
 
   // Today's shift as the end-of-shift report has it, for shift.html: see
@@ -16663,6 +16696,11 @@ function earningsFile(parses, alsoDays, pick, now, done) {
       if (dirErr) return done(dirErr);
       appendLines(text, function (err) { done(err || null, summary); });
     });
+  }, function (e) {
+    // A throw in the filing (readJournal's `failed`): said, and handed to the
+    // caller as an error, which answers it and gives back the earnings lock.
+    console.error('earnings: ' + ((e && e.stack) || e));
+    done(e);
   });
 }
 
@@ -16721,7 +16759,7 @@ function earningsRoute(req, res) {
           entries: entries
         }); });
       });
-    });
+    }, failedRequest(req, res));
   }
 
   if (req.method !== 'POST') {
@@ -16898,7 +16936,7 @@ function earningsRoute(req, res) {
             if (fileErr) return reply(500, { ok: false, error: fileErr.message });
             reply(200, { ok: true, entries: summary.entries });
           });
-        });
+        }, failedRequest(req, res, release));
       });
     });
   }
@@ -16962,7 +17000,7 @@ function earningsRoute(req, res) {
                              undated: parses.filter(function (p) { return !(p.picked || p.day); }).length,
                              added: summary.added, changed: summary.changed });
               });
-            });
+            }, failedRequest(req, res, release));
           };
           next(0);
         });
@@ -17084,7 +17122,7 @@ function goldRoute(req, res) {
     return readJournal(function (rows, readErr) {
       if (!rows) return answer(503, { ok: false, error: 'the journal could not be read (' + (readErr && readErr.code || 'unknown') + ')' });
       answer(200, goldAnswer(rows, Date.now()));
-    });
+    }, failedRequest(req, res));
   }
   if (req.method !== 'POST') {
     req.resume();
@@ -17168,7 +17206,7 @@ function goldRoute(req, res) {
             if (appendErr) return answer(500, { ok: false, error: 'could not save' });
             answer(200, { ok: true, settings: goldSettings([row]) });
           });
-        });
+        }, failedRequest(req, res, release));
       });
     });
   }
