@@ -15624,6 +15624,65 @@ with open(_rr, 'rb') as _fh:
     eq('[reread] ...and the journal on disk is untouched', _fh.read() == _rr_bytes, True)
 shutil.rmtree(_rrdir, ignore_errors=True)
 
+
+# --- the server review (Nov 2026): what a reload costs, and what it sends ----
+#
+# Every static file went out whole on every load (`no-cache` and no
+# validator), so a reload of the panel downloaded its 976 kB again. Each file
+# now carries an ETag off its size and mtime and an unchanged one answers 304;
+# `no-cache` stays, so the browser still asks every time and a new build still
+# wins (sw.js). A changed file is a 200 with the new bytes, which is the half
+# that keeps a deploy reaching the car: checked on the places report's folder,
+# which is served by the same serveFile and is a folder this suite may write.
+def _hget(base, path, headers=None, method='GET'):
+    req = urllib.request.Request(base + path, headers=headers or {}, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, r.read(), {k.lower(): v for k, v in r.headers.items()}
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(), {k.lower(): v for k, v in e.headers.items()}
+
+
+_svdir = tempfile.mkdtemp()
+_svj = os.path.join(_svdir, 'offers.jsonl')
+open(_svj, 'w').close()
+_svplaces = os.path.join(_svdir, 'places')
+os.makedirs(_svplaces)
+_svpage = os.path.join(_svplaces, 'index.html')
+with open(_svpage, 'w') as _fh:
+    _fh.write('<p>first build</p>')
+with open(os.path.join(ROOT, 'live.html'), 'rb') as _fh:
+    _live_bytes = _fh.read()
+proc, base = start({'SCANNER': '0', 'PLACES_REPORT_DIR': _svplaces}, _svj)
+try:
+    _s1 = _hget(base, '/live.html')
+    _tag = _s1[2].get('etag') or ''
+    eq('[serve] a static file carries a validator and still says no-cache (sw.js: the server\'s build wins)',
+       (_s1[0], bool(_tag), _s1[2].get('cache-control'), _s1[1] == _live_bytes),
+       (200, True, 'no-cache', True))
+    _s2 = _hget(base, '/live.html', {'If-None-Match': _tag})
+    eq('[serve] ...and asked again with it, an unchanged file is a 304 with no body, the same tag, no-cache',
+       (_s2[0], len(_s2[1]), _s2[2].get('etag'), _s2[2].get('cache-control')), (304, 0, _tag, 'no-cache'))
+    eq('[serve] ...a weak copy of the tag, or the tag in a list, is the same file',
+       (_hget(base, '/live.html', {'If-None-Match': 'W/' + _tag})[0],
+        _hget(base, '/live.html', {'If-None-Match': '"other", ' + _tag})[0]), (304, 304))
+    eq('[serve] ...another file\'s tag is not, and a HEAD with the tag is a 304 too',
+       (_hget(base, '/live.html', {'If-None-Match': '"other"'})[0],
+        _hget(base, '/card-words.js', {'If-None-Match': _tag})[0],
+        _hget(base, '/live.html', {'If-None-Match': _tag}, method='HEAD')[0]), (200, 200, 304))
+    _p1 = _hget(base, '/places/')
+    with open(_svpage, 'w') as _fh:
+        _fh.write('<p>second build</p>')     # one byte longer, and a later mtime
+    _later = time.time() + 5
+    os.utime(_svpage, (_later, _later))
+    _p2 = _hget(base, '/places/', {'If-None-Match': _p1[2].get('etag') or ''})
+    eq('[serve] a file rewritten since (a deploy) answers its old tag with a 200 and the new bytes',
+       (_p1[0], _p2[0], _p2[1], _p2[2].get('etag') != _p1[2].get('etag')),
+       (200, 200, b'<p>second build</p>', True))
+finally:
+    stop(proc)
+shutil.rmtree(_svdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

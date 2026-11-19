@@ -17098,16 +17098,51 @@ function goldRoute(req, res) {
   return answer(404, { ok: false, error: 'no such gold endpoint' });
 }
 
+/* A file's validator, off the stat serveFile already takes: its size and its
+ * modification time to the microsecond.
+ *
+ * Every static file went out whole on every load. `no-cache` with nothing to
+ * revalidate against means the browser must ask and the server can only
+ * answer with the body, so each page opened downloaded live.html, map-view.js
+ * and the rest again. Measured (the server review, Nov 2026), bytes on the
+ * wire for a reload: the panel's four files 976 kB before, 0.7 kB of 304s
+ * after; the offers page's five 1,167 kB, 0.9 kB. sw.js makes it every load:
+ * it asks the network first for every shell file ("the cost is a round trip
+ * per file"), which is how the server's build wins over the cache.
+ *
+ * `no-cache` stays, and is what keeps that rule: the browser still asks every
+ * time; it is only spared the body when the file has not changed. A deploy
+ * rewrites the file, which moves its mtime, so the next ask is a 200 with the
+ * new build. Not a hash of the content: that would read every file on every
+ * request to save reading it. */
+function fileTag(stat) {
+  return '"' + stat.size.toString(36) + '-' + Math.round(stat.mtimeMs * 1000).toString(36) + '"';
+}
+
+// Whether the request already holds `tag`: If-None-Match is a list, may say
+// `*`, and a weak W/ copy of a tag is the same file for a GET.
+function holdsTag(req, tag) {
+  var have = req.headers['if-none-match'];
+  if (!have) return false;
+  return String(have).split(',').some(function (t) {
+    t = t.trim();
+    return t === '*' || t.replace(/^W\//, '') === tag;
+  });
+}
+
 function serveFile(req, res, file, type) {
   fs.stat(file, function (err, stat) {
     if (err || !stat.isFile()) {
       return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });
     }
+    var tag = fileTag(stat);
     var headers = {
       'Content-Type': type || TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream',
-      'Content-Length': stat.size,
-      'Cache-Control': 'no-cache'
+      'Cache-Control': 'no-cache',
+      'ETag': tag
     };
+    if (holdsTag(req, tag)) return send(res, 304, '', headers);
+    headers['Content-Length'] = stat.size;
     if (req.method === 'HEAD') return send(res, 200, '', headers);
 
     res.writeHead(200, headers);
