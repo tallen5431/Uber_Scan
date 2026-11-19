@@ -9553,15 +9553,30 @@ function latestPerOffer(rows, floor) {
  * whose journal the rig has always written app into (a lite rig's, from its
  * first offer) never loads the parser at all: lite stays lean on a Zero. */
 var RowParser = null;
+/* ...remembered per row, since the server review (Nov 2026): screenType was
+ * asked of every row written before `app` on every fold, and a fold runs
+ * again after each append. Measured on an invented 12,000-offer journal, half
+ * its rows without `app`, /api/trends?days=0 after an appended mark: 195 ms,
+ * 46 of them in rowApp. readJournal's array after an append is the old one's
+ * row objects with the new ones after, so a WeakMap on the row keeps each
+ * answer exactly as long as the row, and the answer depends on the row's
+ * text alone, which is kept beside it and checked. */
+var rowAppSeen = new WeakMap();
 function rowApp(r) {
   if (r.app === 'uber' || r.app === 'doordash' || r.app === null) return r.app;
   if (typeof r.text !== 'string' || !r.text) return null;
+  var hit = rowAppSeen.get(r);
+  if (hit && hit.text === r.text) return hit.app;
   if (!RowParser) RowParser = require('./offer-parser.js');
   var a = RowParser.screenType(r.text).app;
-  return a === 'uber' || a === 'doordash' ? a : null;
+  a = a === 'uber' || a === 'doordash' ? a : null;
+  rowAppSeen.set(r, { text: r.text, app: a });
+  return a;
 }
-function withApp(o) {
-  o.app = rowApp(o);
+// `o` is the fold's copy; `from` the journal's own row it was copied from,
+// which is what the answer is remembered against (a copy is new each fold).
+function withApp(o, from) {
+  o.app = rowApp(from || o);
   return o;
 }
 
@@ -9897,7 +9912,7 @@ function latestPerOfferUncached(rows) {
     if (r.kind) return;                       // something newer than this reader
     // Copies, because `hidden` and `accepted` are written onto these below
     // and the rows readJournal hands over now live across requests.
-    if (!r.id) { out.push(withApp(Object.assign({}, r))); return; }
+    if (!r.id) { out.push(withApp(Object.assign({}, r), r)); return; }
     if (!(r.id in byId)) {
       // The slot is claimed here and filled below, so the order of `out` is
       // still the order the cards were first seen in the file.
@@ -9917,8 +9932,8 @@ function latestPerOfferUncached(rows) {
      and for more it is a pure function of the whole list, which is what it is
      handed here. */
   Object.keys(byId).forEach(function (id) {
-    out[byId[id]] = withPay(withApp(Object.assign({}, bestReading(afterCorrection(readings[id])))),
-                            readings[id]);
+    var best = bestReading(afterCorrection(readings[id]));
+    out[byId[id]] = withPay(withApp(Object.assign({}, best), best), readings[id]);
   });
 
   out.forEach(function (o) {

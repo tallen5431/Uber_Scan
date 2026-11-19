@@ -15751,12 +15751,20 @@ finally:
 shutil.rmtree(_svdir, ignore_errors=True)
 
 
-def _logged(env, journal):
-    """A server whose log is kept: (proc, base, read the log)."""
+def _logged(env, journal, preload=None):
+    """A server whose log is kept: (proc, base, read the log). `preload`, a
+    script node runs first (-r), for a check that has to watch or break a
+    module the server requires — the suite's, never the server's own seam."""
     port = free_port()
     logpath = journal + '.log'
     fh = open(logpath, 'w')
-    p = subprocess.Popen(['node', os.path.join(ROOT, 'server.js')],
+    pre = []
+    if preload is not None:
+        prepath = journal + '.pre.js'
+        with open(prepath, 'w') as pf:
+            pf.write(preload)
+        pre = ['-r', prepath]
+    p = subprocess.Popen(['node'] + pre + [os.path.join(ROOT, 'server.js')],
                          env=dict(os.environ, PORT=str(port), HTTPS_PORT='0', JOURNAL=journal, **env),
                          stdout=fh, stderr=fh)
     b = 'http://127.0.0.1:%d' % port
@@ -15794,6 +15802,32 @@ try:
 finally:
     stop(proc)
 shutil.rmtree(_fndir, ignore_errors=True)
+
+# rowApp asked offer-parser.js's screenType of every row written before `app`
+# on every fold, and the fold runs again after each append: 46 ms of a
+# 195 ms /api/trends on an invented 12,000-offer journal. Remembered per row
+# now. Counted by wrapping screenType before the server loads it: five old
+# rows, folded, a mark appended, folded again — five asks, not ten.
+_SAY_SCREEN = ("var P = require(%r); var st = P.screenType;\n"
+               "P.screenType = function (t) { process.stderr.write('screenType asked\\n'); "
+               "return st.apply(this, arguments); };\n" % os.path.join(ROOT, 'offer-parser.js'))
+_radir = tempfile.mkdtemp()
+_raj = os.path.join(_radir, 'offers.jsonl')
+_ratext = '$9.50\nGuaranteed (incl. tip)\n20 min (4.0 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta'
+write(_raj, [offer(i, NOW - 3600000 + i * 60000, text=_ratext) for i in range(5)])
+proc, base, _ralog = _logged({'SCANNER': '0'}, _raj, preload=_SAY_SCREEN)
+try:
+    _ra1 = get(base, '/api/trends?days=1')
+    write(_raj, [{'v': 1, 'kind': 'mark', 'id': 'off2', 'at': NOW, 'accepted': True, 'via': 'offers'}], mode='a')
+    time.sleep(0.05)
+    _ra2 = get(base, '/api/trends?days=1')
+    eq('[rowApp] five rows written before `app`, folded twice around an append: screenType asked five times, '
+       'not ten, and the same app read', (_ralog().count('screenType asked'), _ra1['rows']['cols'].get('app'),
+                                          _ra1['rows']['cols'].get('app') == _ra2['rows']['cols'].get('app')),
+       (5, _ra2['rows']['cols'].get('app'), True))
+finally:
+    stop(proc)
+shutil.rmtree(_radir, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
