@@ -5,7 +5,10 @@
    held where it could flatter: a curve whose best point is a thin tail, a
    free hour that was really an order in the car, a card read four times
    counted four times, a clock that stepped read as a long delivery, and a
-   ratio that leaves the best-looking cards' optimism in.
+   ratio that leaves the best-looking cards' optimism in. And, for the good
+   offers passed on, where it could mislead: a card nobody answered for read
+   as taken, a stack read as busy, and a night with the rig off read as
+   waiting.
 
    Every journal here is invented: cards from no real shop, on evenings in
    March 2026 that nobody drove, with no position anywhere. The curve's
@@ -375,9 +378,10 @@ eq('the lines say it once, with n, the pending left out, each app\'s, and that n
 eq('...and name no restaurant (the end-of-shift report prints these lines, and names no place)',
    rp.lines.filter(function (l) { return /Pizza|Burgers|Noodles|Bistro/.test(l); }), []);
 // ...less the acceptance lines, which a matched trip moves on purpose: a
-// trip the earnings screen matched to a card is an accept (section 6).
+// trip the earnings screen matched to a card is an accept (section 6), and
+// so a take or the phone's own accept in section 7's passed-on lines.
 function noGold(r) {
-  var g = S.goldLines(r.gold, r.floors);
+  var g = S.goldLines(r.gold, r.floors).concat(r.passed ? S.passedLines(r.passed) : []);
   return r.lines.filter(function (l) { return g.indexOf(l) === -1; });
 }
 eq('...the rest of the answer as it was without earnings; and with none handed, no paid half and no line',
@@ -516,6 +520,111 @@ eq('thin: under 100 requests the rate is over all of them; no line drawn', [rt.g
    [20, false, null]);
 ok('...said so', rt.lines.some(function (l) { return /fewer than 100 seen so the rate is over all of them/.test(l); })
    && rt.lines.some(function (l) { return /not enough on record for a line yet \(20 exclusive requests\)/.test(l); }));
+
+/* --- 7. the good offers passed on -----------------------------------------
+ *
+ * Record P, worked by hand. Two runs: Tuesday night into Wednesday, 2am to
+ * 5am on 17 March (across the 4am turn of the driver's day), and Wednesday
+ * 6pm to 6:56pm; between them the rig was off for thirteen hours. Forty
+ * filler cards at $10/hr keep each run joined (every 6 min in the first, 7 in
+ * the second); ten cards at $30/hr are the good ones. Sorted, 40 x $10 then
+ * 10 x $30: the top 20% falls at 0.8 x 49 = 39.2, $10 + 0.2 x $20 = $14.
+ *
+ *   G1  02:10  no answer, free                     let go (unanswered)
+ *   G2  02:30  ✓, Took 02:31, put down 03:00       taken
+ *   G3  02:45  inside G2's hold                    busy
+ *   G4  03:50  marked passed                       let go (declined)
+ *   G5  04:20  no answer (the next driver day)     let go
+ *   G6  04:58  no answer                           let go
+ *   G7  18:10  ✓, Took 18:11, put down 18:40       taken
+ *   G8  18:20  inside G7's hold                    busy
+ *   G9  18:50  no answer                           let go
+ *   G10 18:55  an Uber add-on, no hold on file     busy
+ *
+ * Ten good: 2 taken, 3 busy, 5 let go (1 marked, 4 no answer); of the 7 with
+ * nothing in the car, 2 of 7 taken-or-let-go = 29%. Blocks: 12–3am G1-G3
+ * (1 / 1 busy / 1), 3–6am G4-G6 (3 let go), 6–9pm G7-G10 (1 / 2 busy / 1).
+ *
+ * Waits from each let go to the next good card that was not busy (G1, G2,
+ * G4, G5, G6, G7, G9 are the ones a free driver could have had):
+ *   G1 -> G2  20 min
+ *   G4 -> G5  30 min, straight across 4am (one run, one sitting)
+ *   G5 -> G6  38 min
+ *   G6 -> G7  2 min to the run's end at 5:00, the 13 h off not counted, 10
+ *             min into the evening run: 12 min, and it ran across an off stretch
+ *   G9        none after it: still open, in no figure
+ * ...and to the next take (02:30, 18:10): 20, 70 + 10 = 80, 40 + 10 = 50, 12;
+ * G9 open. Four waits each, under the ten a median needs. */
+function recP() {
+  var offs = [], ords = [];
+  function at17(h, m) { return new Date(2026, 2, 17, h, m || 0).getTime(); }
+  for (var f = 0; f <= 30; f++) offs.push(card('pf' + f, at17(2, 0) + f * 6 * 60000, 5, 30, 3));
+  for (var g = 0; g <= 8; g++) offs.push(card('pg' + g, at17(18, 0) + g * 7 * 60000, 5, 30, 3));
+  function good(id, h, m, extra) { offs.push(card(id, at17(h, m), 15, 30, 6, extra)); }
+  good('G1', 2, 10); good('G2', 2, 30, { accepted: true }); good('G3', 2, 45);
+  good('G4', 3, 50, { accepted: false }); good('G5', 4, 20); good('G6', 4, 58);
+  good('G7', 18, 10, { accepted: true }); good('G8', 18, 20); good('G9', 18, 50); good('G10', 18, 55, { addon: true });
+  ords.push({ id: 'G2', tookAt: at17(2, 31), endedAt: at17(3, 0), cardMinutes: 30, app: 'uber', pay: 15 });
+  ords.push({ id: 'G7', tookAt: at17(18, 11), endedAt: at17(18, 40), cardMinutes: 30, app: 'uber', pay: 15 });
+  return { offers: offs, orders: ords };
+}
+var rP = S.analyse(Object.assign(recP(), { boots: 20 }));
+var pp = rP.passed;
+eq('passed on: the ruler is the Trends ruler, the top 20% of every rated card at $14 (40 x $10, 10 x $30)',
+   [pp.top, pp.cut, pp.n, pp.over], [20, 14, 50, 10]);
+eq('...taken is a ✓ or a Took; busy is inside a hold or an add-on; the rest let go, marked or with no answer',
+   [pp.all.good, pp.all.taken, pp.all.busy, pp.all.passed, pp.all.declined, pp.all.unanswered, pp.all.phone, pp.all.free,
+    pp.all.shareTaken], [10, 2, 3, 5, 1, 4, 0, 7, 0.29]);
+eq('...by block, as worked',
+   pp.byBlock.map(function (g) { return [g.name, g.good, g.taken, g.busy, g.passed, g.declined]; }),
+   [['12–3am', 3, 1, 1, 1, 0], ['3–6am', 3, 0, 0, 3, 1], ['6–9pm', 4, 1, 2, 1, 0]]);
+eq('...the minutes online to the next good one: 20, 30 across 4am, 38, and 12 across the rig-off night (2 + 10, '
+   + 'not 13 h); the last let go still open',
+   [pp.waits.minutes.good, pp.waits.counts.acrossOff, pp.waits.counts.openGood, pp.waits.counts.origins],
+   [[20, 30, 38, 12], 1, 1, 5]);
+eq('...and to the next take: 20, 80, 50, 12 (the night off left out of each), one open',
+   [pp.waits.minutes.take, pp.waits.counts.openTake], [[20, 80, 50, 12], 1]);
+eq('...four waits are under the ten a median needs: the n alone', [pp.waits.good, pp.waits.take],
+   [{ n: 4, p50: null, p75: null }, { n: 4, p50: null, p75: null }]);
+var clk = S.onlineClock([[0, 10 * 60000], [60 * 60000, 70 * 60000]]);
+eq('the online clock: across an hour off only the 10 minutes on count, and it says it crossed', [
+  clk(5 * 60000, 65 * 60000), clk(1 * 60000, 4 * 60000), clk(20 * 60000, 30 * 60000)],
+   [{ min: 10, acrossOff: true }, { min: 3, acrossOff: false }, { min: 0, acrossOff: true }]);
+// Silence is never an accept: with the ✓ on G2 and its Took both gone, G2
+// is let go, and G3, no longer in any hold, is let go too.
+var noTake = recP();
+noTake.offers.forEach(function (o) { if (o.id === 'G2') delete o.accepted; });
+noTake.orders = noTake.orders.filter(function (o) { return o.id !== 'G2'; });
+var pn = S.analyse(Object.assign(noTake, { boots: 20 })).passed;
+eq('...a card nobody answered for is never taken: without G2\'s ✓ and Took, it and G3 are let go',
+   [pn.all.taken, pn.all.busy, pn.all.passed, pn.all.unanswered], [1, 2, 7, 6]);
+// A card taken while another order was in the car is a stack the driver
+// made: taken, not busy.
+var stack = recP();
+stack.offers.forEach(function (o) { if (o.id === 'G3') o.accepted = true; });
+eq('...a card taken inside another\'s hold is taken (a stack), not busy',
+   [S.analyse(Object.assign(stack, { boots: 20 })).passed.all.taken, S.analyse(Object.assign(recP(), { boots: 20 })).passed.all.taken],
+   [3, 2]);
+// The phone's own accept (an earnings trip matched to the card, no Took).
+var ph = S.analyse(Object.assign(recP(), { boots: 20, earnings: [
+  { key: 'e1', app: 'uber', amount: 15, match: { status: 'matched', offer: 'G1', source: 'offer', cardPay: 15 } }] })).passed;
+eq('...a card Uber\'s earnings screen matched with no Took is counted apart, neither taken nor let go',
+   [ph.all.phone, ph.all.taken, ph.all.passed, ph.all.free], [1, 2, 4, 7]);
+eq('...the other rulers beside it, each worked by the same function (at 50%, the cut is $10 and every card is good)',
+   pp.tops.map(function (t) { return [t.top, t.cut, t.good]; }), [[10, 30, 10], [20, 14, 10], [30, 10, 50], [50, 10, 50]]);
+var pLines = S.passedLines(pp);
+eq('...in words, in the past tense, with each n',
+   pLines, ['The good offers you passed on (the top 20% of this record\'s offers, $14.00/hr or more on the panel): 10 seen; '
+            + '3 came with an order already in the car; of the 7 with none, you took 2 (29% of those taken or let go) and let 5 go '
+            + '(1 marked passed, 4 with no answer, which is not a take).',
+            'When you let one go with nothing in the car, the next good one came: too few to give a median (n=4), and your next '
+            + 'take came: too few to give a median (n=4). Minutes the rig was off are not counted (1 wait ran across a stretch it '
+            + 'was off); 1 had no good one after it in this record. History, not advice: nothing on the rig reads it.']);
+ok('...are in the summary, and none of it says which card to take or let go',
+   pLines.every(function (l) { return rP.lines.indexOf(l) >= 0; })
+   && rP.lines.every(function (l) { return !/\byou should\b|\btake (this|it|only)\b|\bdecline (this|it)\b|\bnext time\b/i.test(l); }));
+eq('...and the offers page\'s light answer (/api/gold) works none of it out',
+   S.analyse(Object.assign(recP(), { light: true })).passed, undefined);
 
 // Run as a child, it answers one JSON request with the same analysis.
 var cp = require('child_process'), path = require('path');

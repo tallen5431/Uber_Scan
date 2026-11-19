@@ -1507,9 +1507,26 @@ function nbx() {
      foldIds.length > 30 && foldIds.every(function (id, i) { return foldIds.indexOf(id) === i; })
      && !/<details class="fold"(?! id="[^"]+" open>)/.test(pageW));
   var stratW = STRATEGY_OF(pageW);
-  // Sixteen tables as before, each a table or, with no rows, "None."
-  eq('...not one of the Strategy tab\'s sixteen tables is gone',
-     (stratW.split('<table>').length - 1) + (stratW.split('<p class="note">None.</p>').length - 1), 16);
+  // Sixteen tables as before, each a table or, with no rows, "None.", and
+  // the two the good offers passed on added under the curve (eighteen).
+  eq('...not one of the Strategy tab\'s sixteen tables is gone, and the passed-on two are there',
+     (stratW.split('<table>').length - 1) + (stratW.split('<p class="note">None.</p>').length - 1), 18);
+  // The good offers passed on (strategy.js section 7): under the curve's
+  // points, ahead of Gold and the slices, worked by strategy.js and only
+  // drawn here — every block's bar line says its counts as strategy.js has them.
+  var pW = repW.strategy.passed;
+  eq('the good offers passed on: strategy.js\'s, over the report\'s offers and takes (one computation)',
+     [pW.cut, pW.all, pW.waits], [sOwn.passed.cut, sOwn.passed.all, sOwn.passed.waits]);
+  ok('...drawn under the curve\'s points and ahead of the slices, a bar line per block with its counts',
+     stratW.indexOf('id="s-points"') < stratW.indexOf('id="s-passed"')
+     && stratW.indexOf('id="s-passed"') < stratW.indexOf('id="s-slices"')
+     && pW.byBlock.length > 0 && pW.byBlock.every(function (g) {
+       return stratW.indexOf('<div class="pname">' + esc0(g.name) + '</div>') >= 0
+         && stratW.indexOf(g.good + ' good · took ' + g.taken) >= 0;
+     }));
+  ok('...saying what taken and busy mean, that silence is never an accept, and that it is history, not advice',
+     /silence is never an accept/.test(stratW) && /History, not advice/.test(stratW)
+     && /<b>Busy<\/b>: it came\s+inside an order/.test(stratW.replace(/\s+/g, ' ')));
   ok('the curve is drawn twice: wide for a laptop, small for a phone and the Overview',
      /<div class="plot wide"><svg viewBox="0 0 640 260"/.test(stratW) && /<div class="plot small"><svg viewBox="0 0 360 220"/.test(stratW)
      && /<svg viewBox="0 0 360 220"/.test(ov));
