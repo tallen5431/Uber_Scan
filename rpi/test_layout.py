@@ -2139,10 +2139,11 @@ const SNAP_MEASURE = (fixture) => {
         });
       }
       // map.html's "you are here" label, by the page's own rule, in the map's
-      // own box. Leaflet comes from a CDN this harness cannot reach, and the
-      // page's offline path writes its notice over the map's box and takes the
-      // label with it — so the label is put back, as the page's markup has
-      // it, to be measured where it would sit.
+      // own box. Leaflet comes from a CDN this harness cannot reach. The
+      // page's offline path wrote its notice over the map's box and took the
+      // label with it; it writes it in a box of its own now (mapSays), and
+      // the label is still put back here if it is missing, as the page's
+      // markup has it, to be measured where it would sit.
       if (name === 'map.html') {
         out[panel[0] + ' map here'] = await page.evaluate((lines) => {
           const box = document.getElementById('map');

@@ -14,11 +14,11 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="styles.css">
-<!-- Leaflet, for the map itself. Loaded from a CDN rather than vendored
+<!-- Leaflet, for the map itself, is loaded from a CDN rather than vendored
      because this page is the one thing here that cannot work offline anyway:
-     it needs a geocoder and it needs tiles. If the rig has no signal the page
-     says so rather than showing an empty grey square. -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+     it needs a geocoder and it needs tiles. It is fetched by MV.needLeaflet
+     once the page is up (startLeaflet, at the foot), not by a tag here: see
+     there for why. -->
 <style>
   body { padding: 0; }
   /* FOUR rows, for four children: the header, the bar, the privacy notice and
@@ -34,6 +34,11 @@
   header { padding: 10px 14px; border-bottom: 1px solid var(--line); }
   h1 { font-size: 18px; margin: 0 0 2px; }
   .sub { font-size: 12px; color: var(--muted); }
+  /* The way back took the browser's own link blue, #0000ee on this page's
+     #0b0f14: 2.05:1, under every contrast floor there is, on the one link
+     out of the page. The line's own muted colour, underlined so it is still
+     seen to be a link. */
+  .sub a { color: var(--muted); text-decoration: underline; }
   .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
          padding: 8px 14px; border-bottom: 1px solid var(--line); }
   .bar label { font-size: 12px; color: var(--muted); display: flex;
@@ -132,8 +137,10 @@
   .note { font-size: 12px; color: var(--muted); line-height: 1.5; }
   .warnbox { border: 1px solid var(--warn); border-radius: 10px; padding: 8px 10px;
              margin: 8px 14px; font-size: 12px; line-height: 1.5; }
-  .leaflet-container { background: var(--panel-2); }
-  .pin-label { font: 700 11px system-ui, sans-serif; }
+  /* The id, because leaflet.css now arrives after this sheet (startLeaflet)
+     and its own `.leaflet-container` grey would win a tie. */
+  #map.leaflet-container { background: var(--panel-2); }
+  #mapSays { padding: 16px; }
 
   /* A line of prose has a width past which it stops being readable. This page
      lifts the shared cap so the map can use the whole panel, and the sentences
@@ -269,7 +276,6 @@
   </div>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <!-- For Advice.BLOCK_NAMES and Advice.blockOf alone: the three-hour edges the
      offer log's "By time of day" chart is drawn on. The `when` box below cuts
      the same week at the same eight places, and a page that kept its own copy
@@ -585,6 +591,7 @@
 
   function load() {
     var days = Math.max(1, Math.min(365, Number(el.days.value) || 7));
+    if (leaflet === 'failed') startLeaflet();
     say('loading…');
     el.place.disabled = true;
     // Both at once, and the load line waits for both: it is the one sentence
@@ -760,14 +767,55 @@
         + whenNote(sub));
   }
 
+  /* Leaflet, asked for once the page is up rather than by a tag in <head>.
+     The tags blocked: a CDN that opens and never answers — car wifi does
+     exactly that — held the page blank, every button unwired, its sidebar
+     unwritten, and the notice below that says the map library did not load
+     never shown, because the script that writes it was waiting behind the
+     one that had not arrived (measured: no paint after 30 s with the CDN
+     stalled). Now the page and its buttons come up at once, the map's box
+     says the map is loading, and MV.needLeaflet's own wait turns a CDN that
+     never answers into the notice. Load offers asks again after a failure. */
+  var LEAFLET = { css: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
+                  js: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js' };
+  var leaflet = 'loading';    // 'loading', 'ready' or 'failed'
+
+  function startLeaflet() {
+    leaflet = 'loading';
+    ensureMap();
+    MV.needLeaflet(document, LEAFLET).then(function (got) {
+      leaflet = got ? 'ready' : 'failed';
+      // Whatever the page already holds is drawn now that it can be; with
+      // nothing loaded yet this is the empty map, as the page always opened.
+      if (ensureMap()) { redraw(); drawHere(); }
+    });
+  }
+
+  // What the map's box says while there is no map. In a box of its own, not
+  // written over the map's: that took the "you are here" label and the key
+  // to the pins with it, for good, so a map that came after had neither.
+  function mapSays(words) {
+    var box = document.getElementById('mapSays');
+    if (!words) { if (box) box.parentNode.removeChild(box); return; }
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'mapSays';
+      box.className = 'note';
+      el.map.appendChild(box);
+    }
+    box.textContent = words;
+  }
+
   function ensureMap() {
     if (map) return true;
     if (typeof L === 'undefined') {
-      el.map.innerHTML = '<div class="note" style="padding:16px">The map library '
-        + 'did not load. This page needs a network: it uses OpenStreetMap for '
-        + 'both the tiles and the lookups.</div>';
+      mapSays(leaflet === 'loading'
+        ? 'Loading the map…'
+        : 'The map library did not load. This page needs a network: it uses '
+          + 'OpenStreetMap for both the tiles and the lookups. Load offers tries again.');
       return false;
     }
+    mapSays(null);
     map = L.map(el.map, { zoomControl: true }).setView([33.94, -84.58], 10);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19, attribution: '© OpenStreetMap'
@@ -1806,7 +1854,7 @@
       });
   });
 
-  ensureMap();
+  startLeaflet();
   load();
   // Where the car is now, and again every HERE_EVERY_MS while the page is on
   // screen; the label's age and its grey move every second without asking.

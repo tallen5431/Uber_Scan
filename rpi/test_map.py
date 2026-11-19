@@ -770,6 +770,45 @@ const KNOWN = {
     await hp.close();
   }
 
+  // The CDN that opens and never answers, with no Leaflet stubbed. Leaflet
+  // was a blocking tag in <head>: the page stayed blank, its buttons
+  // unwired, and its own notice that the map library did not load was never
+  // shown (measured: no paint after 30 s). On the page's own clock, past
+  // MV.needLeaflet's wait.
+  stage = 'a CDN that never answers';
+  {
+    const hp = await browser.newContext({ viewport: { width: 1200, height: 820 } })
+      .then((c) => c.newPage());
+    await hp.clock.install({ time: Date.now() });
+    let cdn = 0;
+    await hp.route('**/unpkg.com/**', () => { cdn++; /* never answered */ });
+    await hp.route('**/api/journal*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: '{"offers":[]}' }));
+    const t0 = Date.now();
+    await hp.goto(base + '/map.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await hp.waitForFunction(() => /offers/.test(document.getElementById('status').textContent || ''),
+                             null, { timeout: 10000 }).catch(() => {});
+    const upIn = Date.now() - t0;
+    const look = () => hp.evaluate(() => ({
+      status: document.getElementById('status').textContent || '',
+      says: (document.getElementById('mapSays') || {}).textContent || '',
+      here: !!document.getElementById('hereNote'),
+      key: !!document.getElementById('mapKey') }));
+    out.stalled = { first: await look(), asked: cdn, upIn: upIn };
+    // The way back, read as the browser paints it: its colour and the page's.
+    out.backLink = await hp.evaluate(() => {
+      const a = document.querySelector('header a[href="journal.html"]');
+      return { fg: a ? getComputedStyle(a).color : null,
+               bg: getComputedStyle(document.body).backgroundColor };
+    });
+    await hp.clock.runFor(16000);
+    await hp.waitForFunction(() => /did not load/.test(
+      (document.getElementById('mapSays') || {}).textContent || ''), null, { timeout: 5000 })
+      .catch(() => {});
+    out.stalled.after = await look();
+    await hp.close();
+  }
+
   console.log(JSON.stringify(out));
   await browser.close();
 })().catch((e) => { console.log(JSON.stringify(
@@ -1257,6 +1296,42 @@ try:
     eq('a late answer does not overwrite a newer one: the dot stays where the car is now',
        (_ht.get('after') or {}).get('dots'), [[33.9616, -84.5499]])
     eq('...and never two asks out at once', _ht.get('most'), 1)
+
+    # --- a CDN that never answers -------------------------------------------
+    _st = got.get('stalled') or {}
+    _s1 = _st.get('first') or {}
+    # Real time, this one: the blocking tag held the page until the browser
+    # gave up on the request, about half a minute here, and only then did it
+    # load its offers.
+    ok_('[no Leaflet] with the CDN never answering, the page is up and has loaded its offers '
+        'within 8 s (%r, %r ms)' % (_s1.get('status'), _st.get('upIn')),
+        'offers' in (_s1.get('status') or '') and (_st.get('upIn') or 1e9) < 8000)
+    ok_('[no Leaflet] ...its map\'s box says the map is loading (%r), having asked the CDN '
+        '(%r)' % (_s1.get('says'), _st.get('asked')),
+        'Loading the map' in (_s1.get('says') or '') and (_st.get('asked') or 0) >= 1)
+    _s2 = _st.get('after') or {}
+    ok_('[no Leaflet] ...and once the wait is up it says the map library did not load (%r)'
+        % _s2.get('says'), 'did not load' in (_s2.get('says') or ''))
+    eq('[no Leaflet] ...in a box of its own: the "you are here" label and the key to the pins '
+       'are still there for a map that comes later', (_s2.get('here'), _s2.get('key')),
+       (True, True))
+
+    # The way back to the offer log was the browser's own link blue on this
+    # page's near-black: 2.05:1. Measured as painted, against WCAG's 4.5:1.
+    def _rgb(css):
+        m = re.match(r'rgba?\((\d+),\s*(\d+),\s*(\d+)', css or '')
+        return tuple(int(x) for x in m.groups()) if m else None
+
+    def _lum(c):
+        ch = [v / 255.0 for v in c]
+        ch = [v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4 for v in ch]
+        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+    _bl = got.get('backLink') or {}
+    _fg, _bg = _rgb(_bl.get('fg')), _rgb(_bl.get('bg'))
+    _ratio = ((max(_lum(_fg), _lum(_bg)) + 0.05) / (min(_lum(_fg), _lum(_bg)) + 0.05)
+              if _fg and _bg else 0)
+    ok_('map.html\'s way back to the offer log can be read: %.2f:1 (%s on %s)'
+        % (_ratio, _bl.get('fg'), _bl.get('bg')), _ratio >= 4.5)
 
     # --- the miles nobody paid for ------------------------------------------
     #
