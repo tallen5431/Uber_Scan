@@ -203,17 +203,44 @@ function seedOf(text) {
  * copied every resample into a new array and sorted it through a compare
  * function — the report's largest single cost on a 3x record. The same
  * draws in the same order, the same middle value (or the mean of the two
- * middle ones), so the same interval for the same seed: a check holds it. */
+ * middle ones), so the same interval for the same seed: a check holds it.
+ *
+ * Then the second review: sorting every resample was still 37% of the whole
+ * report on the invented 11,721-offer journal. A resample's middle needs no
+ * sort at all: the values are sorted ONCE, each draw adds one to its value's
+ * rank, and a walk up the counts reaches the middle rank(s). Each draw is
+ * still values[floor(r() * n)], in the same order, and the order statistics
+ * are the same numbers the sort put there, so the interval is the same to
+ * the bit (bootCIPlain's check; the report built before and after, every CSV
+ * and the page's data identical). O(n) a resample where the sort was
+ * O(n log n). A quantile's own statistic (qOf, which says its q) takes the
+ * same walk to its two straddling ranks and the same arithmetic. */
 function bootCI(values, seed, reps, stat) {
   if (!values || values.length < 2) return null;
   reps = reps || BOOTS;
   var r = rng(seed), n = values.length, meds = new Float64Array(reps), k, i;
-  if (!stat) {
-    var tb = new Float64Array(n), mid = Math.floor(n / 2), odd = n % 2 === 1;
+  var q = !stat ? 0.5 : typeof stat.q === 'number' ? stat.q : null;
+  if (q !== null) {
+    // Each value's rank in the one sort; `order[rank[j]]` IS values[j].
+    var idx = new Array(n);
+    for (i = 0; i < n; i++) idx[i] = i;
+    idx.sort(function (a, b) { return values[a] - values[b]; });
+    var order = new Float64Array(n), rank = new Int32Array(n), cnt = new Int32Array(n);
+    for (i = 0; i < n; i++) { order[i] = values[idx[i]]; rank[idx[i]] = i; }
+    // The lower rank wanted, and whether the one above it is needed: the
+    // median's mid (odd) or mid - 1 and mid (even); type 7's floor(h), h + 1.
+    var h = (n - 1) * q, lo, two;
+    if (!stat) { lo = n % 2 === 1 ? Math.floor(n / 2) : n / 2 - 1; two = n % 2 === 0; }
+    else { lo = Math.floor(h); two = h !== lo; }
     for (k = 0; k < reps; k++) {
-      for (i = 0; i < n; i++) tb[i] = values[Math.floor(r() * n)];
-      tb.sort();
-      meds[k] = odd ? tb[mid] : (tb[mid - 1] + tb[mid]) / 2;
+      cnt.fill(0);
+      for (i = 0; i < n; i++) cnt[rank[Math.floor(r() * n)]]++;
+      var c = 0, j = 0;
+      while (c + cnt[j] <= lo) { c += cnt[j]; j++; }
+      var a = order[j], b = a;
+      if (two && c + cnt[j] === lo + 1) { j++; while (cnt[j] === 0) j++; b = order[j]; }
+      // The very expressions the sorted paths used, so the same bits.
+      meds[k] = !stat ? (two ? (a + b) / 2 : a) : (two ? a + (h - lo) * (b - a) : a);
     }
   } else {
     var buf = new Array(n);
@@ -2543,14 +2570,19 @@ function selectK(a, k) {
   }
   return a[k];
 }
+// It says its q, so bootCI walks the resample's counts to the two ranks
+// instead of calling it on every resample (bootCI's header); called on a
+// list it is the same quantile, which the check holds against the walk.
 function qOf(q) {
-  return function (xs) {
+  var f = function (xs) {
     var h = (xs.length - 1) * q, lo = Math.floor(h), a = selectK(xs, lo);
     if (h === lo) return a;
     var b = Infinity;
     for (var i = lo + 1; i < xs.length; i++) if (xs[i] < b) b = xs[i];
     return a + (h - lo) * (b - a);
   };
+  f.q = q;
+  return f;
 }
 
 /* A 95% interval for the q-th quantile: the percentile bootstrap (BOOTS

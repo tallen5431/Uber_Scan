@@ -2077,6 +2077,26 @@ function nbx() {
       });
     });
     ok('[R1] the median bootstrap\'s typed-array path gives the plain path\'s interval for the same seed (6 sizes x 3 seeds)', same);
+    // The second review: the rank walk, against the statistic called on every
+    // resample (a function with no q takes the general path), ties and all.
+    var qSame = true;
+    [2, 3, 10, 11, 57, 400].forEach(function (n) {
+      var v = []; for (var i = 0; i < n; i++) v.push(i % 3 === 0 ? 12 : Math.round(r9() * 4000) / 100);
+      [0.25, 0.75, 0.9].forEach(function (q) {
+        var plain = function (xs) { return P.quantile(xs, q); };
+        [5, 99].forEach(function (sd) {
+          if (JSON.stringify(P.bootCI(v, sd, 1000, P.qOf(q))) !== JSON.stringify(P.bootCI(v, sd, 1000, plain))) qSame = false;
+        });
+      });
+    });
+    ok('[R1] ...and a quantile\'s rank walk gives the interval its statistic called on every resample gives (6 sizes x 3 q x 2 seeds)', qSame);
+    // Sorting every resample read every value once a draw: 1000 x n reads.
+    // The walk reads them for its one sort and draws ranks after that.
+    var reads = 0, base = []; for (var i2 = 0; i2 < 200; i2++) base.push(Math.round(r9() * 4000) / 100);
+    var watched = new Proxy(base, { get: function (t, p) { if (typeof p === 'string' && /^\d+$/.test(p)) reads++; return t[p]; } });
+    var ciW = P.bootCI(watched, 3);
+    ok('[R1] ...and the median\'s interval comes off one sort, not a sort a resample (' + reads + ' reads of 200 values, '
+       + 'not 200,000), the same interval', reads < 20000 && JSON.stringify(ciW) === JSON.stringify(P.bootCIPlain(base, 3)));
   }());
   ok('[waited] F8: the stays\' columns say "at target" (the card\'s own target), not "good", which is When & where\'s cut',
      (function (t) {
