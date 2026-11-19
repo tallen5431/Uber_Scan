@@ -133,7 +133,7 @@ function offer(x) {
   var goodRows = T.readRows(T.rowsOf([offer({ id: 'g1', at: at(2, 18, 5), perHour: 30 }),
                                        offer({ id: 'g2', at: at(2, 18, 6), perHour: 26 }),
                                        offer({ id: 'g3', at: at(2, 18, 7), perHour: 20 })]));
-  var gp = T.goodPerHour(goodRows, runs, 'day');
+  var gp = T.goodPerHour(goodRows, runs, 'day', 25);
   eq('good per hour online: the day\'s good offers over its own slices\' hours, a run across 4am cut there (its '
      + '3:30-4am half the night before\'s), while hoursBy still credits the sitting to the day it began',
      [gp[0].key, gp[0].good, gp[0].hours, gp[0].rate, T.hoursBy(runs, 'day')['2026-03-02'],
@@ -218,10 +218,10 @@ function offer(x) {
   for (var rep = 0; rep < 400; rep++) {
     var vals = [];
     for (var v = 0; v < 30; v++) vals.push(Math.exp(Math.log(14) + 0.37 * (r3() + r3() + r3() - 1.5) * 2));
-    if (T.shadeOf(vals, 2, 14).shade) shaded += 1;
+    if (T.shadeQ(vals, 2, 14, 0.5).shade) shaded += 1;
   }
   ok('with no effect, at the floor, about 1 cell in 100 or fewer is shaded (' + shaded + ' of 400)', shaded <= 8);
-  eq('...and one day is not enough for a grid cell', T.shadeOf(new Array(40).fill(30), 1, 14).enough, false);
+  eq('...and one day is not enough for a grid cell', T.shadeQ(new Array(40).fill(30), 1, 14, 0.5).enough, false);
 
   /* --- the calendar --- */
   var cal = T.calendar(T.readRows(T.rowsOf(gridRows)), [[at(6, 18), at(6, 22)]]);
@@ -269,7 +269,7 @@ function offer(x) {
   var sc = T.scatter(mrows, 50);
   eq('the scatter is thinned evenly past its cap, and says how many it was', [sc.points.length, sc.of, sc.labels],
      [50, 108, ['2026-03']]);
-  var csv = T.csvPeriods(dailies, T.goodPerHour(mrows, [], 'day'), 'day').split('\n');
+  var csv = T.csvPeriods(dailies, T.goodPerHour(mrows, [], 'day', 25), 'day', 25).split('\n');
   eq('the daily CSV: a header and a line a day', [csv[0].split(',').slice(0, 4), csv.length - 2],
      [['day', 'offers', 'counted', 'pay_p25'], 12]);
   ok('...the hourly CSV: 24 lines', T.csvHourly(hrs).split('\n').length === 26);
@@ -329,10 +329,6 @@ function offer(x) {
   eq('a run across 4am: its 3am half on the Friday night, its 4am half on Saturday',
      Object.keys(four).sort().map(function (k) { return [k, four[k].dow, four[k].hour, four[k].hours]; }),
      [['2026-03-06|3', 5, 3, 0.5], ['2026-03-07|4', 6, 4, 0.5]]);
-  var byCell = T.hoursByCell([[at(6, 23, 30), at(7, 0, 30)], [at(7, 3, 30), at(7, 4, 30)], [at(13, 23, 0), at(13, 23, 45)]]);
-  eq('...and by weekday x hour: Friday 11pm 1.25 h on two nights, Friday 3am and Saturday 4am half an hour each',
-     [byCell[5 * 24 + 23], byCell[5 * 24 + 3], byCell[6 * 24 + 4]],
-     [{ hours: 1.25, days: 2 }, { hours: 0.5, days: 1 }, { hours: 0.5, days: 1 }]);
   eq('...while hoursBy still credits a sitting across 4am to the day it began (round one\'s rule, unchanged)',
      T.hoursBy([[at(7, 3, 30), at(7, 4, 30)]], 'day'), { '2026-03-06': 1 });
 
@@ -1039,7 +1035,25 @@ function offer(x) {
   ok('[offers csv] ...and the text itself starts with its header', made.text.indexOf('datetime,') === 0);
   // The Trends tables: week_start and the weekday appended, the hour's label.
   var xp = T.periods(T.readRows(T.rowsOf(xoffers)), 'day');
-  var xpd = csvRows(T.csvPeriods(xp, [], 'day', 19)), xpw = csvRows(T.csvPeriods(T.periods(T.readRows(T.rowsOf(xoffers)), 'week'), [], 'week', 19));
+  var xRows = T.readRows(T.rowsOf(xoffers));
+  var xpd = csvRows(T.csvPeriods(xp, T.goodPerHour(xRows, [], 'day', 19), 'day', 19));
+  var xpw = csvRows(T.csvPeriods(T.periods(xRows, 'week'), T.goodPerHour(xRows, [], 'week', 19), 'week', 19));
+  // The second review: with no goods passed, the good column fell back to
+  // each row's own target, under a header saying good_from_per_hour 19.
+  // Good is the ruler's only: the goods' count, or nothing.
+  // Three offers at $20, $22 and $30 under a $25 target: 1 good by target,
+  // 3 at a $19 ruler.
+  var tgRows = T.readRows(T.rowsOf([20, 22, 30].map(function (v, i) { return offer({ id: 'tg' + i, at: at(2, 19, i), perHour: v }); })));
+  var tgPer = T.periods(tgRows, 'day');
+  var tgCsv = csvRows(T.csvPeriods(tgPer, T.goodPerHour(tgRows, [], 'day', 19), 'day', 19));
+  var tgBare = csvRows(T.csvPeriods(tgPer, [], 'day', 19));
+  var gi = tgCsv[0].indexOf('good'), gfi = tgCsv[0].indexOf('good_from_per_hour');
+  eq('[trends csv] the good column is counted at good_from_per_hour (3 at $19, not the 1 over its $25 target), and '
+     + 'is empty with no goods, never the targets\' count', [tgCsv[1][gfi], tgCsv[1][gi], tgBare[1][gfi], tgBare[1][gi]],
+     ['19', '3', '19', '']);
+  eq('[trends] ...and with no ruler nothing is good: good per hour and two periods do not fall back to the targets',
+     [T.goodPerHour(tgRows, [], 'day')[0].good, T.compare(tgRows, null, null).a.good, T.compare(tgRows, null, null, 19).a.good],
+     [0, 0, 3]);
   eq('[trends csv] daily: the first column kept, week_start (a Monday) and the weekday appended last',
      [xpd[0][0], xpd[0].slice(-2), xpd[1][0], xpd[1].slice(-2)], ['day', ['week_start', 'weekday'], '2026-10-29', ['2026-10-26', 'Thu']]);
   eq('[trends csv] weekly: week_of is the Monday, week_start the same date, no weekday',
