@@ -123,6 +123,10 @@ var OP = require('../offer-parser.js');
 // What $/hr to expect and what holding out paid (the Strategy tab), shared
 // with the end-of-shift report so the two print one answer.
 var S = require('./strategy.js');
+// trends.js's dispersion and rateShade, for When & where's interval (the
+// reporting review's S2): the same widening the Trends grid's good per hour
+// takes, so the two pages' marks mean the same thing.
+var TR = require('../trends.js');
 // ...and what the app paid, for an order this report could not time (uberTimingFor).
 var E = require('../earnings.js');
 
@@ -1120,9 +1124,17 @@ function waitedTable(line, keyName, label, what) {
  * for a different question). 10/20/30/50% to pick from, 20 by default.
  *
  * THE RANKING. Good offers per hour waited there (the credited hours), with
- * the exact (Garwood) 99% Poisson interval on the count over those hours.
- * An area is marked only where that interval sits wholly above or wholly
- * below the slot's own overall rate — every waiting card in the slot,
+ * the exact (Garwood) 99% Poisson interval on the count over those hours,
+ * WIDENED BY PHI (the reporting review's S2): a plain Poisson interval
+ * marked 4.5-12.6% of no-effect areas once the nights swing 40%, as the
+ * Trends grid's did before it was widened. phi is trends.js `dispersion`
+ * over each area's shift days within each weekday x block (Pearson's
+ * chi-square of the days' good counts against the area's own rate, pooled
+ * over every area, never under 1), one per town or cell and per top; the
+ * interval is on k/phi, scaled back (trends.js `rateShade`). The hour
+ * strip's lines take one phi over every weekday x hour's days. Simulated
+ * in the AUDITS entry: about 1% at every row. An area is marked only where
+ * that interval sits wholly above or wholly below the slot's own overall rate — every waiting card in the slot,
  * placed or not; otherwise it is printed without colour, as every
  * descriptive table here is. 99%, not 95%: the driver flicks through up to
  * seventy slots of up to dozens of areas, and at 95% one in twenty would be
@@ -1167,11 +1179,16 @@ var WW_CONF = 0.99;
 
 // The driver's weekday (0 Sunday), WW_BLOCKS index and hour of the driver
 // day (0 the 4am hour, 23 the 3am one) of a stamp, or null.
+// The HOUR off the real clock, the day off the driver-day shift (the
+// reporting review's F7): shifting the moment back four hours and reading
+// the hour off that put 5:30am on the spring-forward Sunday in the 1am hour
+// and 6:30 and 7:30 both in the 3am one, while Trends put them at 5, 6 and
+// 7. The clock hour, less four, wraps the same way on every other day.
 function wwSlotOf(at) {
   var d = new Date(at);
   if (!isFinite(d.getTime())) return null;
+  var h = (d.getHours() - A.DAY_STARTS_AT + 24) % 24;
   d.setHours(d.getHours() - A.DAY_STARTS_AT);
-  var h = d.getHours();
   for (var i = 0; i < WW_BLOCKS.length; i++) {
     if (h >= WW_BLOCKS[i][0] && h < WW_BLOCKS[i][1]) return { day: d.getDay(), block: i, hour: h };
   }
@@ -1257,38 +1274,81 @@ function whenWhere(offers, waiting) {
     return { h: mins / 60, n: list.length, d: Object.keys(days).length, g: g, u: u, dd: dd,
              p50: v.length ? round2(quantile(v, 0.5)) : null, p90: v.length ? round2(quantile(v, 0.9)) : null };
   }
-  function rated(s) {
+  // phi for each kind of line, per top: `key` puts a card in a group (an
+  // area in a weekday x block, or a weekday x hour), each group's members
+  // its shift days. Disjoint groups, so no card is counted twice.
+  function phiOf(key) {
+    var groups = Object.create(null);
+    line.forEach(function (c) {
+      var g = key(c);
+      if (g === null) return;
+      var gr = groups[g] || (groups[g] = Object.create(null));
+      var m = gr[c.outing] || (gr[c.outing] = { mins: 0, g: WW_TOPS.map(function () { return 0; }) });
+      m.mins += c.mins;
+      c.good.forEach(function (x, i) { if (x) m.g[i] += 1; });
+    });
+    return WW_TOPS.map(function (t, i) {
+      return TR.dispersion(Object.keys(groups).map(function (g) {
+        return Object.keys(groups[g]).map(function (o) { return { k: groups[g][o].g[i], h: groups[g][o].mins / 60 }; });
+      }));
+    });
+  }
+  var phi = { town: phiOf(function (c) { return c.town ? c.day + '|' + c.block + '|' + c.town : null; }),
+              cell: phiOf(function (c) { return c.cell ? c.day + '|' + c.block + '|' + c.cell : null; }),
+              line: phiOf(function (c) { return c.day + '|' + c.hour; }) };
+  function rated(s, ph) {
     s.r = s.g.map(function (k) { return s.h > 0 ? round2(k / s.h) : null; });
-    s.lo = s.g.map(function (k) { return s.h > 0 ? round2(ci(k)[0] / s.h) : null; });
-    s.hi = s.g.map(function (k) { return s.h > 0 ? round2(ci(k)[1] / s.h) : null; });
+    var b = s.g.map(function (k, i) { return wideCI(k, s.h, ph[i]); });
+    s.lo = b.map(function (x) { return x ? round2(x[0]) : null; });
+    s.hi = b.map(function (x) { return x ? round2(x[1]) : null; });
     return s;
   }
-  function inTime(opt, c) {
-    if (opt === 'any') return true;
-    if (opt[0] === 'h') return Number(opt.slice(1)) === c.hour;
-    return Number(opt) === c.block;
+  // The Garwood interval on k/phi, scaled back by phi, per hour.
+  function wideCI(k, h, f) {
+    if (!(h > 0)) return null;
+    f = f > 1 ? f : 1;
+    var b = f === 1 ? ci(k) : poissonCI(k / f, WW_CONF);
+    return [b[0] * f / h, b[1] * f / h];
   }
   // Every slot together: what the hour strip marks each hour's line against.
   var every = sum(line);
   var everyBase = every.g.map(function (k) { return every.h > 0 ? k / every.h : null; });
-  function marks(s, against) {
+  function marks(s, against, ph) {
     return s.g.map(function (k, i) {
       if (against[i] === null || !(s.h > 0)) return null;
-      var b = ci(k);
-      return b[0] / s.h > against[i] ? 'above' : b[1] / s.h < against[i] ? 'below' : null;
+      var b = wideCI(k, s.h, ph[i]);
+      return b[0] > against[i] ? 'above' : b[1] < against[i] ? 'below' : null;
     });
+  }
+  // The cards bucketed once by weekday and hour of the driver day (the
+  // reporting review's R4): 310 slots each filtered the whole line before,
+  // 3.3 s of a 3x record's run; each slot now joins its buckets.
+  var bucket = [];
+  for (var bd = 0; bd < 7; bd++) { bucket.push([]); for (var bh = 0; bh < 24; bh++) bucket[bd].push([]); }
+  line.forEach(function (c) { bucket[c.day][c.hour].push(c); });
+  function hoursOf(opt) {
+    var out = [];
+    if (opt === 'any') { for (var x = 0; x < 24; x++) out.push(x); return out; }
+    if (opt[0] === 'h') return [Number(opt.slice(1))];
+    var b = WW_BLOCKS[Number(opt)];
+    for (var y = b[0]; y < b[1]; y++) out.push(y);
+    return out;
   }
   var slots = {};
   WW_DAY_OPTS.forEach(function (dOpt) {
     WW_BLOCK_OPTS.concat(WW_HOUR_OPTS).forEach(function (bOpt) {
-      var inSlot = line.filter(function (c) { return wwDayIn(dOpt, c.day) && inTime(bOpt, c); });
+      var inSlot = [], hrs = hoursOf(bOpt);
+      for (var dd = 0; dd < 7; dd++) {
+        if (!wwDayIn(dOpt, dd)) continue;
+        hrs.forEach(function (hh) { var b = bucket[dd][hh]; for (var j = 0; j < b.length; j++) inSlot.push(b[j]); });
+      }
       if (!inSlot.length) return;
-      var all = rated(sum(inSlot));
+      var all = rated(sum(inSlot), phi.line);
       var base = all.g.map(function (k) { return all.h > 0 ? k / all.h : null; });
       // The slot's own line held to the same floor, and marked by the same
       // rule against every slot together (the hour strip's colour).
       all.ok = all.h >= WW_MIN_HOURS && all.d >= WW_MIN_DAYS;
-      all.mk = all.ok ? marks(all, everyBase) : null;
+      all.mk = all.ok ? marks(all, everyBase, phi.line) : null;
       var out = { all: all };
       ['town', 'cell'].forEach(function (unit) {
         var by = groupBy(inSlot.filter(function (c) { return c[unit]; }), function (c) { return c[unit]; });
@@ -1297,9 +1357,9 @@ function whenWhere(offers, waiting) {
           var s = sum(by[a]);
           s.a = a;
           if (s.h >= WW_MIN_HOURS && s.d >= WW_MIN_DAYS) {
-            rated(s);
+            rated(s, phi[unit]);
             // Marked on the unrounded figures: wholly above or below the slot.
-            s.mk = marks(s, base);
+            s.mk = marks(s, base, phi[unit]);
             ranked.push(s);
           } else {
             thin.push({ a: a, h: s.h, n: s.n, d: s.d });
@@ -1348,6 +1408,7 @@ function whenWhere(offers, waiting) {
   return { blocks: WW_BLOCKS.map(function (b) { return b[2]; }), days: WW_DAYS, dayOpts: WW_DAY_OPTS,
            blockOpts: WW_BLOCK_OPTS, hourOpts: WW_HOUR_OPTS, hours: WW_HOUR_OPTS.map(function (o, i) { return wwHourName(i); }),
            tops: WW_TOPS, top: WW_TOP, cuts: cuts, offers: rates.length,
+           phi: { town: phi.town.map(round2), cell: phi.cell.map(round2), line: phi.line.map(round2) },
            cards: line.length, minHours: WW_MIN_HOURS, minDays: WW_MIN_DAYS, conf: WW_CONF, slots: slots };
 }
 
@@ -4244,16 +4305,22 @@ function WHENWHERE_SECTION(r) {
     + '<p class="exp">Experimental, descriptive. <b>Offered, not earned</b>: offers are dispatched near the car, so '
     + 'only areas you already wait in compete, and a good offer seen is not one taken. Nothing here is a rule, and '
     + 'nothing on the rig reads it.</p>'
-    + '<p class="note">Every area where the car waited, for the slot you pick, ranked by <b>good offers per hour '
-    + 'waited there</b>. <b>Day</b> is the driver\'s, 4am to 4am: 1am on a Saturday is Friday night; Weekends are the '
+    + '<p class="note">Every area where the car waited, for the slot you pick, ranked by <b>good per hour waited '
+    + '(each gap capped at ' + r.waited.creditMaxMin + ' min, none while carrying)</b>. That is not the offers page\'s '
+    + 'Trends "good per hour online", which counts every minute the rig was scanning, carrying included: the two '
+    + 'measure different hours, so their figures differ by design. <b>Day</b> is the driver\'s, 4am to 4am: 1am on a Saturday is Friday night; Weekends are the '
     + 'driver\'s Saturday and Sunday. <b>Where</b> is the car\'s own GPS fix on each card that came with no order in '
     + 'the car (the Waited tab\'s line: ' + w.cards + ' cards), by the town of its ' + r.gridMi + '-mile cell or the '
     + 'cell itself; <b>hours waited</b> are inferred as that tab infers them, each card\'s time to the next, at most '
     + r.waited.creditMaxMin + ' minutes and none across a silence over ' + r.nextGapMin + '. <b>Good</b> is the card\'s '
     + '$/hr at or over one fixed cutoff, the top share picked of all ' + w.offers + ' offers in this report\'s range, '
-    + 'the same dollars in every slot: <b id="wwCut">' + esc(cutSaid(ti)) + '</b>. The interval is the exact 99% '
-    + 'Poisson interval on the good offers over the hours; an area is <b>marked only where it lies wholly above or '
-    + 'below the slot\'s own rate</b>, and printed without colour otherwise. Ranked at ' + w.minHours + ' h waited on '
+    + 'the same dollars in every slot and the same as the Strategy tab\'s section 7, over this report\'s '
+    + r.outings + ' days: <b id="wwCut">' + esc(cutSaid(ti)) + '</b>. The interval is the exact 99% '
+    + 'Poisson interval on the good offers over the hours, widened by how much more an area\'s days differ than '
+    + 'chance alone would (×' + (w.phi ? w.phi.town[ti].toFixed(2) + ' by town, ×' + w.phi.cell[ti].toFixed(2) + ' by cell'
+    : '1') + ' on this record); an area is <b>marked only where it lies wholly above or '
+    + 'below the slot\'s own rate</b>, and printed without colour otherwise. About 1 coloured square in 100 can be '
+    + 'chance. Ranked at ' + w.minHours + ' h waited on '
     + w.minDays + ' shift days in the slot; under that, listed as too little time there yet.</p>'
     + '<div class="bar" id="wwBar">'
     + '<label>Day <select id="wwDay">' + w.dayOpts.map(function (o) {
@@ -4382,8 +4449,12 @@ function METHOD(r) {
     + 'card\'s area. Good: the card\'s $/hr at or over a fixed cutoff, the top 10/20/30/50% of all ' + r.whenwhere.offers
     + ' counted offers in the range (' + r.whenwhere.tops.map(function (t, i) {
       return 'top ' + t + '% ≥ ' + money(r.whenwhere.cuts[i]);
-    }).join(', ') + '), worked out once and held fixed across every slot and area. Good/hr with its exact (Garwood) '
-    + Math.round(r.whenwhere.conf * 100) + '% Poisson interval, the hours taken as exact. An area is ranked at '
+    }).join(', ') + '), worked out once and held fixed across every slot and area, and handed to the Strategy tab\'s '
+    + 'section 7 so both read one line. Good/hr with its exact (Garwood) '
+    + Math.round(r.whenwhere.conf * 100) + '% Poisson interval, the hours taken as exact, widened by phi: Pearson\'s '
+    + 'chi-square of each area\'s shift days against its own rate within each weekday and block, pooled, never under '
+    + '1 (trends.js dispersion, as the offers page\'s Trends grid); the hour strip by one phi over every weekday and '
+    + 'hour. A plain interval marked 4-13% of no-effect areas once the nights swing 40%; widened, about 1%. An area is ranked at '
     + r.whenwhere.minHours + ' h waited on ' + r.whenwhere.minDays + ' shift days in the slot (chosen: two days is the '
     + 'report\'s own floor, two hours a dozen card gaps at least) and marked only where its interval lies wholly '
     + 'above or below the slot\'s overall rate. A single hour takes the same cutoff, interval, marking and floor, '
@@ -5122,9 +5193,10 @@ var PAGE_JS = String(function page() {
     el.innerHTML = cells;
     var every = W.slots['any|any'];
     document.getElementById('wwStripNote').innerHTML = esc(wwName('wwDay')) + ', hour by hour, every area together: '
-      + 'good offers per hour waited. Coloured only where its 99% interval lies wholly above or below every slot '
-      + 'together (' + (every ? rt(every.all.r[ti]) : '—') + ' good/hr); grey with its offers (n) under ' + W.minHours
-      + ' h on ' + W.minDays + ' shift days. Press an hour to pick it.';
+      + 'good per hour waited. Coloured only where its 99% interval (widened by how the days swing) lies wholly above '
+      + 'or below every slot together (' + (every ? rt(every.all.r[ti]) : '—') + ' good/hr); grey with its offers (n) '
+      + 'under ' + W.minHours + ' h on ' + W.minDays + ' shift days. About 1 coloured square in 100 can be chance. '
+      + 'Press an hour to pick it.';
   }
   function drawWW() {
     var W = R.whenwhere, el = document.getElementById('wwTable');

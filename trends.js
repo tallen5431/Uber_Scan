@@ -313,8 +313,10 @@
   var THIRDS_MONTHS = 3;
   // Good per hour online: the floor of a cell (hours on driver days), and of
   // a calendar tile (one day). See the header for the table they came from.
-  // A clock-hour cell holds at most an hour a night, so 2 hours there is
-  // already 2 nights; the days half is kept for a week's figure, where two
+  // A clock-hour cell holds at most an hour a night — except the 1am hour
+  // of the night the clocks go back (1 Nov 2026), which holds two — so 2
+  // hours there is nearly always 2 nights, and the days half is what makes it
+  // so on that night too; it is also what a week's figure needs, where two
   // hours can be one evening.
   var GOOD_FLOOR_HOURS = 2;
   var GOOD_FLOOR_DAYS = 2;
@@ -777,7 +779,14 @@
    * The top `top`% of the range's $/hr, as one dollar figure (to the cent the
    * rows are packed at, so "at or over $19.40" counts exactly what it says).
    * Over the money rows only, as every other figure. See the header: it is a
-   * reading ruler and reaches nothing else. */
+   * reading ruler and reaches nothing else.
+   *
+   * TIES AT THE CUT COUNT AS GOOD (the reporting review's S8, chosen over
+   * breaking them): "good" is a dollar figure, and two offers at the same
+   * $/hr are equally good, so the share called good can be over the top
+   * X% where many offers sit exactly on the cut. `over` counts them, and the
+   * page prints it ("1,240 of 5,800 offers"), so the share is never hidden.
+   * Breaking ties by time or id would call one of two equal offers good. */
   function ruler(rows, top) {
     var t = TOPS.indexOf(Number(top)) >= 0 ? Number(top) : TOP_DEFAULT;
     var v = valuesOf(rows, 'perHour');

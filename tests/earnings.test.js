@@ -692,8 +692,8 @@ eq('[range] ...a check carries no place or text: keys, ids and figures',
    Object.keys(RS.checks[0]).sort(), ['app', 'at', 'card', 'date', 'diff', 'key', 'offer', 'order', 'paid', 'share',
                                       'source', 'startedAt', 'tipStatus', 'tookAt']);
 eq('[range] by week on the driver\'s day: Monday 3:30am is Sunday\'s, so the week before; Monday 4am opens the next',
-   RS.weeks, [{ week: '2026-11-09', n: 7, card: 66, paid: 82.02, diff: 16.02, median: 0.02 },
-              { week: '2026-11-16', n: 4, card: 44.5, paid: 57.01, diff: 12.51, median: 1.25 }]);
+   RS.weeks, [{ week: '2026-11-09', n: 7, card: 66, paid: 82.02, diff: 16.02, median: 0.02, part: false },
+              { week: '2026-11-16', n: 4, card: 44.5, paid: 57.01, diff: 12.51, median: 1.25, part: false }]);
 eq('[range] the app split: DoorDash\'s 2 orders taken, none matched, said thin; Uber\'s not; all of them in the whole',
    [RS.apps.doordash.taken, RS.apps.doordash.takenMatched, RS.apps.doordash.thin, RS.apps.doordash.thinWhy.length,
     RU.thin, RS.all.taken, RS.all.compared, RS.thin], [2, 0, true, 2, false, 16, 11, true]);
@@ -701,6 +701,13 @@ var RW = E.rangeSummary(RE, RR, { from: nov(16, 4) });
 eq('[range] a range from Monday 4am: Monday 3:30am\'s order and trip are out; 4 compared, said thin',
    [RW.apps.uber.taken, RW.apps.uber.takenMatched, RW.apps.uber.compared, RW.apps.uber.thin,
     RW.apps.uber.thinWhy, RW.weeks.length, RW.apps.doordash], [7, 6, 4, true, ['4 trips to compare, under 5'], 1, undefined]);
+eq('[range] a week the range cuts is said part (the reporting review\'s S8); a range from Monday 4am cuts none',
+   [E.rangeSummary(RE, RR, { from: nov(16, 4) + 3600000 }).weeks[0].part, RW.weeks[0].part,
+    E.rangeSummary(RE, RR, { to: nov(19, 4) }).weeks.map(function (w) { return w.part; })], [true, false, [false, true]]);
+eq('[range] ...and a week\'s median needs ' + E.WEEK_MEDIAN_MIN + ' trips compared: two leave it blank, three print it',
+   [E.rangeSummary([rEnt('w1', nov(3, 18), 5, 6), rEnt('w2', nov(3, 19), 5, 7)], [], {}).weeks[0].median,
+    E.rangeSummary([rEnt('w1', nov(3, 18), 5, 6), rEnt('w2', nov(3, 19), 5, 7), rEnt('w3', nov(3, 20), 5, 8)], [], {}).weeks[0].median],
+   [null, 2]);
 eq('[range] ...under 10 trips there is no P10 or P90, only the median',
    [RW.apps.uber.p10, RW.apps.uber.p90, RW.apps.uber.median], [null, null, 1.25]);
 eq('[range] a run rebuilt from took rows (before the order records) is an order taken and matched',

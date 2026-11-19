@@ -1541,6 +1541,11 @@
   var SPREAD_MIN = 10;
   var COVER_THIN = 0.5;
   var THIN_N = 5;
+  // A week's row prints its median only from this many trips compared (the
+  // reporting review's S8): a median of one or two trips is those trips, and
+  // read down a column it looked like drift. Under it the row says the
+  // trips and leaves the median blank.
+  var WEEK_MEDIAN_MIN = 3;
   // A Took taken back: by the panel (untick) or the offers page (offers).
   var TAKEN_BACK = { untick: 1, offers: 1 };
 
@@ -1689,10 +1694,17 @@
 
     Object.keys(apps).forEach(function (a) { closeGroup(apps[a]); });
     closeGroup(all);
+    // `part`: the range cuts the week (Monday 4am to Monday 4am on this
+    // machine's clock), so its trips are some of that week's, not all.
+    function weekEdge(wk, plus) {
+      var p = String(wk).split('-').map(Number);
+      return new Date(p[0], p[1] - 1, p[2] + plus, DAY_STARTS_AT).getTime();
+    }
     var weekList = Object.keys(weeks).sort().map(function (k) {
       var w = weeks[k], s = w.diffs.sort(function (a, b) { return a - b; });
       return { week: k, n: w.n, card: r2(w.card), paid: r2(w.paid), diff: r2(w.paid - w.card),
-               median: r2(q7(s, 0.5)) };
+               median: s.length >= WEEK_MEDIAN_MIN ? r2(q7(s, 0.5)) : null,
+               part: (from !== null && weekEdge(k, 0) < from) || (to !== null && weekEdge(k, 7) > to) };
     });
     checks.sort(function (a, b) { return Math.abs(b.diff) - Math.abs(a.diff) || (a.at || 0) - (b.at || 0); });
     return { from: from, to: to, all: all, apps: apps, weeks: weekList, checks: checks,
@@ -1784,7 +1796,7 @@
     acceptanceScreen: acceptanceScreen,
     compareOf: compareOf, daySummary: daySummary, rangeSummary: rangeSummary, driverDayOf: driverDayOf,
     weekOfDay: weekOfDay, EVEN_CENTS: EVEN_CENTS, CHECK_SHARE: CHECK_SHARE, CHECK_MIN: CHECK_MIN, CHECK_ABS: CHECK_ABS,
-    SPREAD_MIN: SPREAD_MIN, COVER_THIN: COVER_THIN, THIN_N: THIN_N, PAY_FLAG: PAY_FLAG, PAY_FLAG_SHARE: PAY_FLAG_SHARE,
+    SPREAD_MIN: SPREAD_MIN, COVER_THIN: COVER_THIN, THIN_N: THIN_N, WEEK_MEDIAN_MIN: WEEK_MEDIAN_MIN, PAY_FLAG: PAY_FLAG, PAY_FLAG_SHARE: PAY_FLAG_SHARE,
     ON_TIME_MIN: ON_TIME_MIN, ON_TIME_SHARE: ON_TIME_SHARE, MILES_SAME: MILES_SAME,
     MILES_SAME_SHARE: MILES_SAME_SHARE, BIGGEST_GAPS: BIGGEST_GAPS,
     uberTimingFor: uberTimingFor,

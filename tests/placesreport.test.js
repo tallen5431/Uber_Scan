@@ -2200,6 +2200,34 @@ function nbx() {
   eq('[whenwhere] by town, the cell with no town is left out of the areas but not of the slot\'s line',
      [fri.town.ranked.map(function (s0) { return s0.a; }), fri.all.n], [['Northfen', 'Saltmere'], 270]);
 
+  /* Widened by the nights (the reporting review's S2). Four Fridays, an hour
+   * a night in Northfen's cell (28, 2, 28 and 2 of its 30 cards at $40) and
+   * an hour in Saltmere's (3 of 30 each night; its last card a break): 60
+   * good in 4 h is 15/hr against the slot's 9.15, and the plain 99% interval (10.4-20.8) would mark
+   * it above; the nights swing far past chance (phi 7.5 over the two areas'
+   * nights), so the widened one does not. */
+  var swRows = [];
+  [6, 13, 20, 27].forEach(function (dd, ni) {
+    for (var q = 0; q < 30; q++) {
+      swRows.push(waitCard('sx' + dd + '-' + q, at(dd, 20, q * 2), cellX, q < (ni % 2 ? 2 : 28) ? 40 : 15));
+      swRows.push(waitCard('sy' + dd + '-' + q, at(dd, 21, q * 2), cellY, q < 3 ? 40 : 15));
+    }
+  });
+  var repSW = P.analyse(swRows, [], [], function () { return null; }, { now: 0, cellTown: wTown });
+  var swFri = repSW.whenwhere.slots['5|4'];
+  var swx = swFri.cell.ranked.filter(function (s0) { return s0.a === P.cellOf(cellX).id; })[0];
+  eq('[whenwhere] S2: 60 good in 4 h against the slot\'s 9.15/hr, plainly above (99% from 10.4), is not marked once the '
+     + 'nights\' swing is in (phi ' + repSW.whenwhere.phi.cell[1] + ')',
+     [swx.g[1], swx.h, swx.r[1], swFri.all.r[1], P.poissonCI(60, 0.99)[0] / 4 > swFri.all.r[1],
+      repSW.whenwhere.phi.cell[1] > 5, swx.mk[1], swx.lo[1] < swFri.all.r[1]], [60, 4, 15, 9.15, true, true, null, true]);
+
+  var swPage = P.html(repSW);
+  ok('[whenwhere] F3/S7: the page names its rate good per hour waited (gaps capped, none while carrying), says it is not '
+     + 'Trends\' good per hour online, says the interval is widened, and that 1 coloured square in 100 can be chance',
+     /good per hour waited \(each gap capped at \d+ min, none while carrying\)/.test(swPage)
+     && /Trends "good per hour online"/.test(swPage) && /widened by how much more an area/.test(swPage)
+     && /About 1 coloured square in 100 can be chance/.test(swPage));
+
   /* The floor, over Wednesday nights. Northfen's cell one night only, 11pm to
    * 1:30am: 2.5 h, but ONE shift day (two calendar dates). Saltmere's cell
    * on two nights, 11 to 11:55pm: 1.83 h. The town-less cell on two nights,
@@ -2224,6 +2252,10 @@ function nbx() {
   eq('[whenwhere] the hour: 3am and 3:59am Saturday are Friday\'s last hour; 4am is Saturday\'s first; 8:30pm is the 17th',
      [hourAt(14, 3, 0), hourAt(14, 3, 59), hourAt(14, 4, 0), hourAt(13, 20, 30), hourAt(14, 0, 0)],
      [[5, 23], [5, 23], [6, 0], [5, 16], [5, 20]]);
+  eq('[whenwhere] F7: on the spring-forward Sunday (14 Mar 2027) 5:30, 6:30 and 7:30am are the 5, 6 and 7am hours, '
+     + 'as Trends has them, and Sunday\'s',
+     [5, 6, 7].map(function (h) { var s0 = P.wwSlotOf(new Date(2027, 2, 14, h, 30).getTime()); return [s0.day, s0.hour]; }),
+     [[0, 1], [0, 2], [0, 3]]);
   eq('[whenwhere] ...named in the driver day\'s order, 4am first and 3am last',
      [WW.hourOpts.length, WW.hours[0], WW.hours[7], WW.hours[19], WW.hours[20], WW.hours[23]],
      [24, '4–5am', '11am–12pm', '11pm–12am', '12–1am', '3–4am']);

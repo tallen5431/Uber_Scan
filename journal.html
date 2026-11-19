@@ -4620,8 +4620,11 @@
       html += '<div class="weeks"><table><thead><tr><th scope="col">Week of</th><th scope="col">Trips</th>'
         + '<th scope="col">Cards</th><th scope="col">Paid</th><th scope="col">Median ±</th></tr></thead><tbody>'
         + s.weeks.map(function (wk) {
-          return '<tr><td>' + esc(dayLabel(wk.week)) + '</td><td>' + wk.n + '</td><td>' + esc(money(wk.card, 2))
-            + '</td><td>' + esc(money(wk.paid, 2)) + '</td><td>' + esc(signedMoney(wk.median)) + '</td></tr>';
+          // A median from fewer than three trips is blank, and a week the
+          // range cuts says "part" (earnings.js rangeSummary's weeks).
+          return '<tr><td>' + esc(dayLabel(wk.week)) + (wk.part ? ' <small>(part)</small>' : '') + '</td><td>' + wk.n
+            + '</td><td>' + esc(money(wk.card, 2)) + '</td><td>' + esc(money(wk.paid, 2)) + '</td><td>'
+            + (wk.median === null || wk.median === undefined ? '—' : esc(signedMoney(wk.median))) + '</td></tr>';
         }).join('') + '</tbody></table></div>';
     }
     html += '<p class="note" id="paidRangeSays" aria-live="polite" hidden></p>';
@@ -7743,7 +7746,9 @@
           + (g.ref === null ? '—' : g.ref.toFixed(2)) + ' an hour, and only at ' + g.floorHours + ' hours online on '
           + g.floorDays + ' days; under that a cell is grey and shows its hours. The interval is widened by how much '
           + 'more the nights differ than chance alone would (×' + g.phi.toFixed(2) + ' on this range): unwidened, a cell '
-          + 'with many hours was shaded by chance 5 to 10 times in 100.';
+          + 'with many hours was shaded by chance 5 to 10 times in 100. This is good per hour online, every minute the '
+          + 'rig was scanning, carrying included; the places report\'s When & where counts good per hour waited (each '
+          + 'gap capped at 10 min, none while carrying): different hours, so the two figures differ by design.';
       } else if (earned) {
         note = 'Each cell: the card\'s pay of the offers you ticked taken (' + (netOn() ? 'net of ' + money2(got.cpm)
           + '/mi' : 'gross') + ') over every minute the rig was scanning in that weekday and hour, waiting included, '

@@ -461,6 +461,13 @@ function offer(x) {
   ok('S1: with no effect and a 20% night swing, rho_q ' + rhoQ.toFixed(3) + ' keeps the medians\' chance shading low ('
      + wideQ + ' of 300; ' + plainQ + ' unwidened)', rhoQ > 0.05 && wideQ <= 6 && plainQ >= 15);
 
+  // Ties at the cut count as good: five offers at $20 among ten, top 20%.
+  var tieR = T.ruler(T.readRows(T.rowsOf([1, 2, 3, 4, 5, 20, 20, 20, 20, 20].map(function (v, i) {
+    return offer({ id: 'tie' + i, at: at(2, 19, i), perHour: v });
+  }))), 20);
+  eq('S8: ties at the cut are good, and counted: a $20 cut over ten offers calls 5 of them good, and says so',
+     [tieR.cut, tieR.over, tieR.n], [20, 5, 10]);
+
   /* --- earned net with a take that lost money (the reporting review's S4) --- */
   // 300 evenings, a take an hour; in Saturday's 7pm hour the takes alternate
   // $60 over 20 mi (+$46 net at $0.70/mi) and $5 over 57 mi (-$34.90): the
@@ -1002,6 +1009,9 @@ function offer(x) {
     ok('S7: every coloured view says about 1 coloured square in 100 can be chance; the grid says its quantile is widened',
        (page.match(/\+ CHANCE|\+ ' ' \+ CHANCE/g) || []).length === 5
        && /About 1 coloured square in 100 can be chance\./.test(page) && /move together \(a slow night/.test(page));
+    ok('F3: good per hour online is said apart from When & where\'s good per hour waited',
+       /When & where counts good per hour waited \(each \'\s*\+ '\s*gap capped at 10 min, none while carrying\)/.test(page)
+       || /good per hour waited \(each/.test(page));
     ok('...the ruler offers 10, 20, 30 and 50, opens on 20, and says it is for reading only',
        /data-top="10"[\s\S]*data-top="20" aria-pressed="true"[\s\S]*data-top="30"[\s\S]*data-top="50"/.test(page)
        && /never\s+reaches the verdict/.test(page));
