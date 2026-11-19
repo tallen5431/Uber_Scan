@@ -15829,6 +15829,34 @@ finally:
     stop(proc)
 shutil.rmtree(_radir, ignore_errors=True)
 
+# One window over the folded offers (server.js windowOffers) for /api/journal,
+# /api/today, /api/trends and the Gold card. Written four times, they had
+# drifted: /api/journal counted a row with no `at` as one from before the
+# clock, /api/today dropped it and counted nothing, so the two pages
+# disagreed about one row. A row with no usable moment is before the clock
+# everywhere now; a hidden one is counted nowhere, as before.
+_wdir = tempfile.mkdtemp()
+_wj = os.path.join(_wdir, 'offers.jsonl')
+_wrows = [offer(1, NOW - 600000), offer(2, NOW - 500000), offer(3, None), offer(4, None),
+          offer(5, None, hidden=True), offer(6, 1000)]
+del _wrows[2]['at'], _wrows[2]['firstAt']           # no `at` at all
+write(_wj, _wrows)
+proc, base = start({'SCANNER': '0'}, _wj)
+try:
+    _wall = get(base, '/api/journal?days=0&limit=0')
+    _wday = get(base, '/api/journal?days=1')
+    _wtoday = get(base, '/api/today?since=%d' % (NOW - 3600000))
+    _wtr = get(base, '/api/trends?days=0')
+    eq('[window] a row with no `at`, one with at: null and one from 1970 are all before the clock, on the '
+       'offers page (All and a day) and the driving screen alike; the hidden one counted by neither',
+       (_wall.get('beforeClock'), _wday.get('beforeClock'), _wtoday.get('beforeClock')), (3, 3, 3))
+    eq('[window] ...and none of them is in any list or figure: the two real offers, everywhere',
+       (sorted(o['id'] for o in _wall.get('offers') or []), _wday.get('total'), _wtoday.get('offers'),
+        _wtr.get('total')), (['off1', 'off2'], 2, 2, 2))
+finally:
+    stop(proc)
+shutil.rmtree(_wdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

@@ -9601,11 +9601,7 @@ function withApp(o, from) {
 var TrendsLib = null;
 function trendsOut(rows, floor, days) {
   if (!TrendsLib) TrendsLib = require('./trends.js');
-  var offers = latestPerOffer(rows, floor).filter(function (r) {
-    if ((r.at || 0) < CLOCK_BELIEVABLE_AFTER) return false;
-    if (floor && (r.at || 0) < floor) return false;
-    return !r.hidden;
-  });
+  var offers = shownOffers(windowOffers(latestPerOffer(rows, floor), floor).kept);
   var spans = [];
   try {
     Advice.runs(Advice.usable(offers), Advice.SHOWN_AT).forEach(function (g) {
@@ -10553,6 +10549,44 @@ function percentileOf(sorted, share) {
   return sorted[low] + (sorted[high] - sorted[low]) * (pos - low);
 }
 
+/* The window over folded offers: one rule for every answer that lists or
+ * counts them — /api/journal, /api/today (shiftSummary), /api/trends and
+ * the Gold card.
+ *
+ * It was written out in each, and they had drifted (the server review, Nov
+ * 2026). /api/journal took `(r.at || 0)`, so a row with no `at` was a row
+ * from before the clock and was counted as one; shiftSummary asked
+ * `typeof`/`isFinite` and dropped such a row WITHOUT counting it; trendsOut
+ * and goldAnswer kept a third and fourth copy. So the offers page said "1
+ * offer from before the clock was set" and the driving screen said nothing,
+ * for one row with `at: null` in one file.
+ *
+ * `kept`: the offers in the window, hidden ones included (/api/journal can
+ * list them by name; every other caller drops them, shownOffers). `hidden`:
+ * how many of `kept` are. `beforeClock`: offers with no usable moment — no
+ * `at`, a null, a non-number, or one before CLOCK_BELIEVABLE_AFTER — in no
+ * window by construction, counted so the driver is told they exist, and a
+ * hidden one not counted, as both pages already agreed. `floor` 0 is All. */
+function windowOffers(offers, floor) {
+  var kept = [], beforeClock = 0, hidden = 0;
+  (offers || []).forEach(function (o) {
+    var at = (typeof o.at === 'number' && isFinite(o.at)) ? o.at : null;
+    if (at === null || at < CLOCK_BELIEVABLE_AFTER) {
+      if (!o.hidden) beforeClock += 1;
+      return;
+    }
+    if (floor && at < floor) return;
+    if (o.hidden) hidden += 1;
+    kept.push(o);
+  });
+  return { kept: kept, beforeClock: beforeClock, hidden: hidden };
+}
+
+// ...and the ones the driver has not hidden.
+function shownOffers(offers) {
+  return offers.filter(function (o) { return !o.hidden; });
+}
+
 // What one shift adds up to, over rows the journal has already been read into.
 //
 // Every figure here comes off ONE filtered set, which is the rule journal.html
@@ -10576,25 +10610,18 @@ function shiftSummary(rows, since) {
      `early` still counts, because rowsFor keeps every pre-clock row on purpose:
      a Pi boots in 1970 and those rows are in no window by construction, and
      this figure is how the driver is told they exist. */
-  var offers = latestPerOffer(rows, since);
-  var early = 0;
-  var window = [];
-  offers.forEach(function (o) {
-    // A row the driver hid is not an offer they were made — the test card
-    // presented to check the rig is not a job. /api/journal drops these before
-    // the offers page ever sees them, so a hidden row is in neither its count
-    // nor its set-aside figure, and this has to drop them too. Left in, they
-    // landed in BOTH: counted as an offer, then rejected by trustworthy and
-    // reported as one the scanner had set aside. The driving screen said "6
-    // offers · 2 set aside" where the offers page said "5 offers (1 set
-    // aside)" for the same day, and blamed the reader for an exclusion the
-    // driver had made.
-    if (o.hidden) return;
-    var at = (typeof o.at === 'number' && isFinite(o.at)) ? o.at : null;
-    if (at === null) return;
-    if (at < CLOCK_BELIEVABLE_AFTER) { early += 1; return; }
-    if (at >= since) window.push(o);
-  });
+  var w = windowOffers(latestPerOffer(rows, since), since);
+  var early = w.beforeClock;
+  // A row the driver hid is not an offer they were made — the test card
+  // presented to check the rig is not a job. /api/journal drops these before
+  // the offers page ever sees them, so a hidden row is in neither its count
+  // nor its set-aside figure, and this has to drop them too. Left in, they
+  // landed in BOTH: counted as an offer, then rejected by trustworthy and
+  // reported as one the scanner had set aside. The driving screen said "6
+  // offers · 2 set aside" where the offers page said "5 offers (1 set
+  // aside)" for the same day, and blamed the reader for an exclusion the
+  // driver had made.
+  var window = shownOffers(w.kept);
   var counted = window.filter(function (o) {
     return Advice.trustworthy(o)
       && typeof o.perHour === 'number' && isFinite(o.perHour);
@@ -15765,26 +15792,20 @@ function route(req, res) {
       // in every figure on the page under a date nobody drove. shiftSummary
       // already counts these for the driving screen; this is the same rule for
       // the same rows, and the page says how many there are.
-      var beforeClock = 0;
-      offers = offers.filter(function (r) {
-        // Hidden ones are not counted, because shiftSummary does not count
-        // them either, and the two pages printed different figures for the
-        // same file: 2 here, 1 on the driving screen, over one hidden test
-        // card read before NTP arrived.
-        if ((r.at || 0) < CLOCK_BELIEVABLE_AFTER) {
-          if (!r.hidden) beforeClock += 1;
-          return false;
-        }
-        return !floor || (r.at || 0) >= floor;
-      });
-      var hidden = offers.filter(function (r) { return r.hidden; }).length;
+      //
+      // Hidden ones are not counted, because shiftSummary does not count them
+      // either, and the two pages printed different figures for the same
+      // file: 2 here, 1 on the driving screen, over one hidden test card read
+      // before NTP arrived. windowOffers is that one rule now, for both.
+      var win = windowOffers(offers, floor);
+      var beforeClock = win.beforeClock;
+      var hidden = win.hidden;
+      offers = win.kept;
       // Hidden rows are still on disk — nothing here deletes — but they are out
       // of every figure and every export unless asked for by name. The test card
       // a driver presents to check the rig is not an offer they were made, and
       // leaving it in quietly drags the median toward whatever that card says.
-      if (!withHidden) {
-        offers = offers.filter(function (r) { return !r.hidden; });
-      }
+      if (!withHidden) offers = shownOffers(offers);
       // The whole window, before the cap: the per-mile tables and the orders
       // taken describe every offer in it, not the newest `limit` of them, and
       // an order whose card fell under the cap was missing from `taken`.
@@ -17024,9 +17045,7 @@ function goldOrders(runs) {
 function goldAnswer(rows, now) {
   var S = goldStrategy();
   var floor = now - GOLD_DAYS * 86400000;
-  var offers = latestPerOffer(rows, floor).filter(function (r) {
-    return (r.at || 0) >= CLOCK_BELIEVABLE_AFTER && (r.at || 0) >= floor && !r.hidden;
-  });
+  var offers = shownOffers(windowOffers(latestPerOffer(rows, floor), floor).kept);
   var settings = goldSettings(rows);
   var res = S.analyse({ offers: offers, orders: goldOrders(takenRuns(rows, floor, offers)),
                         earnings: Earnings.fold(rows), light: true,
