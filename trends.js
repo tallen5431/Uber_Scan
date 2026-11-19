@@ -51,7 +51,8 @@
  * same line and an old day compares fairly with a new one. Round one counted
  * each row against its own target at the time; the targets moved over the
  * weeks, so a day under a $22 target and one under $25 were not counted alike.
- * The flag (F_GOOD) is still packed, and nothing on the page reads it now.
+ * The flag (F_GOOD) is still packed, and nothing reads it now: the daily
+ * CSV and goodPerHour fell back to it with no ruler, and no longer do.
  * THE RULER IS FOR READING ONLY: it is not the target, it never reaches the
  * verdict, the panel, the rig, scan_pi or any rule, and it is chosen per
  * viewer in the page's own storage. A percentile of your own history used as
@@ -278,13 +279,19 @@
 }(typeof self !== 'undefined' ? self : this, function (Advice) {
   'use strict';
 
-  var DAY_STARTS_AT = Advice && typeof Advice.DAY_STARTS_AT === 'number' ? Advice.DAY_STARTS_AT : 4;
+  // advice.js is loaded first on every page that loads this one (journal.html
+  // in its head) and required here in node: the 4am, the day keys and the
+  // one quantile are its.
+  var DAY_STARTS_AT = Advice.DAY_STARTS_AT;
+  // The one 30: the places report's MIN_N reads it (see the header's table).
   var FLOOR = 30;
   var FLOOR_DAYS = 2;
   var CI_ALPHA = 0.01;
   // A day's or a week's point on a line: the fewest offers its median is drawn
-  // from (under it the point is hollow and the band left out). Descriptive,
-  // the places report's DESC_MIN_N; nothing is shaded by it.
+  // from (under it the point is hollow and the band left out). Descriptive;
+  // nothing is shaded by it. The one 10: the places report's DESC_MIN_N (its
+  // DROP_MIN_N) and strategy.js's DIST_MIN_N read it, the floor under every
+  // descriptive median and percentile in the three.
   var DAY_MIN = 10;
   var RATE_MIN_N = 30;
   var RATE_COLLINEAR = 0.95;
@@ -411,23 +418,14 @@
     return { v: 1, n: rows.length, cols: cols };
   }
 
-  // The driver's day of a moment, in the zone of whoever asks: 'YYYY-MM-DD'.
-  function dayKeyOf(ms) {
-    var d = new Date(ms);
-    d.setHours(d.getHours() - DAY_STARTS_AT);
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-'
-      + String(d.getDate()).padStart(2, '0');
-  }
+  // The driver's day of a moment, in the zone of whoever asks: 'YYYY-MM-DD';
+  // and the Monday of a driver's day's week, as its key. advice.js's, the one
+  // copy, still exported here under these names for the page and report_check.
+  var dayKeyOf = Advice.dayKeyOf;
+  var weekKeyOf = Advice.weekKeyOf;
   function dateOfKey(key) {
     var p = key.split('-').map(Number);
     return new Date(p[0], p[1] - 1, p[2], 12);
-  }
-  // The Monday of a driver's day's week, as its key.
-  function weekKeyOf(dayKey) {
-    var d = dateOfKey(dayKey);
-    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-'
-      + String(d.getDate()).padStart(2, '0');
   }
   function addDays(key, n) {
     var d = dateOfKey(key);
@@ -482,16 +480,6 @@
   // rowsOf's own rows read the same way (the tests', and a caller with offers).
   function readRows(rows) { return unpack(pack(rows)); }
 
-  function withClock(r, day) {
-    var d = new Date(r.t);
-    r.day = day;
-    r.week = weekKeyOf(day);
-    r.month = day.slice(0, 7);
-    r.dow = dateOfKey(day).getDay();
-    r.hour = d.getHours();
-    return r;
-  }
-
   /* --- the numbers -------------------------------------------------------- */
 
   // Numbers sorted in a Float64Array, by the engine's own numeric sort (the
@@ -512,13 +500,9 @@
     }
     return rangeMemo.s;
   }
-  // Linear between the two straddling values, as the page's percentile().
-  function q(s, share) {
-    if (!s.length) return null;
-    if (s.length === 1) return s[0];
-    var pos = share * (s.length - 1), lo = Math.floor(pos), hi = Math.ceil(pos);
-    return s[lo] + (s[hi] - s[lo]) * (pos - lo);
-  }
+  // Linear between the two straddling values (R's type 7): advice.js's
+  // quantile, which the page's percentile() is too.
+  var q = Advice.quantile;
   function quarts(vals) {
     var s = sorted(vals);
     return { n: s.length, p25: r2(q(s, 0.25)), p50: r2(q(s, 0.5)), p75: r2(q(s, 0.75)), p90: r2(q(s, 0.9)) };
@@ -666,7 +650,6 @@
     var shade = ci[0] > ref ? 'above' : ci[1] < ref ? 'below' : null;
     return { enough: true, shade: shade, ci: [r2(ci[0]), r2(ci[1])] };
   }
-  function shadeOf(vals, days, ref, minDays) { return shadeQ(vals, days, ref, 0.5, minDays); }
 
   /* --- counts over hours: Poisson, and phi ------------------------------------
    *
@@ -841,8 +824,6 @@
   function isGood(r, cut) {
     return r.ok && typeof cut === 'number' && r.perHour !== null && r.perHour !== undefined && r.perHour >= cut;
   }
-  // The ruler where one is given, else the row's own flag (round one's).
-  function goodOf(r, cut) { return typeof cut === 'number' ? isGood(r, cut) : r.good; }
 
   function groupBy(rows, key) {
     var out = Object.create(null), order = [];
@@ -876,7 +857,7 @@
       var e = { key: k, n: list.length, counted: 0, metrics: {}, apps: {}, quality: null, share: null, boost: null };
       var vals = {}, appVals = { uber: {}, doordash: {} }, appN = { uber: 0, doordash: 0 };
       METRICS.forEach(function (m) { vals[m] = []; appVals.uber[m] = []; appVals.doordash[m] = []; });
-      var counted = 0, sus = 0, cor = 0, unr = 0, bk = 0, by2 = 0, good = 0;
+      var counted = 0, sus = 0, cor = 0, unr = 0, bk = 0, by2 = 0;
       for (var i = 0; i < list.length; i++) {
         var r = list[i], av = r.app === 'uber' || r.app === 'doordash' ? appVals[r.app] : null;
         if (av) appN[r.app] += 1;
@@ -894,7 +875,6 @@
         if (r.corrected) cor += 1;
         if (r.unread) unr += 1;
         if (r.boost !== null && r.boost !== undefined) { bk += 1; if (r.boost) by2 += 1; }
-        if (r.good) good += 1;
       }
       METRICS.forEach(function (m) { e.metrics[m] = quarts(vals[m]); });
       e.counted = counted;
@@ -910,7 +890,6 @@
       e.quality = { suspect: sus, corrected: cor, unread: unr };
       e.share = { uber: appN.uber, doordash: appN.doordash, unknown: list.length - appN.uber - appN.doordash };
       e.boost = bk ? { known: bk, yes: by2 } : null;
-      e.good = good;
       return e;
     });
   }
@@ -994,18 +973,6 @@
     Object.keys(pieces).forEach(function (k) {
       var p = pieces[k], key = by === 'week' ? weekKeyOf(p.day) : by === 'month' ? p.month : p.day;
       out[key] = (out[key] || 0) + p.hours;
-    });
-    return out;
-  }
-  /* Hours online by weekday x clock hour (key dow * 24 + hour), with the
-   * driver days each rests on. */
-  function hoursByCell(runs) {
-    var pieces = onlinePieces(runs), out = Object.create(null);
-    Object.keys(pieces).forEach(function (k) {
-      var p = pieces[k], c = p.dow * 24 + p.hour;
-      var e = out[c] || (out[c] = { hours: 0, days: 0 });
-      e.hours += p.hours;
-      e.days += 1;
     });
     return out;
   }
@@ -1172,15 +1139,18 @@
   function statOf(s) { return STATS.indexOf(s) >= 0 ? s : 'p50'; }
   function cpmOf(opts) { return opts && opts.net && typeof opts.costPerMile === 'number' ? opts.costPerMile : null; }
 
-  /* Good offers per hour online, by day or week. "Good" is the ruler's (cut)
-   * where one is given — the page always gives one — else the row's own
-   * target at the time, round one's. Descriptive: it feeds nothing. */
+  /* Good offers per hour online, by day or week. "Good" is the ruler's cut,
+   * which the page always gives. There was a fallback to each row's own
+   * target at the time (round one's flag) when none was given, and the daily
+   * CSV took it too, so a file whose header said `good_from_per_hour` could
+   * count good by targets (the reporting code's second review): with no cut
+   * nothing is good, as no line was drawn. Descriptive: it feeds nothing. */
   function goodPerHour(rows, runs, by, cut) {
     var hours = onlineHoursBy(runs, by);
     var g = groupBy(rows, function (r) { return by === 'week' ? r.week : r.day; });
     return g.keys.sort().map(function (k) {
       var list = g.by[k], hrs = hours[k] || 0;
-      var good = list.filter(function (r) { return goodOf(r, cut); }).length;
+      var good = list.filter(function (r) { return isGood(r, cut); }).length;
       return { key: k, good: good, offers: list.length, hours: r2(hrs),
                rate: hrs > 0 ? r2(good / hrs) : null, offersRate: hrs > 0 ? r2(list.length / hrs) : null };
     });
@@ -2139,7 +2109,7 @@
     function side(p) {
       var list = rows.filter(function (r) { return inPeriod(r, p); });
       var e = { offers: list.length, counted: list.filter(function (r) { return r.ok; }).length,
-                days: daysIn(list), good: list.filter(function (r) { return goodOf(r, cut); }).length, metrics: {} };
+                days: daysIn(list), good: list.filter(function (r) { return isGood(r, cut); }).length, metrics: {} };
       METRICS.forEach(function (m) {
         var v = valuesOf(list, m);
         e.metrics[m] = { n: v.length, median: v.length ? r2(q(sorted(v), 0.5)) : null };
@@ -2246,7 +2216,7 @@
       });
       var g = gBy[e.key] || {};
       row = row.concat([e.share.uber, e.share.doordash, e.share.unknown, e.apps.uber.perHour,
-                        e.apps.doordash.perHour, g.good !== undefined ? g.good : e.good, cut, g.hours, g.rate,
+                        e.apps.doordash.perHour, g.good, cut, g.hours, g.rate,
                         e.quality.suspect,
                         e.quality.corrected, e.quality.unread, e.boost ? e.boost.known : '',
                         e.boost ? e.boost.yes : '',
@@ -2839,7 +2809,7 @@
     METRICS: METRICS, METRIC_NAMES: METRIC_NAMES, APPS: APPS, WEEKDAYS: WEEKDAYS, HOUR_ORDER: HOUR_ORDER,
     distinct: distinct, rowsOf: rowsOf, pack: pack, unpack: unpack, readRows: readRows,
     dayKeyOf: dayKeyOf, weekKeyOf: weekKeyOf, addDays: addDays,
-    medianRank: medianRank, shadeOf: shadeOf, quarts: quarts,
+    medianRank: medianRank, quarts: quarts,
     TOPS: TOPS, TOP_DEFAULT: TOP_DEFAULT, STATS: STATS, STAT_P: STAT_P, STAT_NAMES: STAT_NAMES,
     GOOD_FLOOR_HOURS: GOOD_FLOOR_HOURS, GOOD_FLOOR_DAYS: GOOD_FLOOR_DAYS, F_TAKEN: F_TAKEN,
     quantRanks: quantRanks, quantCI: quantCI, quantCIw: quantCIw, qRho: qRho, qPhiOf: qPhiOf, shadeQ: shadeQ, poisCI: poisCI, dispersion: dispersion,
@@ -2850,7 +2820,7 @@
     timeline: timeline, gridCompare: gridCompare, monthThirds: monthThirds, sameWeekday: sameWeekday,
     periodSpan: periodSpan, inPeriod: inPeriod,
     weekSpanMs: weekSpanMs, weekKeys: weekKeys, weekReview: weekReview, BLOCK_NAMES: BLOCK_NAMES,
-    onlinePieces: onlinePieces, hoursByCell: hoursByCell, cellDetail: cellDetail,
+    onlinePieces: onlinePieces, cellDetail: cellDetail,
     periods: periods, hoursBy: hoursBy, onlineHoursBy: onlineHoursBy, goodPerHour: goodPerHour, hourly: hourly, monthsOf: monthsOf,
     grid: grid, calendar: calendar, fit3: fit3, rateFit: rateFit, rateCard: rateCard,
     compare: compare, scatter: scatter, csvPeriods: csvPeriods, csvHourly: csvHourly,

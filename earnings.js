@@ -39,13 +39,19 @@
  * decision for this feature: "reports are descriptive; nothing changes what
  * the rig decides").
  *
- * A UMD like advice.js, no browser global touched at load and no dependency,
- * so server.js requires it and the suites run it under plain node. */
+ * A UMD like advice.js, no browser global touched at load, so server.js
+ * requires it and the suites run it under plain node. Its one dependency is
+ * advice.js, as trends.js's is (the reporting code's second review): the 4am,
+ * the day and week keys and the type-7 quantile are the one copy there, where
+ * this file carried its own, its 4 hard-coded. In node it is required beside
+ * this file (server.js's copies carry both); on the offers page advice.js is
+ * a plain script in the head and this one is added only when the Money tab
+ * asks, so root.Advice is there first. */
 
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.Earnings = factory();
-}(typeof self !== 'undefined' ? self : this, function () {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./advice.js'));
+  else root.Earnings = factory(root.Advice);
+}(typeof self !== 'undefined' ? self : this, function (Advice) {
   'use strict';
 
   /* --- reading the screen ---------------------------------------------------
@@ -758,7 +764,7 @@
    * starts at 12:30 AM has not been seen on a screenshot (AUDITS.md, Open).
    * endMs: that plus Uber's own minutes and seconds — the finish Uber's
    * figures imply; null where the trip line gave none (a canceled trip). */
-  var DAY_STARTS_AT = 4;
+  var DAY_STARTS_AT = Advice.DAY_STARTS_AT;
   function clockField(e) {
     if (!e) return null;
     if (typeof e.startedAt === 'string') return e.startedAt;
@@ -1490,11 +1496,7 @@
       else out.untimed += 1;
     });
     out.card = r2(out.card); out.paid = r2(out.paid); out.diff = r2(out.paid - out.card); out.total = r2(out.total);
-    if (gaps.length) {
-      gaps.sort(function (a, b) { return a - b; });
-      var h = gaps.length;
-      out.medianMinutes = r2(h % 2 ? gaps[(h - 1) / 2] : (gaps[h / 2 - 1] + gaps[h / 2]) / 2);
-    }
+    if (gaps.length) out.medianMinutes = r2(Advice.median(gaps));
     out.biggest = pays.filter(function (p) { return Math.abs(p.diff) > 0.005; })
       .sort(function (a, b) { return Math.abs(b.diff) - Math.abs(a.diff); }).slice(0, BIGGEST_GAPS);
     return out;
@@ -1567,30 +1569,18 @@
   // trips and leaves the median blank.
   var WEEK_MEDIAN_MIN = 3;
   // A Took taken back: by the panel (untick) or the offers page (offers).
+  // The one list: strategy.js reads it (it had its own copy).
   var TAKEN_BACK = { untick: 1, offers: 1 };
 
-  function q7(sorted, q) {
-    if (!sorted.length) return null;
-    var h = (sorted.length - 1) * q, lo = Math.floor(h);
-    var hi = Math.min(sorted.length - 1, lo + 1);
-    return sorted[lo] + (h - lo) * (sorted[hi] - sorted[lo]);
-  }
+  // R's type 7 on a sorted list: advice.js's, the one copy.
+  var q7 = Advice.quantile;
   function r4(v) { return v === null || v === undefined ? null : Math.round(v * 10000) / 10000; }
 
   // The driver's day of a moment (4am to 4am, this machine's zone), and the
-  // Monday of its week, both 'YYYY-MM-DD': trends.js's dayKeyOf/weekKeyOf.
-  function ymd(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
-  function driverDayOf(ms) {
-    var d = new Date(ms);
-    d.setHours(d.getHours() - DAY_STARTS_AT);
-    return ymd(d);
-  }
-  function weekOfDay(day) {
-    var p = String(day).split('-').map(Number);
-    var d = new Date(p[0], p[1] - 1, p[2], 12);
-    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-    return ymd(d);
-  }
+  // Monday of its week, both 'YYYY-MM-DD': advice.js's dayKeyOf/weekKeyOf,
+  // which trends.js reads too, exported here under the names this file had.
+  var driverDayOf = Advice.dayKeyOf;
+  var weekOfDay = Advice.weekKeyOf;
 
   function momentOf(e) {
     var m = (e && e.match) || {};
@@ -1836,6 +1826,6 @@
     ACCEPT: ACCEPT, MARGIN: MARGIN, OFFER_MORE: OFFER_MORE, SAID_PHONE: SAID_PHONE,
     CONFIDENT: CONFIDENT, OFFSET_MIN_N: OFFSET_MIN_N, OFFSET_MAX_MIN: OFFSET_MAX_MIN,
     CANDIDATES_SHOWN: CANDIDATES_SHOWN, HISTORY_MAX: HISTORY_MAX, TEXT_MAX: TEXT_MAX,
-    SAME_NAME: SAME_NAME, DAY_STARTS_AT: DAY_STARTS_AT, RECORD_MATCH_MS: RECORD_MATCH_MS
+    SAME_NAME: SAME_NAME, DAY_STARTS_AT: DAY_STARTS_AT, RECORD_MATCH_MS: RECORD_MATCH_MS, TAKEN_BACK: TAKEN_BACK
   };
 }));

@@ -23,6 +23,7 @@ var os = require('os');
 var P = require('../tools/places_report.js');
 var MV = require('../map-view.js');
 var A = require('../advice.js');
+var TR = require('../trends.js');
 
 var pass = 0, fail = 0;
 function eq(name, got, want) {
@@ -736,8 +737,11 @@ function nbx() {
   var page6 = P.html(rep6);
   ok('...said on the page to be for reading, not an accept rule', /\$\/mi is shown for reading, not as an accept rule/.test(page6));
 
-  // The page and its CSVs hold no dropoff.
-  ok('the second pass\'s page holds no dropoff text', page6.indexOf('Ombre') < 0 && page6.indexOf('742') < 0);
+  // The page and its CSVs hold no dropoff. The page's "made" is the clock
+  // (now: 0 is no time given), and one run in about ninety its milliseconds
+  // held "742" and failed this check with no dropoff anywhere: left out.
+  var page6Held = page6.replace(/"made":\d+/g, '"made":0');
+  ok('the second pass\'s page holds no dropoff text', page6Held.indexOf('Ombre') < 0 && page6Held.indexOf('742') < 0);
   ok('...nor a drop position', page6.indexOf(String(dropFix.lat).slice(0, 7)) < 0 && page6.indexOf('12.712') < 0);
   var csv6 = Object.keys(P.MORE_CSVS).map(function (k) {
     return P.tableCsv(rep6, P.MORE_CSVS[k][0], P.MORE_CSVS[k][1]);
@@ -816,6 +820,37 @@ function nbx() {
     function (k) { return k; }, {}, 'place');
   eq('...and too few offers before is never flagged, whatever the silence', [rowOf(thinQ, 'Old Haunt').countP,
      rowOf(thinQ, 'Old Haunt').flag], [null, '']);
+  // The second review: exp(-lam) is 0 over lam ~745, and the plain sum read
+  // every busy area's count as impossible. Tables: P(X<=2; 3) = 0.42319;
+  // P(X<=800; 800) = 0.5094 and P(X<=1138; 1141.96) = 0.4612 (each term
+  // from lgamma, summed in Python: a second way to the same figures).
+  eq('poissonLE: a small count by the table, and counts of hundreds do not underflow',
+     [P.poissonLE(2, 3), P.poissonLE(800, 800), P.poissonLE(1138, 1141.96), P.poissonLE(-1, 4), P.poissonLE(3, 0)]
+       .map(function (v) { return Math.round(v * 1e4) / 1e4; }),
+     [0.4232, 0.5094, 0.4612, 0, 1]);
+  var busyQ = [];
+  for (var bq = 1; bq <= 41; bq++) {
+    for (var bm = 0; bm < 60; bm++) busyQ.push(card({ id: 'bq' + bq + '-' + bm, at: day(bq, 18, 0) + bm * 120000, town: 'Brimhaven' }));
+  }
+  // One late card, so the cut falls after the 27th's evening and no day is on both sides.
+  busyQ.push(card({ id: 'bq-late', at: day(41, 23, 0), town: 'Brimhaven' }));
+  var busyRow = rowOf(P.quietTable(busyQ, function (o) { return o.town; }, function (k) { return k; }, {}, 'town'), 'Brimhaven');
+  eq('...so a town sending its 60 a day all along is not gone quiet (expected ' + busyRow.expected + ', got '
+     + busyRow.recent + ', p ' + busyRow.countP + ')', [busyRow.flag, busyRow.countP > 0.4], ['', true]);
+  // The second review: Math.max.apply over every offer passes them all as
+  // arguments, and past ~125,000 the stack overflows; the span, Gone quiet
+  // and --gps each took one. 130,000 cards in one town, a record that size.
+  var hugeQ = [];
+  for (var hq = 0; hq < 130000; hq++) hugeQ.push(card({ id: 'hq' + hq, at: day(1 + Math.floor(hq / 3200), 18) + (hq % 3200) * 1000, town: 'Brimhaven' }));
+  var hugeRow = null, hugeErr = null;
+  try { hugeRow = rowOf(P.quietTable(hugeQ, function (o) { return o.town; }, function (k) { return k; }, {}, 'town'), 'Brimhaven'); }
+  catch (e) { hugeErr = e.message; }
+  eq('...and 130,000 offers do not overflow the stack (' + (hugeErr || 'read') + ')', [hugeErr, hugeRow && hugeRow.last,
+     hugeRow && hugeRow.before + hugeRow.recent], [null, '2026-04-10', 130000]);
+  var spread = []; for (var sp = 0; sp < 200000; sp++) spread.push((sp * 7919) % 200003);
+  eq('...minOf and maxOf, the loop that replaces Math.min/max.apply: 200,000 values, none, and a NaN as Math gives',
+     [P.minOf(spread), P.maxOf(spread), P.minOf([]), P.maxOf([]), isNaN(P.minOf([3, NaN, 1])), isNaN(P.maxOf([NaN, 3]))],
+     [0, 200002, Infinity, -Infinity, true, true]);
 
   eq('ISO weeks: 1 Jan 2026 is in its first', P.isoWeek('2026-01-01'), '2026-W01');
   eq('...and 1 Jan 2027 in 2026\'s fifty-third', P.isoWeek('2027-01-01'), '2026-W53');
@@ -1253,6 +1288,17 @@ function nbx() {
   var thinW = P.waitTable(wSpells.slice(0, 3).map(function (s2) { return Object.assign({ town: 'Faketown' }, s2); }),
                           'town', function (k) { return k; }, 'town').rows[0];
   eq('...under ' + P.SPELL_MIN_N + ' spells a row gives its n only', [thinW.n, thinW.top10PerHour, thinW.expected], [3, null, null]);
+  // The second review: these tiers are per three-hour block, and the
+  // report's other "top 10%" is of the whole range; each column says which.
+  var tierCols = [];
+  ['goodTown', 'goodApp', 'waitTown', 'sizeTown'].forEach(function (t) {
+    (repW.views.all.best[t] ? repW.views.all.best[t].cols : []).forEach(function (c) { if (/top/.test(c.h)) tierCols.push(c.h); });
+  });
+  var pageW = P.html(repW);
+  ok('the Best tab\'s top-tier columns each say "(for its hours)" (' + tierCols.length + ': ' + tierCols.join(' | ') + ')',
+     tierCols.length >= 7 && tierCols.every(function (h) { return /top (10|25)% \(for its hours\)/.test(h); })
+     && (pageW.match(/top 10% \(for its hours\)/g) || []).length >= 3
+     && !/<th>top 10%<\/th>|'top 10%'/.test(pageW));
   var gT = repW.views.all.best.goodApp.rows[0];
   ok('good offers by area: the rig\'s take and the top tiers, counted and shared (' + gT.top10N + ' of ' + gT.n + ')',
      gT.name === 'every app' && gT.go === 10 && gT.top10N >= 10 && gT.top10 === Math.round(gT.top10N / gT.tiered * 100) / 100);
@@ -2077,6 +2123,26 @@ function nbx() {
       });
     });
     ok('[R1] the median bootstrap\'s typed-array path gives the plain path\'s interval for the same seed (6 sizes x 3 seeds)', same);
+    // The second review: the rank walk, against the statistic called on every
+    // resample (a function with no q takes the general path), ties and all.
+    var qSame = true;
+    [2, 3, 10, 11, 57, 400].forEach(function (n) {
+      var v = []; for (var i = 0; i < n; i++) v.push(i % 3 === 0 ? 12 : Math.round(r9() * 4000) / 100);
+      [0.25, 0.75, 0.9].forEach(function (q) {
+        var plain = function (xs) { return P.quantile(xs, q); };
+        [5, 99].forEach(function (sd) {
+          if (JSON.stringify(P.bootCI(v, sd, 1000, P.qOf(q))) !== JSON.stringify(P.bootCI(v, sd, 1000, plain))) qSame = false;
+        });
+      });
+    });
+    ok('[R1] ...and a quantile\'s rank walk gives the interval its statistic called on every resample gives (6 sizes x 3 q x 2 seeds)', qSame);
+    // Sorting every resample read every value once a draw: 1000 x n reads.
+    // The walk reads them for its one sort and draws ranks after that.
+    var reads = 0, base = []; for (var i2 = 0; i2 < 200; i2++) base.push(Math.round(r9() * 4000) / 100);
+    var watched = new Proxy(base, { get: function (t, p) { if (typeof p === 'string' && /^\d+$/.test(p)) reads++; return t[p]; } });
+    var ciW = P.bootCI(watched, 3);
+    ok('[R1] ...and the median\'s interval comes off one sort, not a sort a resample (' + reads + ' reads of 200 values, '
+       + 'not 200,000), the same interval', reads < 20000 && JSON.stringify(ciW) === JSON.stringify(P.bootCIPlain(base, 3)));
   }());
   ok('[waited] F8: the stays\' columns say "at target" (the card\'s own target), not "good", which is When & where\'s cut',
      (function (t) {
@@ -2178,6 +2244,12 @@ function nbx() {
      [[0, 5.298], [0.338, 10.977], [29.598, 65.341]]);
   ok('[whenwhere] ...and a count of thousands does not underflow',
      (function (b) { return b[0] > 1880 && b[0] < 1895 && b[1] > 2110 && b[1] < 2125; }(P.poissonCI(2000, 0.99))));
+  // The second review: wideCI hands it k / phi, and a sum over whole terms
+  // ran to floor(k), so 6.67 drew 6's interval (1.54-15.66).
+  eq('[whenwhere] ...and an effective count k / phi is not rounded down: 6.67 lies between 6 and 7, at trends.js poisCI\'s',
+     [6, 6.67, 7].map(function (k) { return P.poissonCI(k, 0.99).map(function (v) { return Math.round(v * 100) / 100; }); })
+       .concat([TR.poisCI(6.67, 0.01).map(function (v) { return Math.round(v * 100) / 100; })]),
+     [[1.54, 15.66], [1.87, 16.65], [2.04, 17.13], [1.87, 16.65]]);
 
   /* Three Fridays 8–11pm: an hour a night in Northfen's cell (half the cards
    * at $40), an hour in Saltmere's (one a night at $40), an hour in a cell
@@ -2549,6 +2621,45 @@ function nbx() {
       await b.close();
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  }());
+
+  /* --- one copy of each shared piece (the reporting code's second review) --- */
+  (function () {
+    var S1 = require('../tools/strategy.js'), E1 = require('../earnings.js');
+    function src(f) { return fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\/\/[^\n]*/g, ''); }
+    eq('[one copy] the 4am day and week keys are advice.js\'s in trends, earnings, strategy and the report',
+       [TR.dayKeyOf === A.dayKeyOf, TR.weekKeyOf === A.weekKeyOf, E1.driverDayOf === A.dayKeyOf,
+        E1.weekOfDay === A.weekKeyOf, S1.outingOf === A.dayKeyOf, P.outingOf === A.dayKeyOf],
+       [true, true, true, true, true, true]);
+    // 11:30pm on the 7th and 3:59am on the 8th are the 7th; 4am the 8th; a Saturday's week is Monday the 2nd.
+    eq('[one copy] ...which keep the 4am cut, the Monday and a stamp no clock reads',
+       [A.dayKeyOf(at(7, 23, 30)), A.dayKeyOf(at(8, 3, 59)), A.dayKeyOf(at(8, 4)), A.weekKeyOf('2026-03-07'),
+        A.weekKeyOf('2026-03-09'), A.dayKeyOf(8.64e15 * 2)], ['2026-03-07', '2026-03-07', '2026-03-08', '2026-03-02', '2026-03-09', null]);
+    eq('[one copy] the type-7 quantile is advice.js\'s in strategy, and the report\'s sorts then asks it',
+       [S1.quantile === A.quantile, A.quantile([1, 2, 3, 4], 0.5), A.quantile([5], 0.9), A.quantile([], 0.5),
+        P.quantile([4, 1, 3, 2], 0.25), A.median([4, 1, 3, 2]), A.median([])], [true, 2.5, 5, null, 1.75, 2.5, null]);
+    eq('[one copy] a Took taken back is earnings.js\'s list, which strategy reads; the 4am, the 10 and the 30 have one source',
+       [S1.TAKEN_BACK === E1.TAKEN_BACK, E1.DAY_STARTS_AT === A.DAY_STARTS_AT, S1.DIST_MIN_N === TR.DAY_MIN,
+        P.DESC_MIN_N === TR.DAY_MIN, P.MIN_N === TR.FLOOR],
+       [true, true, true, true, true]);
+    var dup = [];
+    ['trends.js', 'earnings.js', 'tools/strategy.js', 'tools/places_report.js', 'journal.html'].forEach(function (f) {
+      var t = src(f);
+      // A sorted list read between two indices; the bootstrap's in-place qOf
+      // (two selections on a resample, then a + (h - lo) * (b - a)) is not one.
+      if (/\[lo\] \+ \(h - lo\) \*|\(pos - lo\)/.test(t)) dup.push(f + ' interpolates its own quantile');
+      if (/var DAY_STARTS_AT = \d/.test(t)) dup.push(f + ' writes its own 4');
+      if (/TAKEN_BACK = \{/.test(t) && f !== 'earnings.js') dup.push(f + ' lists its own taken-back');
+      if (/var (DIST_MIN_N|DROP_MIN_N|MIN_N) = \d/.test(t)) dup.push(f + ' writes its own floor');
+    });
+    eq('[one copy] ...and no file carries its own copy of them', dup, []);
+    // The offers page adds earnings.js only when the Money tab asks, and it
+    // now reads root.Advice: advice.js must be a plain script in the head.
+    var jh = fs.readFileSync(path.join(__dirname, '..', 'journal.html'), 'utf8');
+    ok('[one copy] earnings.js takes Advice, and the offers page loads advice.js before it adds earnings.js',
+       /factory\(require\('\.\/advice\.js'\)\)/.test(src('earnings.js')) && /factory\(root\.Advice\)/.test(src('earnings.js'))
+       && jh.indexOf('<script src="advice.js"></script>') >= 0
+       && jh.indexOf('<script src="advice.js"></script>') < jh.indexOf("s.src = 'earnings.js'"));
   }());
 
   console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'

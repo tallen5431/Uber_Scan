@@ -118,8 +118,9 @@ var BREAK_MIN = A.SHOWN_AT;
 
 // The fewest values a quartile or a percentile is printed over; below it a
 // row gives its n only. The places report's DESC_MIN_N, the floor under its
-// descriptive medians: at nine a 90th percentile is the top value.
-var DIST_MIN_N = 10;
+// descriptive medians: at nine a 90th percentile is the top value. One 10,
+// trends.js DAY_MIN, read by all three.
+var DIST_MIN_N = T.DAY_MIN;
 
 // The fewest offers at a line, seen while free, before that point of a
 // curve counts: advice.js's TARGET_OFFERS, the places report's MIN_N. A
@@ -184,13 +185,12 @@ function r2(v) { return typeof v === 'number' && isFinite(v) ? Math.round(v * 10
 function sum(xs) { var s = 0; for (var i = 0; i < xs.length; i++) s += xs[i]; return s; }
 function sorted(xs) { return xs.slice().sort(function (a, b) { return a - b; }); }
 
-// R's type 7, which is what advice.js, server.js percentileOf and the
-// places report's quantile all are: the same offers give the same P90.
-function quantile(s, q) {
-  if (!s.length) return null;
-  var h = (s.length - 1) * q, lo = Math.floor(h), hi = Math.min(s.length - 1, lo + 1);
-  return s[lo] + (h - lo) * (s[hi] - s[lo]);
-}
+// R's type 7 on a sorted list: advice.js's, the one copy (server.js
+// percentileOf is the same rule): the same offers give the same P90.
+var quantile = A.quantile;
+// The median here is that quantile at a half, a + (b - a) / 2 for an even
+// count, not Advice.median's (a + b) / 2: the two can differ in the last bit,
+// a cent apart after rounding, and this file's figures are kept as they were.
 function median(xs) { return xs.length ? quantile(sorted(xs), 0.5) : null; }
 
 // advice.js's LCG (and the places report's), so a resample comes out the
@@ -200,14 +200,8 @@ function rng(seed) {
   return function () { s = (1664525 * s + 1013904223) >>> 0; return s / 4294967296; };
 }
 
-// The driver's shift day, 'YYYY-MM-DD', advice.js's 4am boundary.
-function outingOf(at) {
-  var d = new Date(at);
-  if (!isFinite(d.getTime())) return null;
-  d.setHours(d.getHours() - A.DAY_STARTS_AT);
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-'
-    + String(d.getDate()).padStart(2, '0');
-}
+// The driver's shift day, 'YYYY-MM-DD', at advice.js's 4am: its dayKeyOf.
+var outingOf = A.dayKeyOf;
 
 // Weekend is a shift day that is a Saturday or a Sunday (4am to 4am, so a
 // Friday night past midnight is still Friday's). A row in a table, not a
@@ -767,12 +761,13 @@ function requestKind(o, app) {
 }
 
 // A Took taken back, by the drop row's `by`: the offers page's untick puts
-// the order down `by: 'offers'`, and earnings.js's TAKEN_BACK names the
-// panel's untick beside it. The reporting review's F5: section 7 counted
-// such an order as taken while the fold, the Trends tab and the Money tab
-// all said it was not. Its hold still stands (the order was in the car
-// while it was), so the cards in it stay busy.
-var TAKEN_BACK = { untick: 1, offers: 1 };
+// the order down `by: 'offers'`, and the panel's untick `by: 'untick'`:
+// earnings.js's TAKEN_BACK, the one list (this file had its own copy). The
+// reporting review's F5: section 7 counted such an order as taken while the
+// fold, the Trends tab and the Money tab all said it was not. Its hold
+// still stands (the order was in the car while it was), so the cards in it
+// stay busy.
+var TAKEN_BACK = E.TAKEN_BACK;
 
 // Every offer id the record says was taken, and how: 'took' or 'phone'.
 function acceptedIds(list, orders, earnings) {

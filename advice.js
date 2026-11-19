@@ -99,6 +99,11 @@
 
   var LADDER_MAX = 60;
 
+  // The one median for the reports as well (the reporting code's second
+  // review: advice, earnings and the places report each had one, and
+  // map-view.js keeps its own): the two middle values' mean, (a + b) / 2.
+  // strategy.js's median is `quantile` at a half, a + (b - a) / 2, which can
+  // differ from this in the last bit, and is kept so its figures do not move.
   function median(v) {
     if (!v.length) return null;
     var s = v.slice().sort(function (a, b) { return a - b; });
@@ -767,6 +772,29 @@
    */
   var DAY_STARTS_AT = 4;
 
+  /* The driver's day of a moment, 'YYYY-MM-DD' on the reader's own clock,
+   * and the Monday of a driver day's week, the same form. One copy (the
+   * reporting code's second review): trends.js (dayKeyOf, weekKeyOf),
+   * earnings.js (driverDayOf, weekOfDay), strategy.js and the places report
+   * (outingOf) each worked them out, all at this 4am, earnings off its own
+   * hard-coded 4. null for a moment no clock can read; a day that is not
+   * one gives a week of NaNs, as earnings' own did. The pages' day helpers
+   * (journal.html dayOf, live.html) still do more than return a key. */
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function ymdOf(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+  function dayKeyOf(ms) {
+    var d = new Date(ms);
+    if (!isFinite(d.getTime())) return null;
+    d.setHours(d.getHours() - DAY_STARTS_AT);
+    return ymdOf(d);
+  }
+  function weekKeyOf(dayKey) {
+    var p = String(dayKey).split('-').map(Number);
+    var d = new Date(p[0], p[1] - 1, p[2], 12);
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    return ymdOf(d);
+  }
+
   /* How many separate OUTINGS a pile of rows came off — which is a different
    * question from `daysIn` above, not a second answer to it.
    *
@@ -788,10 +816,8 @@
   function outingsIn(rows) {
     var seen = Object.create(null), n = 0;
     (rows || []).forEach(function (r) {
-      var d = new Date(r && r.at);
-      if (!isFinite(d.getTime())) return;
-      d.setHours(d.getHours() - DAY_STARTS_AT);
-      var key = d.getFullYear() + '/' + d.getMonth() + '/' + d.getDate();
+      var key = dayKeyOf(r && r.at);
+      if (key === null) return;
       if (!(key in seen)) { seen[key] = true; n += 1; }
     });
     return n;
@@ -2236,8 +2262,11 @@
   // Values before a town's score gets an interval (and so can be "clear").
   var TARGET_CI_MIN = AREA_FLOOR;
 
-  // R's type 7, which is what server.js percentileOf and the places report's
-  // quantile both are: the same offers give the same P90 in all three.
+  // R's type 7, which is what server.js percentileOf is too: the same offers
+  // give the same P90. The one copy for the reports (the reporting code's
+  // second review): trends.js, strategy.js, earnings.js, the places report
+  // and journal.html's percentile each carried it, and read it from here.
+  // A list of one is that value; none, null.
   function quantile(sorted, q) {
     if (!sorted.length) return null;
     var h = (sorted.length - 1) * q, lo = Math.floor(h);
@@ -2531,8 +2560,11 @@
            areas: areas, AREA_FLOOR: AREA_FLOOR, AREA_DAYS: AREA_DAYS,
            AREA_ALPHA: AREA_ALPHA, AREA_SHUFFLES: AREA_SHUFFLES,
            outingsIn: outingsIn,
-           // The one place the driver's 4am day boundary is written down.
-           DAY_STARTS_AT: DAY_STARTS_AT,
+           // The one place the driver's 4am day boundary is written down,
+           // and the day and week keys every report counts by.
+           DAY_STARTS_AT: DAY_STARTS_AT, dayKeyOf: dayKeyOf, weekKeyOf: weekKeyOf,
+           // ...and the one median and type-7 quantile the reports share.
+           median: median, quantile: quantile,
            costPerMileIn: costPerMileIn, costLadder: costLadder,
            costHolds: costHolds,
            mapSearch: mapSearch, mapRoute: mapRoute, mapQuery: mapQuery,

@@ -138,8 +138,9 @@ var ROOT = path.resolve(__dirname, '..');
  * colour comes only from a test and an interval — so the floor is the low end
  * of that range: below it a bootstrap interval of a median over a tail this
  * long is not worth drawing. Below it a cell is "too few", listed with its n
- * and never ranked or tested. */
-var MIN_N = 30;
+ * and never ranked or tested. The same 30 as trends.js FLOOR, whose own
+ * table arrived at it, and read from there so the two cannot come apart. */
+var MIN_N = TR.FLOOR;
 // ...and on two separate outings at least, Advice.areas' own rule: thirty
 // offers from one evening are one evening.
 var MIN_OUTINGS = A.AREA_DAYS;
@@ -154,7 +155,9 @@ var BOOTS = 1000;
 var GRID_MI = 2;
 // "Where trips leave you": taken trips are few, so this floor is lower and
 // the table is descriptive; its colour follows the same test-and-interval rule.
-var DROP_MIN_N = 10;
+// Ten, trends.js DAY_MIN: the one floor under a descriptive median in the
+// reports (DESC_MIN_N below is this; strategy.js's DIST_MIN_N reads it too).
+var DROP_MIN_N = TR.DAY_MIN;
 // A silence after a drop longer than the rig's own break (advice.js SHOWN_AT)
 // ends the wait unmeasured: the driver stopped, not the market.
 var NEXT_GAP_MIN = A.SHOWN_AT;
@@ -181,6 +184,23 @@ var GPS_TIMED = 'drop (gps-timed)';
 
 function round2(v) { return v === null || v === undefined ? null : Math.round(v * 100) / 100; }
 
+/* The least and greatest of a list, by a loop. Math.min.apply and
+ * Math.max.apply pass the list as arguments, on the stack, and past about
+ * 125,000 values that throws "Maximum call stack size exceeded": the span,
+ * Gone quiet and --gps all took one over every offer, so a record that size
+ * would have stopped the report. Infinity / -Infinity for none and NaN if
+ * any is NaN, as the two Math calls give. */
+function minOf(xs) {
+  var m = Infinity;
+  for (var i = 0; i < xs.length; i++) if (xs[i] < m || xs[i] !== xs[i]) { m = xs[i]; if (m !== m) break; }
+  return m;
+}
+function maxOf(xs) {
+  var m = -Infinity;
+  for (var i = 0; i < xs.length; i++) if (xs[i] > m || xs[i] !== xs[i]) { m = xs[i]; if (m !== m) break; }
+  return m;
+}
+
 // advice.js's own LCG (shuffled), for intervals that come out the same twice.
 function rng(seed) {
   var s = seed >>> 0;
@@ -203,17 +223,44 @@ function seedOf(text) {
  * copied every resample into a new array and sorted it through a compare
  * function — the report's largest single cost on a 3x record. The same
  * draws in the same order, the same middle value (or the mean of the two
- * middle ones), so the same interval for the same seed: a check holds it. */
+ * middle ones), so the same interval for the same seed: a check holds it.
+ *
+ * Then the second review: sorting every resample was still 37% of the whole
+ * report on the invented 11,721-offer journal. A resample's middle needs no
+ * sort at all: the values are sorted ONCE, each draw adds one to its value's
+ * rank, and a walk up the counts reaches the middle rank(s). Each draw is
+ * still values[floor(r() * n)], in the same order, and the order statistics
+ * are the same numbers the sort put there, so the interval is the same to
+ * the bit (bootCIPlain's check; the report built before and after, every CSV
+ * and the page's data identical). O(n) a resample where the sort was
+ * O(n log n). A quantile's own statistic (qOf, which says its q) takes the
+ * same walk to its two straddling ranks and the same arithmetic. */
 function bootCI(values, seed, reps, stat) {
   if (!values || values.length < 2) return null;
   reps = reps || BOOTS;
   var r = rng(seed), n = values.length, meds = new Float64Array(reps), k, i;
-  if (!stat) {
-    var tb = new Float64Array(n), mid = Math.floor(n / 2), odd = n % 2 === 1;
+  var q = !stat ? 0.5 : typeof stat.q === 'number' ? stat.q : null;
+  if (q !== null) {
+    // Each value's rank in the one sort; `order[rank[j]]` IS values[j].
+    var idx = new Array(n);
+    for (i = 0; i < n; i++) idx[i] = i;
+    idx.sort(function (a, b) { return values[a] - values[b]; });
+    var order = new Float64Array(n), rank = new Int32Array(n), cnt = new Int32Array(n);
+    for (i = 0; i < n; i++) { order[i] = values[idx[i]]; rank[idx[i]] = i; }
+    // The lower rank wanted, and whether the one above it is needed: the
+    // median's mid (odd) or mid - 1 and mid (even); type 7's floor(h), h + 1.
+    var h = (n - 1) * q, lo, two;
+    if (!stat) { lo = n % 2 === 1 ? Math.floor(n / 2) : n / 2 - 1; two = n % 2 === 0; }
+    else { lo = Math.floor(h); two = h !== lo; }
     for (k = 0; k < reps; k++) {
-      for (i = 0; i < n; i++) tb[i] = values[Math.floor(r() * n)];
-      tb.sort();
-      meds[k] = odd ? tb[mid] : (tb[mid - 1] + tb[mid]) / 2;
+      cnt.fill(0);
+      for (i = 0; i < n; i++) cnt[rank[Math.floor(r() * n)]]++;
+      var c = 0, j = 0;
+      while (c + cnt[j] <= lo) { c += cnt[j]; j++; }
+      var a = order[j], b = a;
+      if (two && c + cnt[j] === lo + 1) { j++; while (cnt[j] === 0) j++; b = order[j]; }
+      // The very expressions the sorted paths used, so the same bits.
+      meds[k] = !stat ? (two ? (a + b) / 2 : a) : (two ? a + (h - lo) * (b - a) : a);
     }
   } else {
     var buf = new Array(n);
@@ -232,7 +279,7 @@ function bootCIPlain(values, seed, reps) {
   var r = rng(seed), n = values.length, meds = new Array(reps), buf = new Array(n);
   for (var k = 0; k < reps; k++) {
     for (var i = 0; i < n; i++) buf[i] = values[Math.floor(r() * n)];
-    meds[k] = MV.median(buf);
+    meds[k] = A.median(buf);
   }
   meds.sort(function (a, b) { return a - b; });
   return [round2(meds[Math.floor(0.025 * reps)]), round2(meds[Math.ceil(0.975 * reps) - 1])];
@@ -250,14 +297,9 @@ function seenAt(o) {
 // The block an offer is held still in: advice.js's eight, as map.html asks it.
 function stratum(o) { return A.blockOf(o.at); }
 
-// The driver's shift day, advice.js's outingsIn key (DAY_STARTS_AT).
-function outingOf(at) {
-  var d = new Date(at);
-  if (!isFinite(d.getTime())) return null;
-  d.setHours(d.getHours() - A.DAY_STARTS_AT);
-  var mm = String(d.getMonth() + 1).padStart(2, '0'), dd = String(d.getDate()).padStart(2, '0');
-  return d.getFullYear() + '-' + mm + '-' + dd;
-}
+// The driver's shift day, 'YYYY-MM-DD': advice.js's dayKeyOf, the key its
+// outingsIn counts by (DAY_STARTS_AT).
+var outingOf = A.dayKeyOf;
 
 /* The 2-mile cell a point is in, as { id, s, w, n, e, lat, lon }. Rows of
  * GRID_MI/69 degrees of latitude; each row's columns as wide as GRID_MI at
@@ -772,7 +814,7 @@ function cells(rows, key, opts) {
     if (!(k in memo)) {
       var others = (inBlock[b] || []).filter(function (x) { return x.g !== name; })
                                        .map(function (x) { return x.v; });
-      memo[k] = others.length ? MV.median(others) : null;
+      memo[k] = others.length ? A.median(others) : null;
     }
     return memo[k];
   }
@@ -798,18 +840,18 @@ function cells(rows, key, opts) {
     }
     var ppms = g.offers.map(payPerMile).filter(function (v) { return v !== null; });
     var top = topOf(g.offers, opts.tierOf);
-    var score = diffs.length ? round2(MV.median(diffs)) : null;
+    var score = diffs.length ? round2(A.median(diffs)) : null;
     var sci = bootCI(diffs, seedOf('s' + g.name));
     var clear = sci ? (sci[0] > 0 ? 'above' : sci[1] < 0 ? 'below' : null) : null;
     return {
       name: g.name, n: g.n, outings: g.days,
       median: round2(g.median), ci: bootCI(vals, seedOf('m' + g.name)),
       score: score, sci: sci, compared: diffs.length,
-      pay: pays.length ? round2(MV.median(pays)) : null,
+      pay: pays.length ? round2(A.median(pays)) : null,
       take: said.length ? round2(said.filter(function (o) { return o.state === 'go'; }).length
                                  / said.length) : null,
       // $/mi off the card, read and never ranked (see payPerMile).
-      ppm: ppms.length ? round2(MV.median(ppms)) : null, ppmN: ppms.length,
+      ppm: ppms.length ? round2(A.median(ppms)) : null, ppmN: ppms.length,
       ppmCi: ppms.length >= DESC_MIN_N ? bootCI(ppms, seedOf('d' + g.name)) : null,
       clear: clear,
       beats: !!(significant && clear),
@@ -841,8 +883,8 @@ function coverage(rows, placedRow) {
   var withPickup = pool.filter(function (o) { return typeof o.pickup === 'string' && o.pickup.trim(); });
   function side(list) {
     return { n: list.length,
-             perHour: list.length ? round2(MV.median(list.map(function (o) { return o.perHour; }))) : null,
-             pay: list.length ? round2(MV.median(list.filter(function (o) {
+             perHour: list.length ? round2(A.median(list.map(function (o) { return o.perHour; }))) : null,
+             pay: list.length ? round2(A.median(list.filter(function (o) {
                return typeof o.pay === 'number';
              }).map(function (o) { return o.pay; }))) : null };
   }
@@ -977,12 +1019,12 @@ function dropTable(trips, keyName, hold) {
     var got = list.filter(function (t) { return !t.next.censored; });
     g.trips = list.length;
     g.ended = list.length - got.length;
-    g.nextPerHour = got.length ? round2(MV.median(got.map(function (t) { return t.next.perHour; }))) : null;
-    g.nextPay = got.length ? round2(MV.median(got.map(function (t) { return t.next.pay; }))) : null;
+    g.nextPerHour = got.length ? round2(A.median(got.map(function (t) { return t.next.perHour; }))) : null;
+    g.nextPay = got.length ? round2(A.median(got.map(function (t) { return t.next.pay; }))) : null;
     var any = list.filter(function (t) { return t.nextAny && !t.nextAny.censored; });
     g.anyN = any.length;
-    g.anyMin = any.length ? round2(MV.median(any.map(function (t) { return t.nextAny.wait; }))) : null;
-    g.anyPerHour = any.length ? round2(MV.median(any.map(function (t) { return t.nextAny.perHour; }))) : null;
+    g.anyMin = any.length ? round2(A.median(any.map(function (t) { return t.nextAny.wait; }))) : null;
+    g.anyPerHour = any.length ? round2(A.median(any.map(function (t) { return t.nextAny.perHour; }))) : null;
     g.anyGood = any.length ? share(any.filter(function (t) { return t.nextAny.good; }).length, any.length) : null;
     // Lower is better for a wait: the sign of `clear` says which way.
     if (keyName === 'cell') {
@@ -1246,32 +1288,12 @@ function wwDayIn(opt, day) {
 }
 
 /* The exact (Garwood) interval on a Poisson mean from k events: the means at
- * which k or more, and k or fewer, are each (1 - conf) / 2 likely. Summed in
- * logs, so a count of hundreds does not underflow exp(-lam) as poissonLE's
- * plain sum would. Bisection to a part in 1e10. */
-function poissonCI(k, conf) {
-  var a = (1 - conf) / 2;
-  function le(x, lam) {
-    if (x < 0) return 0;
-    if (lam <= 0) return 1;
-    var t = -lam, s = t;
-    for (var i = 1; i <= x; i++) {
-      t += Math.log(lam / i);
-      s = s > t ? s + Math.log1p(Math.exp(t - s)) : t + Math.log1p(Math.exp(s - t));
-    }
-    return Math.min(1, Math.exp(s));
-  }
-  function root(x, want) {
-    var lo = 0, hi = x + 10 + 10 * Math.sqrt(x + 1);
-    while (le(x, hi) > want) hi *= 2;
-    for (var j = 0; j < 200 && hi - lo > 1e-10 * Math.max(1, hi); j++) {
-      var mid = (lo + hi) / 2;
-      if (le(x, mid) > want) lo = mid; else hi = mid;
-    }
-    return (lo + hi) / 2;
-  }
-  return [k === 0 ? 0 : root(k - 1, 1 - a), root(k, a)];
-}
+ * which k or more, and k or fewer, are each (1 - conf) / 2 likely. trends.js
+ * `poisCI`, the one copy, by its regularised gamma. This file had its own,
+ * a sum over whole terms, and wideCI hands it k / phi, which is rarely whole:
+ * the sum ran to floor(k), so 6.67 good drew the interval of 6 (1.54-15.66
+ * where the exact one is 1.87-16.65) and the marks leaned towards "below". */
+function poissonCI(k, conf) { return TR.poisCI(k, 1 - conf); }
 
 /* The tab's table: every (day choice, block choice) with any waiting in it,
  * keyed 'day|block', each with the slot's overall line and, by town and by
@@ -1911,11 +1933,21 @@ function wilson(k, n) {
   return [round2(Math.max(0, mid - half)), round2(Math.min(1, mid + half))];
 }
 
-// P(X <= x) for X ~ Poisson(lam).
+/* P(X <= x) for X ~ Poisson(lam), summed in logs. The plain sum started from
+ * exp(-lam), which is 0 for any lam over about 745: every term after it was
+ * 0 too, so a busy area expecting 1,142 offers that got 1,138 read p = 0 and
+ * "Gone quiet" flagged every busy town on the invented 11,721-offer journal
+ * (true p 0.46). Each term's log is the last one's plus log(lam / k), added
+ * to the running log-sum without leaving logs. */
 function poissonLE(x, lam) {
-  var term = Math.exp(-lam), sum = term;
-  for (var k = 1; k <= x; k++) { term *= lam / k; sum += term; }
-  return Math.min(1, sum);
+  if (x < 0) return 0;
+  if (lam <= 0) return 1;
+  var t = -lam, s = t;
+  for (var k = 1; k <= x; k++) {
+    t += Math.log(lam / k);
+    s = s > t ? s + Math.log1p(Math.exp(t - s)) : t + Math.log1p(Math.exp(s - t));
+  }
+  return Math.min(1, Math.exp(s));
 }
 
 // The ISO week ('2026-W10') of a shift day 'YYYY-MM-DD'.
@@ -1929,7 +1961,9 @@ function isoWeek(day) {
   return y + '-W' + String(wk).padStart(2, '0');
 }
 
-function med(xs) { return xs.length ? round2(MV.median(xs)) : null; }
+// Advice.median, the one median the reports share (map-view.js's, which this
+// file read before, is the same rule and stays map-view's own).
+function med(xs) { return xs.length ? round2(A.median(xs)) : null; }
 function medCi(xs, seed) { return xs.length >= DESC_MIN_N ? bootCI(xs, seedOf(seed)) : null; }
 function share(k, n) { return n ? round2(k / n) : null; }
 
@@ -2204,7 +2238,7 @@ function quietTable(rows, key, label, diffs, what) {
   var pool = rows.filter(counted);
   var times = pool.map(seenAt).filter(isFinite);
   if (!times.length) return { cols: [], rows: [], cut: null };
-  var end = Math.max.apply(null, times), cut = end - QUIET_DAYS * 864e5;
+  var end = maxOf(times), cut = end - QUIET_DAYS * 864e5;
   var before = pool.filter(function (o) { return seenAt(o) < cut; });
   var recent = pool.filter(function (o) { return seenAt(o) >= cut; });
   var outB = A.outingsIn(before), outR = A.outingsIn(recent);
@@ -2212,7 +2246,7 @@ function quietTable(rows, key, label, diffs, what) {
   var out = Object.keys(by).filter(function (k) { return by[k].length >= DESC_MIN_N; }).map(function (k) {
     var list = by[k];
     var b = list.filter(function (o) { return seenAt(o) < cut; }).length, r = list.length - b;
-    var last = Math.max.apply(null, list.map(seenAt));
+    var last = maxOf(list.map(seenAt));
     var expected = outB ? round2(b / outB * outR) : null;
     var countP = b >= MIN_N && outR >= QUIET_MIN_OUTINGS && expected >= QUIET_MIN_EXPECTED
       ? Math.round(poissonLE(r, expected) * 1000) / 1000 : null;
@@ -2497,7 +2531,10 @@ function restaurantsTable(rows, ctx) {
  * same three-hour block (advice.js blockOf), so a late-night offer is held to
  * late-night offers. A block with fewer than TIER_MIN_N offers gets no
  * threshold and its offers no tier. Ties at the threshold count as top, so a
- * share can sit a little over 10%. */
+ * share can sit a little over 10%. Every column counting these says "(for
+ * its hours)" (the reporting code's second review): elsewhere in the report
+ * "top 10%" is of the whole range — When & where's ruler, the Strategy tab,
+ * the Overview's spread — and the two read alike in a header. */
 var TIER_MIN_N = MIN_N;
 // Values before a P75 or P90 gets a bootstrap interval: the ranking's floor.
 var Q_CI_MIN_N = MIN_N;
@@ -2521,12 +2558,10 @@ var SHORT_MILES = 0.35;
 var SIZE_BANDS = [[0, 4, 'short, under 4 mi'], [4, 8, 'medium, 4–8 mi'], [8, 12, 'long, 8–12 mi'],
                   [12, Infinity, '12 mi and over']];
 
-// The q-th quantile, linear between order statistics (R's type 7).
+// The q-th quantile of an unsorted list, linear between order statistics
+// (R's type 7): sorted here, then advice.js's quantile, the one copy.
 function quantile(xs, q) {
-  var v = xs.slice().sort(function (a, b) { return a - b; });
-  if (!v.length) return null;
-  var h = (v.length - 1) * q, lo = Math.floor(h);
-  return v[lo] + (h - lo) * ((v[lo + 1] === undefined ? v[lo] : v[lo + 1]) - v[lo]);
+  return A.quantile(xs.slice().sort(function (a, b) { return a - b; }), q);
 }
 // The same quantile, of a resample that may be reordered in place (the
 // bootstrap's own buffer): two selections, not a sort.
@@ -2543,14 +2578,19 @@ function selectK(a, k) {
   }
   return a[k];
 }
+// It says its q, so bootCI walks the resample's counts to the two ranks
+// instead of calling it on every resample (bootCI's header); called on a
+// list it is the same quantile, which the check holds against the walk.
 function qOf(q) {
-  return function (xs) {
+  var f = function (xs) {
     var h = (xs.length - 1) * q, lo = Math.floor(h), a = selectK(xs, lo);
     if (h === lo) return a;
     var b = Infinity;
     for (var i = lo + 1; i < xs.length; i++) if (xs[i] < b) b = xs[i];
     return a + (h - lo) * (b - a);
   };
+  f.q = q;
+  return f;
 }
 
 /* A 95% interval for the q-th quantile: the percentile bootstrap (BOOTS
@@ -2777,7 +2817,8 @@ function goodTable(rows, key, label, what, tierOf) {
     .sort(function (a, b) { return (b.top10 || 0) - (a.top10 || 0) || b.n - a.n; });
   if (pool.length) out.unshift(row('every ' + what, pool, 'g*' + what));
   return { cols: [C('name', what, 't'), C('n', 'offers', 'n'), C('go', 'rig said take', 'n'), C('goShare', 'take share', '%'),
-                  C('top25', 'top 25%', '%'), C('top10N', 'top 10% n', 'n'), C('top10', 'top 10%', '%'),
+                  C('top25', 'top 25% (for its hours)', '%'), C('top10N', 'top 10% (for its hours) n', 'n'),
+                  C('top10', 'top 10% (for its hours)', '%'),
                   C('top10Ci', '95%', '%ci'), C('median', 'median $/hr', '$'), C('p75', 'P75 $/hr', '$'),
                   C('p90', 'P90 $/hr', '$'), C('p90Ci', '95%', '$ci')], rows: out };
 }
@@ -2820,10 +2861,11 @@ function waitTable(spells, keyName, label, what) {
   out.forEach(function (r) { delete r.blockN; });
   return { cols: [C('name', what, 't'), C('block', 'hours', 't'), C('n', 'spells', 'n'), C('days', 'days', 'n'),
                   C('hours', 'hours waited', 'h'), C('goPerHour', 'takes said / hr waiting', 'r2'),
-                  C('top25PerHour', 'top 25% / hr waiting', 'r2'), C('top10PerHour', 'top 10% / hr waiting', 'r2'),
+                  C('top25PerHour', 'top 25% (for its hours) / hr waiting', 'r2'),
+                  C('top10PerHour', 'top 10% (for its hours) / hr waiting', 'r2'),
                   C('trips', 'taken while there', 'n'), C('timed', 'of them timed', 'n'),
                   C('expected', 'expected $/hr working it', '$'),
-                  C('ifTop10', 'if every top 10% taken (offered, card min)', '$')], rows: out };
+                  C('ifTop10', 'if every top 10% (for its hours) taken (offered, card min)', '$')], rows: out };
 }
 
 /* (c) Dead miles after a drop: from each put-down at the door to the next
@@ -2907,7 +2949,8 @@ function sizeTable(rows, key, label, what, tierOf) {
     .sort(function (a, b) { return by[b].length - by[a].length; })
     .forEach(function (k) { add(label(k), by[k], 'z' + k); });
   return { cols: [C('name', what, 't'), C('band', 'size', 't'), C('n', 'offers', 'n'), C('median', 'median $/hr', '$'),
-                  C('p90', 'P90 $/hr', '$'), C('top10', 'top 10%', '%'), C('ppm', 'median $/mi (read only)', '$')],
+                  C('p90', 'P90 $/hr', '$'), C('top10', 'top 10% (for its hours)', '%'),
+                  C('ppm', 'median $/mi (read only)', '$')],
            rows: out };
 }
 
@@ -3321,7 +3364,7 @@ function analyse(offers, taken, placed, dropAt, opts) {
   var times = counts.map(function (o) { return o.at; }).filter(isFinite);
   return {
     made: opts.now || Date.now(),
-    span: times.length ? [Math.min.apply(null, times), Math.max.apply(null, times)] : null,
+    span: times.length ? [minOf(times), maxOf(times)] : null,
     outings: A.outingsIn(counts),
     minN: typeof opts.minN === 'number' ? opts.minN : MIN_N,
     dropMinN: DROP_MIN_N, minOutings: MIN_OUTINGS, alpha: ALPHA, shuffles: SHUFFLES,
@@ -5185,7 +5228,7 @@ var PAGE_JS = String(function page() {
     }).join('');
     el.innerHTML = c.groups.length ? '<div class="tw"><table><thead><tr><th>' + (kind === 'place' ? 'place'
       : kind === 'town' ? 'town' : 'cell') + '</th><th>n</th><th>days</th><th>vs same hours</th><th>95%</th>'
-      + '<th>median $/hr</th><th>95%</th><th>P75 $/hr</th><th>P90 $/hr</th><th>95%</th><th>top 10%</th>'
+      + '<th>median $/hr</th><th>95%</th><th>P75 $/hr</th><th>P90 $/hr</th><th>95%</th><th>top 10% (for its hours)</th>'
       + '<th>median pay</th><th>$/mi (read only)</th><th>95%</th>'
       + '<th>rig said take</th><th></th></tr></thead><tbody>'
       + rows + '</tbody></table></div>' : '';
@@ -5225,7 +5268,7 @@ var PAGE_JS = String(function page() {
 
   /* The Restaurants table: a tbody per restaurant, its branches hidden under
      it until ▸ is clicked, so a sort moves a restaurant with its branches. */
-  var REST_HEAD = ['restaurant', 'offers', 'days', 'vs same hours', '95%', 'median $/hr', '95%', 'P90 $/hr', 'top 10%',
+  var REST_HEAD = ['restaurant', 'offers', 'days', 'vs same hours', '95%', 'median $/hr', '95%', 'P90 $/hr', 'top 10% (for its hours)',
                    'median pay',
                    '$/mi (read only)', 'you took', 'real $/hr', 'timed', 'real − card', 'wait', 'add-on', 'stacked',
                    'Uber · DD', ''];
@@ -5313,7 +5356,8 @@ var PAGE_JS = String(function page() {
            : '<b>not distinguishable from chance</b>, so nothing is coloured.')) + '</p>';
       if (!t.groups.length) return;
       out += '<div class="tw"><table><thead><tr><th>' + esc(k[1].toLowerCase()) + '</th><th>offers</th><th>days</th>'
-        + '<th>top 10%</th><th>the others, same hours</th><th>vs same hours</th><th>95%</th><th>top 25%</th><th></th></tr></thead><tbody>'
+        + '<th>top 10% (for its hours)</th><th>the others, same hours</th><th>vs same hours</th><th>95%</th><th>top 25% (for its hours)</th>'
+        + '<th></th></tr></thead><tbody>'
         + t.groups.map(function (g) {
           function pts(v) { return v === null || v === undefined ? '—' : (v >= 0 ? '+' : '−') + Math.abs(v * 100).toFixed(1) + ' pts'; }
           var pl = k[0] === 'place' ? R.places[g.name] : null;
@@ -5859,8 +5903,15 @@ var PAGE_JS = String(function page() {
       if (A0.centre) { lats.push(A0.centre.lat); lons.push(A0.centre.lon); }
       if (!lats.length) { el.innerHTML = '<p class="note" style="padding:12px">No dot in this slot.</p>'; }
       else {
-        var la0 = Math.min.apply(null, lats), la1 = Math.max.apply(null, lats);
-        var lo0 = Math.min.apply(null, lons), lo1 = Math.max.apply(null, lons);
+        // A loop, not Math.min.apply: an Any-day slot holds a dot for every
+        // offer, past the ~125,000 arguments the stack takes (minOf's note).
+        var la0 = Infinity, la1 = -Infinity, lo0 = Infinity, lo1 = -Infinity;
+        for (var di = 0; di < lats.length; di++) {
+          if (lats[di] < la0) la0 = lats[di];
+          if (lats[di] > la1) la1 = lats[di];
+          if (lons[di] < lo0) lo0 = lons[di];
+          if (lons[di] > lo1) lo1 = lons[di];
+        }
         var kx = Math.cos((la0 + la1) / 2 * Math.PI / 180);
         var spanX = Math.max((lo1 - lo0) * kx, 0.01), spanY = Math.max(la1 - la0, 0.01);
         var sc = Math.min((Wd - 40) / spanX, (Hd - 40) / spanY);
@@ -6408,7 +6459,7 @@ async function main(argv) {
   var spanTimes = offers.filter(counted).map(seenAt).filter(isFinite);
   var fx = null, presses = null;
   if (o.gps && spanTimes.length) {
-    fx = gpsFixes(o.gps, Math.min.apply(null, spanTimes) - 3600e3, Math.max.apply(null, spanTimes) + 3600e3);
+    fx = gpsFixes(o.gps, minOf(spanTimes) - 3600e3, maxOf(spanTimes) + 3600e3);
     var tp = timePresses(taken, fx.fixes);
     taken = tp.taken;
     presses = tp.stats;
@@ -6583,7 +6634,7 @@ module.exports = {
   pickupKind: pickupKind, placePickup: placePickup, placeDropoff: placeDropoff, storeLabel: storeLabel,
   printedDoor: printedDoor, placeRow: placeRow, heldEndsOf: heldEndsOf, afterFor: afterFor,
   AFTER_GPS_WIDEN_MI: AFTER_GPS_WIDEN_MI,
-  placesOf: placesOf, cellOf: cellOf, bootCI: bootCI, cells: cells, coverage: coverage,
+  placesOf: placesOf, cellOf: cellOf, bootCI: bootCI, minOf: minOf, maxOf: maxOf, cells: cells, coverage: coverage,
   nextTake: nextTake, timelineOf: timelineOf, tripsOf: tripsOf, dropTable: dropTable,
   analyse: analyse, summary: summary, testLine: testLine, html: html, csvOf: csvOf, dropCsv: dropCsv,
   paidSection: paidSection, loadEarnings: loadEarnings,
