@@ -838,7 +838,7 @@ the answer is noise.
 
 ```sh
 # on the NucBox, from the checkout (git pull first)
-node tools/places_report.js http://localhost:8081 --out ~/places-report \
+node tools/places_report.js http://localhost:8082 --out ~/places-report \
      --gps ~/gpslog --nominatim http://localhost:8088
 xdg-open ~/places-report/index.html      # or copy the folder to a laptop
 ```
@@ -1173,7 +1173,7 @@ or one trip's amount — so its output can be pasted back as it is:
 
 ```sh
 # on the NucBox, from the checkout
-node tools/report_check.js http://localhost:8081            # or --since 2026-09-01, --json
+node tools/report_check.js http://localhost:8082            # or --since 2026-09-01, --json
 ```
 
 It says what was read (and whether the server cut it), the GPS fix coverage,

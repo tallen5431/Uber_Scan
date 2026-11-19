@@ -148,7 +148,7 @@ eq('the pair window is the server\'s own (server.js REOFFER_WINDOW_MS)', sw && s
      && /CUT: the server would not page/.test(RC.format(cut)));
   eq('the arguments: one server (the NucBox\'s copy by default), --since as a date, --json',
      [RC.parseArgs([]).server, RC.parseArgs(['http://x:1', '--since', '2026-03-01', '--json'])],
-     ['http://localhost:8081', { server: 'http://x:1', since: '2026-03-01', json: true }]);
+     ['http://localhost:8082', { server: 'http://x:1', since: '2026-03-01', json: true }]);
   var threw = null;
   try { RC.parseArgs(['--since', 'March']); } catch (e) { threw = e.message; }
   eq('...and refuses a date it cannot read', threw, '--since is YYYY-MM-DD');

@@ -1,6 +1,6 @@
 /* The reports checked against the real journal, in aggregates only.
  *
- *   node tools/report_check.js                       the NucBox's copy (http://localhost:8081)
+ *   node tools/report_check.js                       the NucBox's copy (http://localhost:8082)
  *   node tools/report_check.js http://localhost:8080 --since 2026-09-01
  *   node tools/report_check.js --json                the same figures as JSON
  *
@@ -48,7 +48,7 @@ var P = require('./places_report.js');
 var USAGE = [
   'node tools/report_check.js [server] [--since YYYY-MM-DD] [--json]',
   '',
-  'Run on the NucBox. Reads the journal through the server (default http://localhost:8081, the copy at home)',
+  'Run on the NucBox. Reads the journal through the server (default http://localhost:8082, the copy at home)',
   'and prints aggregates only: no place, coordinate, text, id or single trip\'s amount.'
 ].join('\n');
 
@@ -402,7 +402,10 @@ function parseArgs(argv) {
     else if (!o.server) o.server = a;
     else throw new Error('one server address, not two');
   }
-  if (!o.server) o.server = 'http://localhost:8081';
+  // 8082, the copy the rig syncs to and places_nightly.sh reads. It was
+  // 8081 — the NucBox's relay server, which holds a journal of its own — and
+  // the first real run read that one: weeks stale, and the sync blamed.
+  if (!o.server) o.server = 'http://localhost:8082';
   if (o.since && !/^\d{4}-\d\d-\d\d$/.test(o.since)) throw new Error('--since is YYYY-MM-DD');
   return o;
 }

@@ -1,7 +1,7 @@
 /* Where the good offers start, measured on the NucBox after the fact.
  *
- *   node tools/places_report.js http://localhost:8081 --out ~/places-report
- *   node tools/places_report.js http://localhost:8081 --out ~/places-report \
+ *   node tools/places_report.js http://localhost:8082 --out ~/places-report
+ *   node tools/places_report.js http://localhost:8082 --out ~/places-report \
  *        --gps ~/gpslog --since 2026-09-01 --nominatim http://localhost:8088
  *
  * The owner's words (25 Oct 2026): "It would be helpful know where and what
@@ -6294,7 +6294,7 @@ function parseArgs(argv) {
     else if (!o.server) o.server = a;
     else throw new Error('one server address, not two');
   }
-  if (!o.server) o.server = 'http://localhost:8081';
+  if (!o.server) o.server = 'http://localhost:8082';
   if (o.since && !/^\d{4}-\d\d-\d\d$/.test(o.since)) throw new Error('--since is YYYY-MM-DD');
   if (!(o.minN >= 2)) throw new Error('--min-n is a number, 2 or more');
   if (!(o.gap >= 0)) throw new Error('--gap is milliseconds');
@@ -6306,7 +6306,7 @@ function parseArgs(argv) {
 }
 
 var USAGE = [
-  'usage: node tools/places_report.js [http://localhost:8081] [--out ~/places-report]',
+  'usage: node tools/places_report.js [http://localhost:8082] [--out ~/places-report]',
   '         [--gps ~/gpslog] [--since YYYY-MM-DD] [--nominatim http://localhost:8088]',
   '         [--cache ~/.cache/uber-scan/places-report-answers.json] [--gap ms] [--min-n 30]',
   '         [--streets URL] [--waits URL] [--relay URL] [--road-asks 5000] [--allow-degraded]',
