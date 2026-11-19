@@ -123,6 +123,10 @@ var OP = require('../offer-parser.js');
 // What $/hr to expect and what holding out paid (the Strategy tab), shared
 // with the end-of-shift report so the two print one answer.
 var S = require('./strategy.js');
+// trends.js's dispersion and rateShade, for When & where's interval (the
+// reporting review's S2): the same widening the Trends grid's good per hour
+// takes, so the two pages' marks mean the same thing.
+var TR = require('../trends.js');
 // ...and what the app paid, for an order this report could not time (uberTimingFor).
 var E = require('../earnings.js');
 
@@ -194,14 +198,41 @@ function seedOf(text) {
 
 /* A percentile bootstrap interval for the median, 95%, or null under two.
  * `stat` another statistic of the resample in its place (a quantile, a mean). */
+/* The median's own path (the reporting review's R1): the resample in a
+ * Float64Array sorted in place, numerically by the engine, where MV.median
+ * copied every resample into a new array and sorted it through a compare
+ * function — the report's largest single cost on a 3x record. The same
+ * draws in the same order, the same middle value (or the mean of the two
+ * middle ones), so the same interval for the same seed: a check holds it. */
 function bootCI(values, seed, reps, stat) {
   if (!values || values.length < 2) return null;
   reps = reps || BOOTS;
-  stat = stat || MV.median;
+  var r = rng(seed), n = values.length, meds = new Float64Array(reps), k, i;
+  if (!stat) {
+    var tb = new Float64Array(n), mid = Math.floor(n / 2), odd = n % 2 === 1;
+    for (k = 0; k < reps; k++) {
+      for (i = 0; i < n; i++) tb[i] = values[Math.floor(r() * n)];
+      tb.sort();
+      meds[k] = odd ? tb[mid] : (tb[mid - 1] + tb[mid]) / 2;
+    }
+  } else {
+    var buf = new Array(n);
+    for (k = 0; k < reps; k++) {
+      for (i = 0; i < n; i++) buf[i] = values[Math.floor(r() * n)];
+      meds[k] = stat(buf);
+    }
+  }
+  meds.sort();
+  return [round2(meds[Math.floor(0.025 * reps)]), round2(meds[Math.ceil(0.975 * reps) - 1])];
+}
+// The way it was, kept for the check that the fast path gives the same.
+function bootCIPlain(values, seed, reps) {
+  if (!values || values.length < 2) return null;
+  reps = reps || BOOTS;
   var r = rng(seed), n = values.length, meds = new Array(reps), buf = new Array(n);
   for (var k = 0; k < reps; k++) {
     for (var i = 0; i < n; i++) buf[i] = values[Math.floor(r() * n)];
-    meds[k] = stat(buf);
+    meds[k] = MV.median(buf);
   }
   meds.sort(function (a, b) { return a - b; });
   return [round2(meds[Math.floor(0.025 * reps)]), round2(meds[Math.ceil(0.975 * reps) - 1])];
@@ -995,11 +1026,16 @@ function dropTable(trips, keyName, hold) {
  *     car was at the earlier card. The Busy tab's spells, off the GPS log,
  *     are the measured version where --gps is given.
  *   - Takes the driver never pressed Took on leave their drive in as waiting.
- *   - Minutes to the first good offer start at the first CARD seen in an
- *     area, not at arrival (arrival is not on the record without the log),
- *     so a stay whose first card was good reads 0.
- * "Good" is the row's own target at the time (perHour >= target), the
- * offers page's Trends tab's word; "rig said take" elsewhere is the verdict. */
+ *   - Minutes to the first card at target start at the first CARD seen in
+ *     an area, not at arrival (arrival is not on the record without the
+ *     log), so a stay whose first card was at target reads 0.
+ * "At target" here is the row's own target at the time (perHour >= target),
+ * and said so on the page (the reporting review's F8): it is NOT the
+ * offers page's Trends ruler nor When & where's "good", which are one
+ * dollar cut, the top X% of the whole range — this comment once called it
+ * the Trends tab's word, from before Trends moved to its ruler, and the
+ * columns said "first good", which on this report means the other thing.
+ * "Rig said take" elsewhere is the verdict. */
 var CREDIT_MAX_MIN = 10;
 
 function goodOf(o) {
@@ -1071,8 +1107,8 @@ function waitedTable(line, keyName, label, what) {
   return { cols: [C('name', what, 't'), C('block', 'hours', 't'), C('n', 'offers', 'n'), C('days', 'days', 'n'),
                   C('hours', 'hours there (inferred)', 'h'), C('perHour', 'offers / hr there', 'r'),
                   C('median', 'median $/hr', '$'), C('medianCi', '95%', '$ci'), C('good', 'cleared target', '%'),
-                  C('stays', 'stays', 'n'), C('staysGood', 'stays with a good offer', '%'),
-                  C('toGood', 'min to first good (from first card)', 'min')], rows: out };
+                  C('stays', 'stays', 'n'), C('staysGood', 'stays with a card at target', '%'),
+                  C('toGood', 'min to first card at target (from first card)', 'min')], rows: out };
 }
 
 /* --- when & where: which area, at the weekday and hours picked -----------
@@ -1120,9 +1156,17 @@ function waitedTable(line, keyName, label, what) {
  * for a different question). 10/20/30/50% to pick from, 20 by default.
  *
  * THE RANKING. Good offers per hour waited there (the credited hours), with
- * the exact (Garwood) 99% Poisson interval on the count over those hours.
- * An area is marked only where that interval sits wholly above or wholly
- * below the slot's own overall rate — every waiting card in the slot,
+ * the exact (Garwood) 99% Poisson interval on the count over those hours,
+ * WIDENED BY PHI (the reporting review's S2): a plain Poisson interval
+ * marked 4.5-12.6% of no-effect areas once the nights swing 40%, as the
+ * Trends grid's did before it was widened. phi is trends.js `dispersion`
+ * over each area's shift days within each weekday x block (Pearson's
+ * chi-square of the days' good counts against the area's own rate, pooled
+ * over every area, never under 1), one per town or cell and per top; the
+ * interval is on k/phi, scaled back (trends.js `rateShade`). The hour
+ * strip's lines take one phi over every weekday x hour's days. Simulated
+ * in the AUDITS entry: about 1% at every row. An area is marked only where
+ * that interval sits wholly above or wholly below the slot's own overall rate — every waiting card in the slot,
  * placed or not; otherwise it is printed without colour, as every
  * descriptive table here is. 99%, not 95%: the driver flicks through up to
  * seventy slots of up to dozens of areas, and at 95% one in twenty would be
@@ -1167,11 +1211,16 @@ var WW_CONF = 0.99;
 
 // The driver's weekday (0 Sunday), WW_BLOCKS index and hour of the driver
 // day (0 the 4am hour, 23 the 3am one) of a stamp, or null.
+// The HOUR off the real clock, the day off the driver-day shift (the
+// reporting review's F7): shifting the moment back four hours and reading
+// the hour off that put 5:30am on the spring-forward Sunday in the 1am hour
+// and 6:30 and 7:30 both in the 3am one, while Trends put them at 5, 6 and
+// 7. The clock hour, less four, wraps the same way on every other day.
 function wwSlotOf(at) {
   var d = new Date(at);
   if (!isFinite(d.getTime())) return null;
+  var h = (d.getHours() - A.DAY_STARTS_AT + 24) % 24;
   d.setHours(d.getHours() - A.DAY_STARTS_AT);
-  var h = d.getHours();
   for (var i = 0; i < WW_BLOCKS.length; i++) {
     if (h >= WW_BLOCKS[i][0] && h < WW_BLOCKS[i][1]) return { day: d.getDay(), block: i, hour: h };
   }
@@ -1229,9 +1278,31 @@ function poissonCI(k, conf) {
  * on the page through R.cells, as every cell is) — so it holds no name and
  * no coordinate the report does not already. Worked out here, once; the page
  * only picks a slot and sorts. */
-function whenWhere(offers, waiting) {
+/* The report's rulers, worked out ONCE (the reporting review's F4): the top
+ * 10/20/30/50% of every counted offer's $/hr in the range, as dollar cuts,
+ * each with how many offers it is over and how many sit at or over it. When
+ * & where reads them and the Strategy tab's section 7 is handed them, so
+ * the two never draw two lines over one report: they did — section 7 had
+ * T.ruler over its own rated offers (a card with no perHour rated off pay
+ * and minutes), and on one invented report put "good" at $36.60 over 90
+ * offers while When & where put it at $39.60 over 60. Ties at a cut count
+ * as good, as trends.js `ruler` documents. */
+function reportRulers(offers) {
   var rates = offers.filter(counted).map(function (o) { return o.perHour; });
-  var cuts = WW_TOPS.map(function (p) { return rates.length ? round2(quantile(rates, 1 - p / 100)) : null; });
+  var out = { tops: WW_TOPS, n: rates.length, days: A.outingsIn(offers.filter(counted)), byTop: {} };
+  out.cuts = WW_TOPS.map(function (p) {
+    var c = rates.length ? round2(quantile(rates, 1 - p / 100)) : null;
+    out.byTop[p] = { cut: c, n: rates.length, days: out.days,
+                     over: c === null ? 0 : rates.filter(function (v) { return v >= c; }).length };
+    return c;
+  });
+  return out;
+}
+
+function whenWhere(offers, waiting, rulers) {
+  var ru = rulers || reportRulers(offers);
+  var rates = { length: ru.n };
+  var cuts = ru.cuts;
   var memo = Object.create(null);
   function ci(k) { return memo[k] || (memo[k] = poissonCI(k, WW_CONF)); }
   var line = (waiting || []).map(function (w) {
@@ -1257,38 +1328,81 @@ function whenWhere(offers, waiting) {
     return { h: mins / 60, n: list.length, d: Object.keys(days).length, g: g, u: u, dd: dd,
              p50: v.length ? round2(quantile(v, 0.5)) : null, p90: v.length ? round2(quantile(v, 0.9)) : null };
   }
-  function rated(s) {
+  // phi for each kind of line, per top: `key` puts a card in a group (an
+  // area in a weekday x block, or a weekday x hour), each group's members
+  // its shift days. Disjoint groups, so no card is counted twice.
+  function phiOf(key) {
+    var groups = Object.create(null);
+    line.forEach(function (c) {
+      var g = key(c);
+      if (g === null) return;
+      var gr = groups[g] || (groups[g] = Object.create(null));
+      var m = gr[c.outing] || (gr[c.outing] = { mins: 0, g: WW_TOPS.map(function () { return 0; }) });
+      m.mins += c.mins;
+      c.good.forEach(function (x, i) { if (x) m.g[i] += 1; });
+    });
+    return WW_TOPS.map(function (t, i) {
+      return TR.dispersion(Object.keys(groups).map(function (g) {
+        return Object.keys(groups[g]).map(function (o) { return { k: groups[g][o].g[i], h: groups[g][o].mins / 60 }; });
+      }));
+    });
+  }
+  var phi = { town: phiOf(function (c) { return c.town ? c.day + '|' + c.block + '|' + c.town : null; }),
+              cell: phiOf(function (c) { return c.cell ? c.day + '|' + c.block + '|' + c.cell : null; }),
+              line: phiOf(function (c) { return c.day + '|' + c.hour; }) };
+  function rated(s, ph) {
     s.r = s.g.map(function (k) { return s.h > 0 ? round2(k / s.h) : null; });
-    s.lo = s.g.map(function (k) { return s.h > 0 ? round2(ci(k)[0] / s.h) : null; });
-    s.hi = s.g.map(function (k) { return s.h > 0 ? round2(ci(k)[1] / s.h) : null; });
+    var b = s.g.map(function (k, i) { return wideCI(k, s.h, ph[i]); });
+    s.lo = b.map(function (x) { return x ? round2(x[0]) : null; });
+    s.hi = b.map(function (x) { return x ? round2(x[1]) : null; });
     return s;
   }
-  function inTime(opt, c) {
-    if (opt === 'any') return true;
-    if (opt[0] === 'h') return Number(opt.slice(1)) === c.hour;
-    return Number(opt) === c.block;
+  // The Garwood interval on k/phi, scaled back by phi, per hour.
+  function wideCI(k, h, f) {
+    if (!(h > 0)) return null;
+    f = f > 1 ? f : 1;
+    var b = f === 1 ? ci(k) : poissonCI(k / f, WW_CONF);
+    return [b[0] * f / h, b[1] * f / h];
   }
   // Every slot together: what the hour strip marks each hour's line against.
   var every = sum(line);
   var everyBase = every.g.map(function (k) { return every.h > 0 ? k / every.h : null; });
-  function marks(s, against) {
+  function marks(s, against, ph) {
     return s.g.map(function (k, i) {
       if (against[i] === null || !(s.h > 0)) return null;
-      var b = ci(k);
-      return b[0] / s.h > against[i] ? 'above' : b[1] / s.h < against[i] ? 'below' : null;
+      var b = wideCI(k, s.h, ph[i]);
+      return b[0] > against[i] ? 'above' : b[1] < against[i] ? 'below' : null;
     });
+  }
+  // The cards bucketed once by weekday and hour of the driver day (the
+  // reporting review's R4): 310 slots each filtered the whole line before,
+  // 3.3 s of a 3x record's run; each slot now joins its buckets.
+  var bucket = [];
+  for (var bd = 0; bd < 7; bd++) { bucket.push([]); for (var bh = 0; bh < 24; bh++) bucket[bd].push([]); }
+  line.forEach(function (c) { bucket[c.day][c.hour].push(c); });
+  function hoursOf(opt) {
+    var out = [];
+    if (opt === 'any') { for (var x = 0; x < 24; x++) out.push(x); return out; }
+    if (opt[0] === 'h') return [Number(opt.slice(1))];
+    var b = WW_BLOCKS[Number(opt)];
+    for (var y = b[0]; y < b[1]; y++) out.push(y);
+    return out;
   }
   var slots = {};
   WW_DAY_OPTS.forEach(function (dOpt) {
     WW_BLOCK_OPTS.concat(WW_HOUR_OPTS).forEach(function (bOpt) {
-      var inSlot = line.filter(function (c) { return wwDayIn(dOpt, c.day) && inTime(bOpt, c); });
+      var inSlot = [], hrs = hoursOf(bOpt);
+      for (var dd = 0; dd < 7; dd++) {
+        if (!wwDayIn(dOpt, dd)) continue;
+        hrs.forEach(function (hh) { var b = bucket[dd][hh]; for (var j = 0; j < b.length; j++) inSlot.push(b[j]); });
+      }
       if (!inSlot.length) return;
-      var all = rated(sum(inSlot));
+      var all = rated(sum(inSlot), phi.line);
       var base = all.g.map(function (k) { return all.h > 0 ? k / all.h : null; });
       // The slot's own line held to the same floor, and marked by the same
       // rule against every slot together (the hour strip's colour).
       all.ok = all.h >= WW_MIN_HOURS && all.d >= WW_MIN_DAYS;
-      all.mk = all.ok ? marks(all, everyBase) : null;
+      all.mk = all.ok ? marks(all, everyBase, phi.line) : null;
       var out = { all: all };
       ['town', 'cell'].forEach(function (unit) {
         var by = groupBy(inSlot.filter(function (c) { return c[unit]; }), function (c) { return c[unit]; });
@@ -1297,9 +1411,9 @@ function whenWhere(offers, waiting) {
           var s = sum(by[a]);
           s.a = a;
           if (s.h >= WW_MIN_HOURS && s.d >= WW_MIN_DAYS) {
-            rated(s);
+            rated(s, phi[unit]);
             // Marked on the unrounded figures: wholly above or below the slot.
-            s.mk = marks(s, base);
+            s.mk = marks(s, base, phi[unit]);
             ranked.push(s);
           } else {
             thin.push({ a: a, h: s.h, n: s.n, d: s.d });
@@ -1348,6 +1462,7 @@ function whenWhere(offers, waiting) {
   return { blocks: WW_BLOCKS.map(function (b) { return b[2]; }), days: WW_DAYS, dayOpts: WW_DAY_OPTS,
            blockOpts: WW_BLOCK_OPTS, hourOpts: WW_HOUR_OPTS, hours: WW_HOUR_OPTS.map(function (o, i) { return wwHourName(i); }),
            tops: WW_TOPS, top: WW_TOP, cuts: cuts, offers: rates.length,
+           phi: { town: phi.town.map(round2), cell: phi.cell.map(round2), line: phi.line.map(round2) },
            cards: line.length, minHours: WW_MIN_HOURS, minDays: WW_MIN_DAYS, conf: WW_CONF, slots: slots };
 }
 
@@ -2668,8 +2783,11 @@ function strategyOrders(taken, records, fixes, earnings) {
     // miles where its trip was matched (earnings.js uberTimingFor): labelled
     // so for the Strategy tab, never in place of the rig's own timing.
     var ub = real ? null : E.uberTimingFor(earnings, t.id, t.tookAt);
+    // `by`, the drop row's: section 7 leaves a Took taken back out of what
+    // was taken (strategy.js TAKEN_BACK), as earnings.js does.
+    var by = typeof t.by === 'string' ? t.by : null;
     if (ub) {
-      return { id: t.id, tookAt: t.tookAt, endedAt: typeof t.endedAt === 'number' ? t.endedAt : null,
+      return { id: t.id, tookAt: t.tookAt, endedAt: typeof t.endedAt === 'number' ? t.endedAt : null, by: by,
                app: t.app || null, pay: t.pay, cardMinutes: t.minutes, cardMiles: t.miles,
                addon: t.addon === true, carried: t.carried, actualMinutes: ub.minutes,
                actualMiles: ub.miles, milesFrom: ub.miles !== null ? 'uber' : null, timedBy: 'uber',
@@ -2688,7 +2806,7 @@ function strategyOrders(taken, records, fixes, earnings) {
         if (g !== null) { miles = g; from = 'log'; }
       }
     }
-    return { id: t.id, tookAt: t.tookAt, endedAt: typeof t.endedAt === 'number' ? t.endedAt : null,
+    return { id: t.id, tookAt: t.tookAt, endedAt: typeof t.endedAt === 'number' ? t.endedAt : null, by: by,
              app: t.app || null, pay: t.pay, cardMinutes: t.minutes, cardMiles: t.miles,
              addon: t.addon === true, carried: t.carried, actualMinutes: real ? real.mins : null,
              actualMiles: miles, milesFrom: from, clockStepped: stepped };
@@ -2806,7 +2924,8 @@ function analyse(offers, taken, placed, dropAt, opts) {
   function waitCellKey(o) { var w = waitBy.get(o); return w ? w.cell : null; }
   function waitTownKey(o) { var w = waitBy.get(o); return w ? w.town : null; }
   // When & where: the same line, by the driver's weekday and block.
-  var whenwhere = whenWhere(offers, waiting);
+  var rulers = reportRulers(offers);
+  var whenwhere = whenWhere(offers, waiting, rulers);
   var tookRuns = (taken || []).filter(function (t) { return t && typeof t.tookAt === 'number'; });
   // Spells parked with no order in the car (main reads them off the GPS
   // log): each to its 2-mile cell and, where the NucBox named one, the town
@@ -2948,6 +3067,8 @@ function analyse(offers, taken, placed, dropAt, opts) {
   // earnings screenshots and matched to orders (/api/earnings): the card
   // against what was paid, under the curve.
   var strategy = S.analyse({ offers: offers, orders: strategyIn, areaOf: townKey, appOf: appOf,
+                             // One ruler for section 7 and When & where.
+                             rulers: rulers.byTop,
                              target: targetLine(counts, opts.now), boots: opts.boots,
                              earnings: Array.isArray(opts.earnings) ? opts.earnings : undefined,
                              // The Gold card's goal and Uber's own figures,
@@ -3395,7 +3516,12 @@ function html(r) {
   // (GROUPS' fourth field), so the script does not keep a second list.
   var hourly = [];
   GROUPS.forEach(function (g) { g[2].forEach(function (t) { if (t[3]) hourly.push(t[0]); }); });
-  var data = JSON.stringify(Object.assign({}, r, { hourly: hourly })).replace(/</g, '\\u003c');
+  // The page reads no single wait (the reporting review's R3): section 7's
+  // lists of every wait, kept on the analysis for a check that wants them,
+  // are left out of the page's data, where nothing read them.
+  var data = JSON.stringify(Object.assign({}, r, { hourly: hourly }), function (k, v) {
+    return k === 'minutes' && v && Array.isArray(v.good) && Array.isArray(v.take) ? undefined : v;
+  }).replace(/</g, '\\u003c');
   var span = r.span ? new Date(r.span[0]).toISOString().slice(0, 10) + ' to '
     + new Date(r.span[1]).toISOString().slice(0, 10) : 'no offers';
   var cvAll = r.coverage.all, placedTotal = cvAll.placed.n + cvAll.unplaced.n;
@@ -3481,8 +3607,9 @@ function html(r) {
     + wd.creditMaxMin + ' minutes and none across a silence over ' + r.nextGapMin + ', credited to where the car was at '
     + 'the earlier card (the Busy tab\'s spells, off the GPS log, are the measured version). <b>Cleared target</b> is '
     + 'the card\'s $/hr at or over the target the panel judged it by. A <b>stay</b> is consecutive cards in one area '
-    + 'with no silence; its minutes to the first good offer start at its first CARD, not at arrival, so a stay whose '
-    + 'first card was good reads 0. Figures at ' + r.descMinN + ' offers on ' + r.minOutings + ' shift days.</p>'
+    + 'with no silence; its minutes to the first card at target start at its first CARD, not at arrival, so a stay '
+    + 'whose first card was at target reads 0. At target is each card\'s own target at the time, not the top-X% '
+    + '"good" of When &amp; where and section 7. Figures at ' + r.descMinN + ' offers on ' + r.minOutings + ' shift days.</p>'
     + fold('f-waitedAreaTown', 'By town', '<div id="m-waitedAreaTown"></div>')
     + fold('f-waitedAreaGrid', 'By ' + r.gridMi + '-mile cell', '<div id="m-waitedAreaGrid"></div>')
     + '<h3>From a drop to the next Took</h3>'
@@ -3526,7 +3653,12 @@ function html(r) {
       }).join('') + '</span>';
     }).join('') + '</div></nav>\n';
   var strip = '<p class="strip" id="strip"><b>Offered, not earned</b>; only places near where you wait; '
-    + pct(cvAll.unplaced.n, placedTotal) + ' of pickups unplaced. <a href="#overview">Read before the numbers</a></p>\n';
+    + pct(cvAll.unplaced.n, placedTotal) + ' of pickups unplaced. <a href="#overview">Read before the numbers</a></p>\n'
+    // A capped read said on the page, not only on stdout (the reporting
+    // review's R2): every figure below is over what was read.
+    + (r.source && r.source.truncated ? '<p class="strip warn" id="capped"><b>Not the whole journal:</b> the server sent '
+      + r.source.count + ' of ' + r.source.total + ' offers and would not page further, so every figure here is over the '
+      + 'newest ' + r.source.count + '. Narrow the window with --since, or update the server.</p>\n' : '');
   return '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
     + '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
     + '<title>Strategy &amp; Places Report</title>\n'
@@ -3930,19 +4062,21 @@ function PASSED_PART(s) {
       + seg.map(function (x) {
         return x[1] ? '<i class="p' + x[0] + '" style="width:' + pctOf(x[1]) + '" title="' + esc(x[0]) + ' ' + x[1] + '"></i>' : '';
       }).join('') + '</div><div class="pfig">' + g.good + ' good · took ' + g.taken
-      + (g.shareTaken !== null ? ' (' + Math.round(g.shareTaken * 100) + '%)' : '') + ' · let go ' + g.passed
-      + (g.declined ? ' (' + g.declined + ' marked)' : '') + (g.phone ? ' · phone ' + g.phone : '') + ' · busy ' + g.busy
+      + (g.shareTaken !== null ? ' (' + Math.round(g.shareTaken * 100) + '%)' : '') + ' · no answer ' + g.unanswered
+      + ' · let go ' + g.passed + (g.declined ? ' (' + g.declined + ' marked)' : '') + (g.phone ? ' · phone ' + g.phone : '')
+      + ' · busy ' + g.busy
       + ' · ' + esc(wait(g.wait)) + '</div></div>';
   }).join('');
   var w = p.waits, wc = w.counts;
   function waitSay(x) {
-    return x.p50 === null ? '(too few waits to give a median: n=' + x.n + ')'
-      : 'after <b>a median ' + x.p50 + ' min</b> (P75 ' + x.p75 + ' min; n=' + x.n + ')';
+    var open = x.open ? ', ' + x.open + ' still open' : '';
+    return x.p50 === null ? '(too few waits to give a median: n=' + x.n + open + ')'
+      : 'after <b>a median ' + x.p50 + ' min</b> (P75 ' + x.p75 + ' min; n=' + x.n + open + ')';
   }
   function waitCell(x) { return x.p50 === null ? (x.n ? 'n=' + x.n + ' (too few)' : '—') : x.p50 + ' / ' + x.p75 + ' min (n=' + x.n + ')'; }
   var blockCols = [['name', ''], ['good', 'good seen'], ['taken', 'taken'],
                    [function (g) { return g.shareTaken === null ? null : Math.round(g.shareTaken * 100) + '%'; }, 'of taken + let go'],
-                   ['passed', 'let go'], ['declined', '…marked passed'], ['unanswered', '…no answer'],
+                   ['unanswered', 'no answer'], ['passed', 'let go'], ['declined', '…marked passed'],
                    ['phone', 'on the phone, no Took'], ['busy', 'order already in the car'],
                    [function (g) { return waitCell(g.wait); }, 'to the next good: median / P75']];
   var topCols = [[function (t) { return 'top ' + t.top + '%' + (t.top === p.top ? ' (shown)' : ''); }, 'good ='],
@@ -3951,17 +4085,22 @@ function PASSED_PART(s) {
                  ['passed', 'let go'], ['phone', 'phone'], ['busy', 'busy'],
                  [function (t) { return waitCell(t.waitGood); }, 'to the next good'],
                  [function (t) { return waitCell(t.waitTake); }, 'to the next take']];
-  return '<h3 id="s-passed">The good offers you passed on</h3>'
-    + '<p class="note">Good is the top ' + p.top + '% of this record\'s own panel $/hr: <b>$' + p.cut.toFixed(2)
-    + '/hr or more</b> (' + p.over + ' of ' + p.n + ' offers), one dollar line held fixed across days and blocks — the '
-    + 'offers page\'s Trends ruler, worked out by the same function. <b>Taken</b> is a Took or your ✓ on the card; a card '
+  return '<h3 id="s-passed">Good offers not taken on the record</h3>'
+    + '<p class="note">Good is the top ' + p.top + '% of ' + (p.report ? 'this report\'s ' + p.n + ' offers over its '
+      + (p.days || 0) + ' days' : 'this record\'s own panel $/hr') + ': <b>$' + p.cut.toFixed(2)
+    + '/hr or more</b> (' + p.over + ' of ' + p.n + ' offers), one dollar line held fixed across days and blocks — '
+    + (p.report ? 'the same line When &amp; where reads, worked out once for the whole report. '
+      : 'the offers page\'s Trends ruler, worked out by the same function. ')
+    + '<b>No answer</b> is most of what is not taken: a card nobody ticked or Took, counted before <b>let go</b>, '
+    + 'which adds the ones you marked passed. <b>Taken</b> is a Took or your ✓ on the card; a card '
     + 'nobody answered for is not taken (silence is never an accept). <b>Busy</b>: it came inside an order\'s hold, Took to '
     + 'its end, or was an Uber add-on — no free driver was choosing it, and an order you never Took leaves its cards '
     + 'reading free. <b>On the phone</b>: Uber\'s earnings screen matched it with no Took, so it is neither taken nor let '
-    + 'go here. <b>The wait</b> is minutes online from a card let go to the next good card that was not busy, and to your '
-    + 'next take. Minutes with the rig off are not counted (' + wc.acrossOff + ' of ' + wc.origins + ' waits ran across '
-    + 'such a stretch)' + (wc.openGood ? '; ' + wc.openGood + ' with no good card after it in the record ' + (wc.openGood === 1
-      ? 'is' : 'are') + ' in no median' : '') + (wc.lone ? '; ' + wc.lone + ' let go alone, outside any run, start no wait' : '')
+    + 'go here. <b>The wait</b> is minutes online and free from a card let go to the next good card that was not busy, '
+    + 'and to your next take: minutes with the rig off are not counted (' + wc.acrossOff + ' of ' + wc.origins
+    + ' waits ran across such a stretch), nor the minutes of a trip you took meanwhile (' + (wc.throughHold || 0)
+    + ' ran through one)' + (wc.openGood ? '; ' + wc.openGood + ' with no good card after it in the record ' + (wc.openGood === 1
+      ? 'is' : 'are') + ' still open, said beside each median and in none' : '') + (wc.lone ? '; ' + wc.lone + ' let go alone, outside any run, start no wait' : '')
     + '. A median needs ' + s.floors.dist + ' waits. History, not advice: no verdict, target or '
     + 'panel line reads it, and the blocks are rows, not a line tuned to the hour.</p>'
     + '<div class="plegend"><span><i class="ptaken"></i>taken</span><span><i class="pphone"></i>on the phone, no Took</span>'
@@ -4244,16 +4383,22 @@ function WHENWHERE_SECTION(r) {
     + '<p class="exp">Experimental, descriptive. <b>Offered, not earned</b>: offers are dispatched near the car, so '
     + 'only areas you already wait in compete, and a good offer seen is not one taken. Nothing here is a rule, and '
     + 'nothing on the rig reads it.</p>'
-    + '<p class="note">Every area where the car waited, for the slot you pick, ranked by <b>good offers per hour '
-    + 'waited there</b>. <b>Day</b> is the driver\'s, 4am to 4am: 1am on a Saturday is Friday night; Weekends are the '
+    + '<p class="note">Every area where the car waited, for the slot you pick, ranked by <b>good per hour waited '
+    + '(each gap capped at ' + r.waited.creditMaxMin + ' min, none while carrying)</b>. That is not the offers page\'s '
+    + 'Trends "good per hour online", which counts every minute the rig was scanning, carrying included: the two '
+    + 'measure different hours, so their figures differ by design. <b>Day</b> is the driver\'s, 4am to 4am: 1am on a Saturday is Friday night; Weekends are the '
     + 'driver\'s Saturday and Sunday. <b>Where</b> is the car\'s own GPS fix on each card that came with no order in '
     + 'the car (the Waited tab\'s line: ' + w.cards + ' cards), by the town of its ' + r.gridMi + '-mile cell or the '
     + 'cell itself; <b>hours waited</b> are inferred as that tab infers them, each card\'s time to the next, at most '
     + r.waited.creditMaxMin + ' minutes and none across a silence over ' + r.nextGapMin + '. <b>Good</b> is the card\'s '
     + '$/hr at or over one fixed cutoff, the top share picked of all ' + w.offers + ' offers in this report\'s range, '
-    + 'the same dollars in every slot: <b id="wwCut">' + esc(cutSaid(ti)) + '</b>. The interval is the exact 99% '
-    + 'Poisson interval on the good offers over the hours; an area is <b>marked only where it lies wholly above or '
-    + 'below the slot\'s own rate</b>, and printed without colour otherwise. Ranked at ' + w.minHours + ' h waited on '
+    + 'the same dollars in every slot and the same as the Strategy tab\'s section 7, over this report\'s '
+    + r.outings + ' days: <b id="wwCut">' + esc(cutSaid(ti)) + '</b>. The interval is the exact 99% '
+    + 'Poisson interval on the good offers over the hours, widened by how much more an area\'s days differ than '
+    + 'chance alone would (×' + (w.phi ? w.phi.town[ti].toFixed(2) + ' by town, ×' + w.phi.cell[ti].toFixed(2) + ' by cell'
+    : '1') + ' on this record); an area is <b>marked only where it lies wholly above or '
+    + 'below the slot\'s own rate</b>, and printed without colour otherwise. About 1 coloured square in 100 can be '
+    + 'chance. Ranked at ' + w.minHours + ' h waited on '
     + w.minDays + ' shift days in the slot; under that, listed as too little time there yet.</p>'
     + '<div class="bar" id="wwBar">'
     + '<label>Day <select id="wwDay">' + w.dayOpts.map(function (o) {
@@ -4382,8 +4527,12 @@ function METHOD(r) {
     + 'card\'s area. Good: the card\'s $/hr at or over a fixed cutoff, the top 10/20/30/50% of all ' + r.whenwhere.offers
     + ' counted offers in the range (' + r.whenwhere.tops.map(function (t, i) {
       return 'top ' + t + '% ≥ ' + money(r.whenwhere.cuts[i]);
-    }).join(', ') + '), worked out once and held fixed across every slot and area. Good/hr with its exact (Garwood) '
-    + Math.round(r.whenwhere.conf * 100) + '% Poisson interval, the hours taken as exact. An area is ranked at '
+    }).join(', ') + '), worked out once and held fixed across every slot and area, and handed to the Strategy tab\'s '
+    + 'section 7 so both read one line. Good/hr with its exact (Garwood) '
+    + Math.round(r.whenwhere.conf * 100) + '% Poisson interval, the hours taken as exact, widened by phi: Pearson\'s '
+    + 'chi-square of each area\'s shift days against its own rate within each weekday and block, pooled, never under '
+    + '1 (trends.js dispersion, as the offers page\'s Trends grid); the hour strip by one phi over every weekday and '
+    + 'hour. A plain interval marked 4-13% of no-effect areas once the nights swing 40%; widened, about 1%. An area is ranked at '
     + r.whenwhere.minHours + ' h waited on ' + r.whenwhere.minDays + ' shift days in the slot (chosen: two days is the '
     + 'report\'s own floor, two hours a dozen card gaps at least) and marked only where its interval lies wholly '
     + 'above or below the slot\'s overall rate. A single hour takes the same cutoff, interval, marking and floor, '
@@ -4461,7 +4610,7 @@ var PAGE_CSS = [
   '.nav .tabs button{flex:none;min-height:36px;padding:4px 12px}',
   '@media (min-width:760px){.nav .tabs{flex-wrap:wrap;overflow:visible}}',
   // The gist of the old banner, under the nav on every tab but the Overview.
-  '.strip{font-size:12px;color:var(--ink2);margin:6px 0 0}.strip[hidden]{display:none}',
+  '.strip{font-size:12px;color:var(--ink2);margin:6px 0 0}.strip[hidden]{display:none}.strip.warn{color:var(--ink)}',
   '.bar{position:static;border-bottom:0;padding:8px 0 0}.bar[hidden]{display:none}',
   // A heading a link lands on clears the sticky nav.
   'h3,details.fold{scroll-margin-top:110px}',
@@ -5122,9 +5271,10 @@ var PAGE_JS = String(function page() {
     el.innerHTML = cells;
     var every = W.slots['any|any'];
     document.getElementById('wwStripNote').innerHTML = esc(wwName('wwDay')) + ', hour by hour, every area together: '
-      + 'good offers per hour waited. Coloured only where its 99% interval lies wholly above or below every slot '
-      + 'together (' + (every ? rt(every.all.r[ti]) : '—') + ' good/hr); grey with its offers (n) under ' + W.minHours
-      + ' h on ' + W.minDays + ' shift days. Press an hour to pick it.';
+      + 'good per hour waited. Coloured only where its 99% interval (widened by how the days swing) lies wholly above '
+      + 'or below every slot together (' + (every ? rt(every.all.r[ti]) : '—') + ' good/hr); grey with its offers (n) '
+      + 'under ' + W.minHours + ' h on ' + W.minDays + ' shift days. About 1 coloured square in 100 can be chance. '
+      + 'Press an hour to pick it.';
   }
   function drawWW() {
     var W = R.whenwhere, el = document.getElementById('wwTable');
@@ -5213,13 +5363,52 @@ async function getJson(u) {
   return { ok: res.ok, status: res.status, body: body };
 }
 
-async function loadJournal(base, sinceMs) {
-  var u = base.replace(/\/+$/, '') + '/api/journal?days=3650&limit=20000'
+/* The whole journal, a page of JOURNAL_PAGE at a time (the reporting
+ * review's R2). The server lists at most 20,000 offers, the newest, and the
+ * report read one answer, so past 20,000 it quietly described the newest
+ * 20,000 and said so only on stdout. It now asks again for the offers before
+ * the oldest it holds (`until`, the server's), keeping the first answer's
+ * takes, records and every figure the server worked over the whole window,
+ * until the server says nothing was cut. A server from before `until` sends
+ * the same page again: no new offer, so it stops, and the answer keeps
+ * `truncated`, which the page now says at its head. `getter` stands in for
+ * the network in the checks. */
+var JOURNAL_PAGE = 20000;
+var JOURNAL_PAGES_MAX = 50;
+async function loadJournal(base, sinceMs, getter) {
+  var get = getter || getJson;
+  var root = base.replace(/\/+$/, '') + '/api/journal?days=3650&limit=' + JOURNAL_PAGE
     + (sinceMs ? '&since=' + sinceMs : '');
-  var got = await getJson(u);
-  if (!got.ok || !got.body) throw new Error(u + ' answered ' + got.status);
-  if (got.body.unreadable) throw new Error('the server could not read its journal (' + got.body.unreadable + ')');
-  return got.body;
+  async function one(until) {
+    var u = root + (until ? '&until=' + until : '');
+    var got = await get(u);
+    if (!got.ok || !got.body) throw new Error(u + ' answered ' + got.status);
+    if (got.body.unreadable) throw new Error('the server could not read its journal (' + got.body.unreadable + ')');
+    return got.body;
+  }
+  var body = await one(null);
+  var offers = Array.isArray(body.offers) ? body.offers.slice() : [];
+  var seen = Object.create(null);
+  offers.forEach(function (o) { if (o && typeof o.id === 'string') seen[o.id] = true; });
+  var page = body, pages = 1;
+  while (page.truncated && pages < JOURNAL_PAGES_MAX) {
+    var oldest = Infinity;
+    (page.offers || []).forEach(function (o) { if (o && typeof o.at === 'number' && o.at < oldest) oldest = o.at; });
+    if (!isFinite(oldest)) break;
+    // One past the oldest, so a second offer at that same moment, cut off
+    // by the cap, comes too; the ids already held are skipped.
+    page = await one(oldest + 1);
+    pages += 1;
+    var fresh = (page.offers || []).filter(function (o) { return !(o && typeof o.id === 'string' && seen[o.id]); });
+    if (!fresh.length) break;
+    fresh.forEach(function (o) { if (o && typeof o.id === 'string') seen[o.id] = true; });
+    offers = fresh.concat(offers);
+  }
+  body.offers = offers;
+  body.pages = pages;
+  body.count = offers.length;
+  body.truncated = offers.length < (body.total || 0);
+  return body;
 }
 
 /* A Nominatim jsonv2 list as server.js's relay hands it to a page (nbxHits):
@@ -5569,7 +5758,9 @@ async function main(argv) {
   var offers = Array.isArray(body.offers) ? body.offers : [];
   if (body.truncated) {
     console.error('warning: the server sent ' + body.count + ' of ' + body.total
-                  + ' offers (its limit). Narrow the window with --since.');
+                  + ' offers (its limit, and it did not page: an older server?). Narrow the window with --since.');
+  } else if (body.pages > 1) {
+    console.log('journal: ' + body.count + ' offers, read in ' + body.pages + ' pages of ' + JOURNAL_PAGE);
   }
 
   // The relay asked: --relay, else the journal's own server.
@@ -5757,7 +5948,7 @@ async function main(argv) {
     // tab's miles where an order left one. An older server sends none.
     records: Array.isArray(body.records) ? body.records : [],
     presses: presses, region: region, streetsSaid: st.said, roadSaid: roadSaid, waitsFrom: waitsFrom,
-    source: { server: o.server, count: body.count, total: body.total,
+    source: { server: o.server, count: body.count, total: body.total, pages: body.pages || 1,
               truncated: !!body.truncated, since: o.since } });
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, 'index.html'), html(report));
@@ -5817,7 +6008,8 @@ module.exports = {
   SHORT_MILES: SHORT_MILES,
   DEAD_MAX_MIN: DEAD_MAX_MIN, SIZE_BANDS: SIZE_BANDS, TAKE_SLACK_MS: TAKE_SLACK_MS,
   GROUPS: GROUPS, TABS: TABS, blockChart: blockChart, fold: fold,
-  whenWhere: whenWhere, wwSlotOf: wwSlotOf, poissonCI: poissonCI, WW_BLOCKS: WW_BLOCKS, WW_TOPS: WW_TOPS,
+  bootCIPlain: bootCIPlain, loadJournal: loadJournal, JOURNAL_PAGE: JOURNAL_PAGE,
+  whenWhere: whenWhere, reportRulers: reportRulers, wwSlotOf: wwSlotOf, poissonCI: poissonCI, WW_BLOCKS: WW_BLOCKS, WW_TOPS: WW_TOPS,
   WW_TOP: WW_TOP, WW_MIN_HOURS: WW_MIN_HOURS, WW_MIN_DAYS: WW_MIN_DAYS, WW_CONF: WW_CONF,
 };
 

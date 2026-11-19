@@ -766,11 +766,20 @@ function requestKind(o, app) {
   return tag === true ? 'tagged' : 'untagged';
 }
 
+// A Took taken back, by the drop row's `by`: the offers page's untick puts
+// the order down `by: 'offers'`, and earnings.js's TAKEN_BACK names the
+// panel's untick beside it. The reporting review's F5: section 7 counted
+// such an order as taken while the fold, the Trends tab and the Money tab
+// all said it was not. Its hold still stands (the order was in the car
+// while it was), so the cards in it stay busy.
+var TAKEN_BACK = { untick: 1, offers: 1 };
+
 // Every offer id the record says was taken, and how: 'took' or 'phone'.
 function acceptedIds(list, orders, earnings) {
   var by = Object.create(null);
   (orders || []).forEach(function (o) {
     if (!o || typeof o.id !== 'string') return;
+    if (typeof o.by === 'string' && TAKEN_BACK[o.by]) return;
     if (num(o.tookAt) !== null) by[o.id] = 'took';
     else if ((o.how === 'phone' || o.phone === true) && !by[o.id]) by[o.id] = 'phone';
   });
@@ -818,12 +827,17 @@ function acceptedIds(list, orders, earnings) {
  *   marked passed (`accepted: false`, the offers page's Passed) and the ones
  *   with no answer at all.
  *
- *   THE WAIT. From a card let go, the minutes ONLINE until the next good card
- *   that was not busy (one a free driver could have had), and until the next
- *   take of any $/hr. Online is section 3's own runs (every card and every
- *   hold, joined across silences under BREAK_MIN): a stretch with the rig off
- *   between two runs is not waiting and adds nothing, while a run across 4am
- *   is one sitting and its minutes count straight through. A wait that ran
+ *   THE WAIT. From a card let go, the minutes ONLINE AND FREE until the next
+ *   good card that was not busy (one a free driver could have had), and
+ *   until the next take of any $/hr. Online is section 3's own runs (every
+ *   card and every hold, joined across silences under BREAK_MIN): a stretch
+ *   with the rig off between two runs is not waiting and adds nothing, while
+ *   a run across 4am is one sitting and its minutes count straight through.
+ *   FREE takes the holds out (the reporting review's S6): a wait that ran
+ *   through a trip the driver then took counted the trip's 38 minutes, when
+ *   no free good card could come, so the median read the trip as waiting.
+ *   The open waits (no good card after one, anywhere in the window) are
+ *   printed beside each median, not only under it. A wait that ran
  *   across an off stretch is counted (its online minutes) and said; one with
  *   no good card or take after it anywhere in the window is "still open" and
  *   in no median; a card let go outside any run (a lone card) starts none.
@@ -867,9 +881,15 @@ function waitSum(list) {
 
 /* `offers` section 3's rated offers; `byId` the folded row of each id; `how`
  * acceptedIds; `seenAll` every card seen ({id, seen}); `runs` the shift's
- * runs; `heldU` the merged holds; `top` the ruler's share. */
-function passedOf(offers, byId, how, seenAll, runs, heldU, top) {
-  var rul = T.ruler(offers.map(function (o) { return { ok: true, perHour: o.ph }; }), top);
+ * runs; `heldU` the merged holds; `top` the ruler's share; `given` (the
+ * places report's, the reporting review's F4) the ruler worked out once over
+ * the report's own offers, { cut, n, over }, so section 7 and When & where
+ * read one line — else T.ruler over these offers, as before. */
+function passedOf(offers, byId, how, seenAll, runs, heldU, top, given) {
+  var rul = given && typeof given.cut === 'number'
+    ? { top: T.TOPS.indexOf(Number(top)) >= 0 ? Number(top) : T.TOP_DEFAULT, cut: given.cut, n: given.n, over: given.over,
+        days: given.days, report: true }
+    : T.ruler(offers.map(function (o) { return { ok: true, perHour: o.ph }; }), top);
   var cut = rul.cut;
   function blank(name) {
     return { name: name, good: 0, taken: 0, phone: 0, busy: 0, passed: 0, declined: 0, unanswered: 0, free: 0,
@@ -901,13 +921,14 @@ function passedOf(offers, byId, how, seenAll, runs, heldU, top) {
     g.shareTaken = g.taken + g.passed ? r2(g.taken / (g.taken + g.passed)) : null;
   });
 
-  // The waits.
-  var clock = onlineClock(runs);
+  // The waits: minutes free off the runs less the holds; whether one
+  // crossed a stretch with the rig off off the runs themselves.
+  var clock = onlineClock(runs), freeClock = onlineClock(subtract(runs, heldU));
   var goodFree = good.filter(function (o, i) { return kinds[i] !== 'busy'; }).map(function (o) { return o.at; });
   var takes = seenAll.filter(function (x) { return typeof x.id === 'string' && how[x.id] === 'took'; })
     .map(function (x) { return x.seen; }).sort(function (a, b) { return a - b; });
   var toGood = [], toTake = [], blockGood = A.BLOCK_NAMES.map(function () { return []; });
-  var w = { origins: 0, lone: 0, openGood: 0, openTake: 0, acrossOff: 0 };
+  var w = { origins: 0, lone: 0, openGood: 0, openTake: 0, acrossOff: 0, throughHold: 0 };
   good.forEach(function (o, i) {
     if (kinds[i] !== 'passed') return;
     if (!within(runSpans, o.at)) { w.lone += 1; return; }
@@ -915,22 +936,24 @@ function passedOf(offers, byId, how, seenAll, runs, heldU, top) {
     var ng = nextAfter(goodFree, o.at);
     if (ng === null) w.openGood += 1;
     else {
-      var c = clock(o.at, ng);
-      toGood.push(c.min); blockGood[o.block].push(c.min);
+      var c = clock(o.at, ng), fm = freeClock(o.at, ng).min;
+      toGood.push(fm); blockGood[o.block].push(fm);
       if (c.acrossOff) w.acrossOff += 1;
+      if (fm < c.min - 1e-9) w.throughHold += 1;
     }
     var nt = nextAfter(takes, o.at);
     if (nt === null) w.openTake += 1;
-    else toTake.push(clock(o.at, nt).min);
+    else toTake.push(freeClock(o.at, nt).min);
   });
   // Each wait itself too, to the tenth of a minute, oldest card first: what
   // the medians are of, for a reader (or a check) that wants them.
   function tenths(xs) { return xs.map(function (v) { return Math.round(v * 10) / 10; }); }
   var waits = { good: waitSum(toGood), take: waitSum(toTake), counts: w,
                 minutes: { good: tenths(toGood), take: tenths(toTake) } };
+  waits.good.open = w.openGood; waits.take.open = w.openTake;
   byBlock.forEach(function (g, b) { g.wait = waitSum(blockGood[b]); });
   all.wait = waits.good;
-  return { top: rul.top, cut: cut, n: rul.n, over: rul.over, all: all,
+  return { top: rul.top, cut: cut, n: rul.n, over: rul.over, days: rul.days || null, report: !!rul.report, all: all,
            byBlock: byBlock.filter(function (g) { return g.good; }), waits: waits };
 }
 
@@ -1331,9 +1354,10 @@ function analyse(input) {
     var seenAll = dd.list.filter(function (x) { return x.seen !== null; })
       .map(function (x) { return { id: x.row ? x.row.id : null, seen: x.seen }; });
     var top = T.TOPS.indexOf(Number(inp.top)) >= 0 ? Number(inp.top) : PASSED_TOP;
-    passed = passedOf(offers, byId, how, seenAll, runs, heldU, top);
+    var given = inp.rulers && typeof inp.rulers === 'object' ? inp.rulers : null;
+    passed = passedOf(offers, byId, how, seenAll, runs, heldU, top, given && given[top]);
     passed.tops = T.TOPS.map(function (t) {
-      var p = t === top ? passed : passedOf(offers, byId, how, seenAll, runs, heldU, t);
+      var p = t === top ? passed : passedOf(offers, byId, how, seenAll, runs, heldU, t, given && given[t]);
       var g = p.all;
       return { top: t, cut: p.cut, good: g.good, taken: g.taken, phone: g.phone, busy: g.busy, passed: g.passed,
                declined: g.declined, unanswered: g.unanswered, shareTaken: g.shareTaken, waitGood: p.waits.good,
@@ -1553,18 +1577,23 @@ function uberSaid(n) {
  * n. Nothing in it says which card to take or let go. */
 function waitWords(wt, what) {
   if (!wt.n) return null;
-  if (wt.p50 === null) return what + ': too few to give a median (n=' + wt.n + ')';
-  return what + ' after a median ' + wt.p50 + ' min online (P75 ' + wt.p75 + ' min; n=' + wt.n + ')';
+  var open = wt.open ? ', ' + wt.open + ' still open' : '';
+  if (wt.p50 === null) return what + ': too few to give a median (n=' + wt.n + open + ')';
+  return what + ' after a median ' + wt.p50 + ' min online and free (P75 ' + wt.p75 + ' min; n=' + wt.n + open + ')';
 }
 function passedLines(p) {
   var g = p.all;
   if (p.cut === null || !g.good) return [];
-  var s = 'The good offers you passed on (the top ' + p.top + '% of this record\'s offers, ' + d2(p.cut)
-    + '/hr or more on the panel): ' + g.good + ' seen; ' + g.busy + ' came with an order already in the car';
+  // "Not taken on the record" (the reporting review's P1): most of what
+  // was "passed on" had no answer at all, so the heading no longer says the
+  // driver passed it, and no answer is its own count, before let go.
+  var s = 'Good offers not taken on the record (the top ' + p.top + '% of this '
+    + (p.report ? 'report\'s ' + p.n + ' offers' + (p.days ? ' over its ' + p.days + ' days' : '') : 'record\'s offers')
+    + ', ' + d2(p.cut) + '/hr or more on the panel): ' + g.good + ' seen; ' + g.busy + ' came with an order already in the car';
   var settled = g.taken + g.passed;
   s += '; of the ' + g.free + ' with none, you took ' + g.taken
-    + (settled ? ' (' + pct(g.taken / settled) + ' of those taken or let go)' : '') + ' and let ' + g.passed + ' go ('
-    + g.declined + ' marked passed, ' + g.unanswered + ' with no answer, which is not a take)'
+    + (settled ? ' (' + pct(g.taken / settled) + ' of those taken or let go)' : '') + ', ' + g.unanswered
+    + ' had no answer (which is not a take) and ' + g.declined + ' you marked passed: ' + g.passed + ' let go'
     + (g.phone ? '; ' + plural(g.phone, 'more was', 'more were') + ' accepted on the phone with no Took, by the '
       + 'earnings screen, and is counted as neither' : '') + '.';
   var bits = [waitWords(p.waits.good, 'the next good one came'), waitWords(p.waits.take, 'your next take came')]
@@ -1574,7 +1603,7 @@ function passedLines(p) {
     var w = p.waits.counts;
     out.push('When you let one go with nothing in the car, ' + bits.join(', and ') + '. Minutes the rig was off are '
              + 'not counted' + (w.acrossOff ? ' (' + plural(w.acrossOff, 'wait') + ' ran across a stretch it was off)' : '')
-             + (w.openGood ? '; ' + w.openGood + ' had no good one after it in this record' : '')
+             + (w.throughHold ? '; nor the minutes of a trip you took meanwhile' : '')
              + '. History, not advice: nothing on the rig reads it.');
   }
   return out;
@@ -1705,6 +1734,7 @@ module.exports = {
   RATIO_MIN_N: RATIO_MIN_N, CURVE_MIN_OUTINGS: CURVE_MIN_OUTINGS, BOOT_MIN_OUTINGS: BOOT_MIN_OUTINGS, BOOTS: BOOTS,
   cardVsPaid: cardVsPaid, paidLines: paidLines, PAID_MIN_N: PAID_MIN_N,
   passedOf: passedOf, passedLines: passedLines, onlineClock: onlineClock, PASSED_TOP: PASSED_TOP,
+  acceptedIds: acceptedIds, TAKEN_BACK: TAKEN_BACK,
   goldLines: goldLines, pathAhead: pathAhead, requestKind: requestKind, uberFigures: uberFigures, goalOf: goalOf,
   GOLD_GOAL: GOLD_GOAL, GOLD_WINDOW: GOLD_WINDOW, GOLD_LAST: GOLD_LAST, GOLD_AHEAD: GOLD_AHEAD,
   PLATEAU: PLATEAU, HOLD_MAX_MIN: HOLD_MAX_MIN, TOO_SOON: TOO_SOON, BANDS: BANDS, RATE_BANDS: RATE_BANDS

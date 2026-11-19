@@ -1310,8 +1310,10 @@ function nbx() {
      && pageW.indexOf('<button type="button" data-tab="strategy">Strategy</button>')
         < pageW.indexOf('<button type="button" data-tab="targets">'));
   var sOrders = P.strategyOrders(wTaken, [], null);
+  // The report hands strategy.js its rulers, worked out once (the reporting
+  // review's F4); the same call here, so the one computation is the same.
   var sOwn = S.analyse({ offers: wRows, orders: sOrders, areaOf: function (o) { return MV.townFor(o, A.area); },
-                         appOf: P.appOf, target: 25 });
+                         appOf: P.appOf, target: 25, rulers: P.reportRulers(wRows).byTop });
   eq('...its figures are strategy.js\'s over the report\'s offers and takes (one computation)',
      [repW.strategy.curve, repW.strategy.seen, repW.strategy.actual, repW.strategy.lines],
      [sOwn.curve, sOwn.seen, sOwn.actual, sOwn.lines]);
@@ -1517,6 +1519,19 @@ function nbx() {
   var pW = repW.strategy.passed;
   eq('the good offers passed on: strategy.js\'s, over the report\'s offers and takes (one computation)',
      [pW.cut, pW.all, pW.waits], [sOwn.passed.cut, sOwn.passed.all, sOwn.passed.waits]);
+  eq('F4: section 7 and When & where read one ruler, worked out once over the report\'s offers, said over its days',
+     [repW.strategy.passed.tops.map(function (t) { return t.cut; }), repW.whenwhere.cuts, pW.report, pW.n, pW.days,
+      repW.whenwhere.offers], [repW.whenwhere.cuts, P.reportRulers(wRows).cuts, true, P.reportRulers(wRows).n, repW.outings,
+      P.reportRulers(wRows).n]);
+  ok('P1: the heading is "Good offers not taken on the record", and no answer is its own count ahead of let go',
+     /<h3 id="s-passed">Good offers not taken on the record<\/h3>/.test(stratW)
+     && pW.byBlock.every(function (g) { return stratW.indexOf(' · no answer ' + g.unanswered + ' · let go ' + g.passed) >= 0; })
+     && stratW.indexOf('<th>no answer</th><th>let go</th>') >= 0);
+  eq('F5: strategyOrders carries the drop row\'s `by`, so section 7 can leave a Took taken back out of what was taken',
+     P.strategyOrders([{ id: 'tb', tookAt: at(3, 18), endedAt: at(3, 18, 5), by: 'offers' }], [], null).map(function (o) {
+       return o.by; }), ['offers']);
+  ok('R3: the page\'s data carries no list of every wait (nothing reads it), the analysis still does',
+     Array.isArray(pW.waits.minutes.good) && pageW.indexOf('"minutes":{"good"') < 0);
   ok('...drawn under the curve\'s points and ahead of the slices, a bar line per block with its counts',
      stratW.indexOf('id="s-points"') < stratW.indexOf('id="s-passed"')
      && stratW.indexOf('id="s-passed"') < stratW.indexOf('id="s-slices"')
@@ -2049,6 +2064,23 @@ function nbx() {
      [wn.perHour, wn.good, wn.stays, wn.staysGood, wn.toGood, ws.good, ws.staysGood, ws.toGood],
      [25, 1, 4, 1, 0, 0, 0, null]);
   ok('[waited] ...each with its median $/hr and an interval', wn.median > 28 && wn.medianCi && ws.median < 19);
+  // R1: the median bootstrap's typed-array path gives what the plain one gave, seed for seed.
+  (function () {
+    var r9 = (function (seed) { var x = seed >>> 0; return function () { x = (Math.imul(1664525, x) + 1013904223) >>> 0; return x / 4294967296; }; }(41));
+    var same = true;
+    [2, 3, 10, 11, 57, 400].forEach(function (n) {
+      var v = []; for (var i = 0; i < n; i++) v.push(Math.round(r9() * 4000) / 100 + (i % 7 === 0 ? 0 : 0.005));
+      [1, 77, 123456].forEach(function (sd) {
+        if (JSON.stringify(P.bootCI(v, sd)) !== JSON.stringify(P.bootCIPlain(v, sd))) same = false;
+      });
+    });
+    ok('[R1] the median bootstrap\'s typed-array path gives the plain path\'s interval for the same seed (6 sizes x 3 seeds)', same);
+  }());
+  ok('[waited] F8: the stays\' columns say "at target" (the card\'s own target), not "good", which is When & where\'s cut',
+     (function (t) {
+       var names = t.cols.map(function (c) { return c.h; }).join('|');
+       return /min to first card at target/.test(names) && /stays with a card at target/.test(names) && !/first good/.test(names);
+     }(P.waitedTable(P.waitingLine(wRowsA, wTakenA, wTown, {}), 'town', function (x) { return x; }, 'town'))));
   var wPage = P.html(repWA);
   ok('[waited] the page has the tab and says it is offered, not earned, and dispatched near the car',
      /<section data-tab="waited">/.test(wPage) && /Offered, not earned/.test(wPage)
@@ -2200,6 +2232,34 @@ function nbx() {
   eq('[whenwhere] by town, the cell with no town is left out of the areas but not of the slot\'s line',
      [fri.town.ranked.map(function (s0) { return s0.a; }), fri.all.n], [['Northfen', 'Saltmere'], 270]);
 
+  /* Widened by the nights (the reporting review's S2). Four Fridays, an hour
+   * a night in Northfen's cell (28, 2, 28 and 2 of its 30 cards at $40) and
+   * an hour in Saltmere's (3 of 30 each night; its last card a break): 60
+   * good in 4 h is 15/hr against the slot's 9.15, and the plain 99% interval (10.4-20.8) would mark
+   * it above; the nights swing far past chance (phi 7.5 over the two areas'
+   * nights), so the widened one does not. */
+  var swRows = [];
+  [6, 13, 20, 27].forEach(function (dd, ni) {
+    for (var q = 0; q < 30; q++) {
+      swRows.push(waitCard('sx' + dd + '-' + q, at(dd, 20, q * 2), cellX, q < (ni % 2 ? 2 : 28) ? 40 : 15));
+      swRows.push(waitCard('sy' + dd + '-' + q, at(dd, 21, q * 2), cellY, q < 3 ? 40 : 15));
+    }
+  });
+  var repSW = P.analyse(swRows, [], [], function () { return null; }, { now: 0, cellTown: wTown });
+  var swFri = repSW.whenwhere.slots['5|4'];
+  var swx = swFri.cell.ranked.filter(function (s0) { return s0.a === P.cellOf(cellX).id; })[0];
+  eq('[whenwhere] S2: 60 good in 4 h against the slot\'s 9.15/hr, plainly above (99% from 10.4), is not marked once the '
+     + 'nights\' swing is in (phi ' + repSW.whenwhere.phi.cell[1] + ')',
+     [swx.g[1], swx.h, swx.r[1], swFri.all.r[1], P.poissonCI(60, 0.99)[0] / 4 > swFri.all.r[1],
+      repSW.whenwhere.phi.cell[1] > 5, swx.mk[1], swx.lo[1] < swFri.all.r[1]], [60, 4, 15, 9.15, true, true, null, true]);
+
+  var swPage = P.html(repSW);
+  ok('[whenwhere] F3/S7: the page names its rate good per hour waited (gaps capped, none while carrying), says it is not '
+     + 'Trends\' good per hour online, says the interval is widened, and that 1 coloured square in 100 can be chance',
+     /good per hour waited \(each gap capped at \d+ min, none while carrying\)/.test(swPage)
+     && /Trends "good per hour online"/.test(swPage) && /widened by how much more an area/.test(swPage)
+     && /About 1 coloured square in 100 can be chance/.test(swPage));
+
   /* The floor, over Wednesday nights. Northfen's cell one night only, 11pm to
    * 1:30am: 2.5 h, but ONE shift day (two calendar dates). Saltmere's cell
    * on two nights, 11 to 11:55pm: 1.83 h. The town-less cell on two nights,
@@ -2224,6 +2284,10 @@ function nbx() {
   eq('[whenwhere] the hour: 3am and 3:59am Saturday are Friday\'s last hour; 4am is Saturday\'s first; 8:30pm is the 17th',
      [hourAt(14, 3, 0), hourAt(14, 3, 59), hourAt(14, 4, 0), hourAt(13, 20, 30), hourAt(14, 0, 0)],
      [[5, 23], [5, 23], [6, 0], [5, 16], [5, 20]]);
+  eq('[whenwhere] F7: on the spring-forward Sunday (14 Mar 2027) 5:30, 6:30 and 7:30am are the 5, 6 and 7am hours, '
+     + 'as Trends has them, and Sunday\'s',
+     [5, 6, 7].map(function (h) { var s0 = P.wwSlotOf(new Date(2027, 2, 14, h, 30).getTime()); return [s0.day, s0.hour]; }),
+     [[0, 1], [0, 2], [0, 3]]);
   eq('[whenwhere] ...named in the driver day\'s order, 4am first and 3am last',
      [WW.hourOpts.length, WW.hours[0], WW.hours[7], WW.hours[19], WW.hours[20], WW.hours[23]],
      [24, '4–5am', '11am–12pm', '11pm–12am', '12–1am', '3–4am']);
@@ -2293,6 +2357,33 @@ function nbx() {
   // a coordinate would carry five places)
   ok('[privacy] ...and holds no coordinate, pickup, dropoff or id of a card',
      !/"(lat|lon|pickup|dropoff|id|at|text)"/.test(wwJson) && !/\d\.\d{3,}/.test(wwJson) && !/"e[xyzth]\d/.test(wwJson));
+
+  /* --- the whole journal, page by page (the reporting review's R2) --- */
+  // A fake server listing at most 20, the newest, before `until`; two offers
+  // share the moment the first page is cut at. And one from before `until`,
+  // which sends the same page whatever it is asked.
+  var jr = [];
+  for (var ji = 1; ji <= 45; ji++) jr.push({ id: 'j' + ji, at: 1000 * (ji === 26 ? 25 : ji) });
+  function fakeServer(knowsUntil) {
+    return async function (u) {
+      var m = /[?&]until=(\d+)/.exec(u), until = knowsUntil && m ? Number(m[1]) : 0;
+      var win = jr.filter(function (o) { return !until || o.at < until; });
+      return { ok: true, status: 200, body: { offers: win.slice(-20), total: win.length, count: Math.min(20, win.length),
+                                              truncated: win.length > 20, taken: [{ id: 'first page only' }] } };
+    };
+  }
+  var jAll = await P.loadJournal('http://fake', null, fakeServer(true));
+  eq('[R2] past the server\'s limit the report pages back with `until` and reads every offer once, oldest first',
+     [jAll.offers.length, jAll.pages, jAll.truncated, jAll.offers[0].id, jAll.offers[44].id,
+      jAll.offers.filter(function (o, i, a) { return a.indexOf(o) !== i; }).length, jAll.taken.length],
+     [45, 3, false, 'j1', 'j45', 0, 1]);
+  var jOld = await P.loadJournal('http://fake', null, fakeServer(false));
+  eq('[R2] ...a server that cannot page sends the same page again: it stops, and says the read is cut',
+     [jOld.offers.length, jOld.pages, jOld.truncated, jOld.total], [20, 2, true, 45]);
+  var capRep = Object.assign({}, repSW, { source: { truncated: true, count: 20, total: 45 } });
+  ok('[R2] ...and the page says so at its head, not only on stdout',
+     /id="capped"><b>Not the whole journal:<\/b> the server sent 20 of 45 offers/.test(P.html(capRep))
+     && P.html(repSW).indexOf('id="capped"') < 0);
 
   console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
                    : '\nAll ' + pass + ' places-report checks passed');

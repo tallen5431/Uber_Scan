@@ -15509,6 +15509,11 @@ function route(req, res) {
     // figures, and only the browser knows where the driver is and therefore
     // when their day began.
     var since = clampNumber(q.since, 0, 4102444800000, 0);
+    // ...and an end, for a reader that must page past `limit` (the places
+    // report, the reporting review's R2): only the offers LISTED stop before
+    // `until`; the window, its takes, records and every figure over it are
+    // the same as without it, so a second page is only older offers.
+    var until = clampNumber(q.until, 0, 4102444800000, 0);
     var withHidden = q.hidden === '1';
     return readJournal(function (rows, readErr, torn) {
       // This one may degrade — a driver looking at the offers page is better
@@ -15570,15 +15575,16 @@ function route(req, res) {
       if (!withHidden) {
         offers = offers.filter(function (r) { return !r.hidden; });
       }
+      // The whole window, before the cap: the per-mile tables and the orders
+      // taken describe every offer in it, not the newest `limit` of them, and
+      // an order whose card fell under the cap was missing from `taken`.
+      var windowed = offers;
+      if (until) offers = offers.filter(function (r) { return (r.at || 0) < until; });
       // How many there really are in this window, kept before the cap. Without
       // it the page cannot tell a window of 5000 offers from a window of
       // 60000 truncated to 5000 — and it was labelling the second one "All",
       // computing the median and the $/hr ladder over an unannounced subset.
       var total = offers.length;
-      // The whole window, before the cap: the per-mile tables and the orders
-      // taken describe every offer in it, not the newest `limit` of them, and
-      // an order whose card fell under the cap was missing from `taken`.
-      var windowed = offers;
       if (limit && offers.length > limit) offers = offers.slice(-limit);
       if (pathname === '/api/journal.csv') {
         // A journal that could not be READ is refused here rather than
@@ -15720,8 +15726,19 @@ function route(req, res) {
                     { 'Content-Type': 'application/json; charset=utf-8' });
       }
       var tfloor = tsince || (tdays > 0 ? Date.now() - tdays * 86400000 : 0);
-      send(res, 200, JSON.stringify(trendsOut(rows, tfloor, tdays)),
-           { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      var tbody = JSON.stringify(trendsOut(rows, tfloor, tdays));
+      var thead = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store',
+                    'Vary': 'Accept-Encoding' };
+      // Gzipped where the browser says it can take it (the reporting
+      // review's T9): the answer is seven columns of digits, 1.3 MB for a 3x
+      // record, and the phone on the rig's Wi-Fi or a VPN waited on it.
+      // Level 1: the columns compress about fivefold at the fastest level,
+      // and the Pi's CPU is the scarcer thing (lite never reaches here).
+      if (/\bgzip\b/.test(String(req.headers['accept-encoding'] || '')) && tbody.length > 1024) {
+        thead['Content-Encoding'] = 'gzip';
+        return send(res, 200, require('zlib').gzipSync(tbody, { level: 1 }), thead);
+      }
+      send(res, 200, tbody, thead);
     });
   }
 
@@ -16605,7 +16622,7 @@ function earningsRoute(req, res) {
             })[0];
             if (!c) return reply(400, { ok: false, error: 'no such order on that day' });
             match = { status: 'picked', by: 'you', offer: c.offer, order: c.order, offeredAt: c.offeredAt,
-                      tookAt: c.tookAt, endedAt: c.endedAt, how: c.how, cardPay: c.pay, source: c.source,
+                      tookAt: c.tookAt, endedAt: c.endedAt, how: c.how, cardPay: Earnings.cardPayOf(c), source: c.source,
                       said: c.source === 'offer' ? Earnings.SAID_PHONE : null,
                       cardMinutes: c.cardMinutes, cardMiles: c.cardMiles,
                       rigMinutes: typeof c.minutes === 'number' ? Math.round(c.minutes * 100) / 100 : null,
