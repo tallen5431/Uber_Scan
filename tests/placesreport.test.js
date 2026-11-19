@@ -583,6 +583,18 @@ function nbx() {
   ok('the page builds, with its banner', /Offered, not earned/.test(page)
      && /ranks only places near where you already wait/.test(page));
   ok('...Leaflet pinned at map.html\'s version', /unpkg\.com\/leaflet@1\.9\.4\/dist\/leaflet\.js/.test(page));
+  // ...and by its digests, map-view.js's own (needLeaflet's): loaded bare, a
+  // CDN serving anything else ran its script in a page holding the record.
+  var MVd = require('../map-view.js').LEAFLET_SRI;
+  eq('...its stylesheet and script carry map-view.js\'s digests, as CORS fetches',
+     [(page.match(/<link rel="stylesheet" href="https:\/\/unpkg\.com\/leaflet[^>]*>/) || [''])[0],
+      (page.match(/<script src="https:\/\/unpkg\.com\/leaflet[^>]*>/) || [''])[0]],
+     ['<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="'
+        + MVd['https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'] + '" crossorigin="anonymous">',
+      '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="'
+        + MVd['https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'] + '" crossorigin="anonymous">']);
+  ok('...which are sha256 digests, not empty', /^sha256-[A-Za-z0-9+\/]{43}=$/.test(MVd['https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'])
+     && /^sha256-[A-Za-z0-9+\/]{43}=$/.test(MVd['https://unpkg.com/leaflet@1.9.4/dist/leaflet.js']));
   ok('...OSM\'s tiles, as map.html draws them', /tile\.openstreetmap\.org\/\{z\}\/\{x\}\/\{y\}\.png/.test(page));
   ok('...and the hour filter', /id="when"/.test(page));
   ok('no dropoff text is on the page', page.indexOf('Ombre') < 0 && page.indexOf('742') < 0);
@@ -737,9 +749,11 @@ function nbx() {
   var page6 = P.html(rep6);
   ok('...said on the page to be for reading, not an accept rule', /\$\/mi is shown for reading, not as an accept rule/.test(page6));
 
-  // The page and its CSVs hold no dropoff. The page's "made" is the clock
-  // (now: 0 is no time given), and one run in about ninety its milliseconds
-  // held "742" and failed this check with no dropoff anywhere: left out.
+  // The page and its CSVs hold no dropoff. The page's "made" was the clock
+  // while now: 0 read as no time given, and one run in about ninety its
+  // milliseconds held "742" and failed this check with no dropoff anywhere:
+  // left out still, though now: 0 is the epoch now.
+  eq('now: 0 is a time given, not the clock', rep6.made, 0);
   var page6Held = page6.replace(/"made":\d+/g, '"made":0');
   ok('the second pass\'s page holds no dropoff text', page6Held.indexOf('Ombre') < 0 && page6Held.indexOf('742') < 0);
   ok('...nor a drop position', page6.indexOf(String(dropFix.lat).slice(0, 7)) < 0 && page6.indexOf('12.712') < 0);
@@ -2643,7 +2657,12 @@ function nbx() {
         P.DESC_MIN_N === TR.DAY_MIN, P.MIN_N === TR.FLOOR],
        [true, true, true, true, true]);
     var dup = [];
-    ['trends.js', 'earnings.js', 'tools/strategy.js', 'tools/places_report.js', 'journal.html'].forEach(function (f) {
+    // The report's own files since it was cut into tools/report/ (19 Nov 2026),
+    // or this would ask the one that keeps only analyse.
+    var cut = fs.readdirSync(path.join(__dirname, '..', 'tools', 'report'))
+      .filter(function (f) { return /\.js$/.test(f); }).map(function (f) { return 'tools/report/' + f; });
+    ok('[one copy] the report\'s cut files are all asked (' + cut.length + ')', cut.length >= 8);
+    ['trends.js', 'earnings.js', 'tools/strategy.js', 'tools/places_report.js', 'journal.html'].concat(cut).forEach(function (f) {
       var t = src(f);
       // A sorted list read between two indices; the bootstrap's in-place qOf
       // (two selections on a resample, then a + (h - lo) * (b - a)) is not one.
@@ -2653,6 +2672,11 @@ function nbx() {
       if (/var (DIST_MIN_N|DROP_MIN_N|MIN_N) = \d/.test(t)) dup.push(f + ' writes its own floor');
     });
     eq('[one copy] ...and no file carries its own copy of them', dup, []);
+    // The last two copies of advice.js's median, identical to it line for line.
+    ok('[one copy] the offers page\'s medianOf and tools/measure_places.js\'s median are advice.js\'s',
+       /var medianOf = Advice\.median;/.test(src('journal.html')) && !/function medianOf\b/.test(src('journal.html'))
+       && /var median = A\.median;/.test(src('tools/measure_places.js'))
+       && !/function median\b/.test(src('tools/measure_places.js')));
     // The offers page adds earnings.js only when the Money tab asks, and it
     // now reads root.Advice: advice.js must be a plain script in the head.
     var jh = fs.readFileSync(path.join(__dirname, '..', 'journal.html'), 'utf8');

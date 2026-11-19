@@ -82,7 +82,17 @@ function offer(x) {
      mr.filter(function (r) { return r.unread && r.ok; }).length, 0);
   eq('the data-quality counts: suspect for another reason, pay re-read, pay unread (not overlapping)',
      day.quality, { suspect: 1, corrected: 1, unread: 2 });
-  eq('"good" is the row\'s own target', mr.filter(function (r) { return r.good; }).length, 1);
+  // Round one's per-row "good" (over its own target) is no longer packed:
+  // nothing read it once the ruler counted good. Its bit stays unused and the
+  // others keep their places, so an answer packed before reads the same.
+  var packed = T.pack(T.rowsOf(mix));
+  eq('round one\'s per-row "good" is gone: no row carries it, bit 2 is never set, the bits above it unmoved',
+     [mr.filter(function (r) { return 'good' in r; }).length,
+      packed.cols.flags.filter(function (f) { return f & 2; }).length, T.F_TAKEN, T.F_REOFFER,
+      T.unpack({ cols: { t: [at(2, 19, 0) / 1000], app: [1], pay: [10], perHour: [20], minutes: [30], miles: [5],
+                         flags: [1 | 2 | 4 | 128 | 256] } })
+        .map(function (r) { return [r.ok, r.suspect, r.taken, r.reoffered, 'good' in r]; })],
+     [0, 0, 128, 256, [[true, true, true, true, false]]]);
   eq('the app share counts offers, and an offer whose app is not known says so',
      T.periods(T.readRows(T.rowsOf([offer({ id: 'u' }), offer({ id: 'd', app: 'doordash' }),
                                     offer({ id: 'n', app: null })])), 'day')[0].share,

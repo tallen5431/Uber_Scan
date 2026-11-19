@@ -704,12 +704,16 @@
                padding: 4px 12px; min-height: 34px;
                background: var(--panel-2); color: var(--text);
                border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+  /* The map's ground is held by the id: leaflet.css arrives after this sheet
+     (MV.needLeaflet), and its own `.leaflet-container` grey beat the plain
+     `.leaflet-container` rule that stood below on order, so that rule never
+     coloured anything and is gone. map.html's `#map.leaflet-container` is
+     the same fix. */
   #sheetMap { min-height: 0; background: var(--panel-2); }
   #sheetFoot { padding: 7px 12px; border-top: 1px solid var(--line);
                font-size: 12px; color: var(--muted);
                display: flex; gap: 8px; align-items: center; }
   #sheetNote { flex: 1 1 auto; min-width: 0; }
-  .leaflet-container { background: var(--panel-2); }
   /* The sheet covers the bottom bar and the last few rows of the log. Given
      back as padding while it is open, so the last offer in the list can still
      be reached — a list whose end is permanently under a panel is a list that
@@ -3773,12 +3777,9 @@
      what. History only: no verdict, target or rate on the panel moves. */
   var REAL_BANDS = [[0, 20, '0-20 min'], [20, 30, '20-30 min'], [30, 45, '30-45 min'],
                     [45, Infinity, '45+ min']];
-  function medianOf(xs) {
-    var s = xs.slice().sort(function (a, b) { return a - b; });
-    if (!s.length) return null;
-    var m = Math.floor(s.length / 2);
-    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-  }
+  // advice.js's median, the one the reports share: this page carried its own
+  // copy, the same sort, the same middle and (a + b) / 2, null for none.
+  var medianOf = Advice.median;
   function showReal(taken) {
     var runs = (taken || []).filter(function (t) {
       return t && t.by !== 'replaced' && t.by !== 'expiry' && typeof t.pay === 'number'

@@ -51,8 +51,9 @@
  * same line and an old day compares fairly with a new one. Round one counted
  * each row against its own target at the time; the targets moved over the
  * weeks, so a day under a $22 target and one under $25 were not counted alike.
- * The flag (F_GOOD) is still packed, and nothing reads it now: the daily
- * CSV and goodPerHour fell back to it with no ruler, and no longer do.
+ * Round one's per-row flag (F_GOOD) is no longer packed: the daily CSV and
+ * goodPerHour fell back to it with no ruler, then stopped, and nothing read
+ * it after (its bit stays unused; see the flag bits).
  * THE RULER IS FOR READING ONLY: it is not the target, it never reaches the
  * verdict, the panel, the rig, scan_pi or any rule, and it is chosen per
  * viewer in the page's own storage. A percentile of your own history used as
@@ -339,7 +340,11 @@
   // Flag bits on a packed row.
   // F_TAKEN: the driver's own ✓ only (see the header); a bit, not a column,
   // so the answer grows by nothing and carries no more than it did.
-  var F_OK = 1, F_GOOD = 2, F_SUSPECT = 4, F_CORRECTED = 8, F_UNREAD = 16, F_BOOST_KNOWN = 32, F_BOOST = 64,
+  // 2 was F_GOOD, round one's "over its own target at the time", which
+  // nothing read once the ruler took over (the header); it is left unused
+  // rather than the bits above it moved down, so a packed answer from before
+  // still reads the same.
+  var F_OK = 1, F_SUSPECT = 4, F_CORRECTED = 8, F_UNREAD = 16, F_BOOST_KNOWN = 32, F_BOOST = 64,
       F_TAKEN = 128, F_REOFFER = 256;
 
   function num(v) { return typeof v === 'number' && isFinite(v) ? v : null; }
@@ -377,7 +382,6 @@
       var ok = !unread && !!(Advice && Advice.trustworthy ? Advice.trustworthy(o) : !o.suspect)
         && num(o.pay) !== null;
       var perHour = ok ? num(o.perHour) : null;
-      var target = num(o.target);
       var known = Object.prototype.hasOwnProperty.call(o, 'boost');
       out.push({
         t: t, app: appCode(o.app),
@@ -386,7 +390,6 @@
         minutes: ok ? num(o.minutes) : null,
         miles: ok && !o.milesUncertain ? num(o.miles) : null,
         flags: (ok ? F_OK : 0)
-          | (ok && perHour !== null && target !== null && perHour >= target ? F_GOOD : 0)
           | (o.suspect ? F_SUSPECT : 0)
           | (c && typeof c.to === 'number' ? F_CORRECTED : 0)
           | (unread ? F_UNREAD : 0)
@@ -468,7 +471,7 @@
         t: ms, app: c.app[i] === 1 ? 'uber' : c.app[i] === 2 ? 'doordash' : null,
         pay: pay, perHour: c.perHour[i], minutes: c.minutes[i], miles: mi,
         perMile: pay !== null && mi !== null && mi >= 0.1 ? pay / mi : null,
-        ok: !!(f & F_OK), good: !!(f & F_GOOD), suspect: !!(f & F_SUSPECT),
+        ok: !!(f & F_OK), suspect: !!(f & F_SUSPECT),
         corrected: !!(f & F_CORRECTED), unread: !!(f & F_UNREAD),
         boost: f & F_BOOST_KNOWN ? !!(f & F_BOOST) : null, taken: !!(f & F_TAKEN),
         reoffered: !!(f & F_REOFFER),

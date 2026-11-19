@@ -1,0 +1,141 @@
+/* The places report's style (tools/report/render.js reads it into the
+ * page). The comments are for this file's reader and are left out of the
+ * page, which is the same to the byte as when this was a list of strings
+ * in tools/places_report.js. A comment starts a line and ends one. */
+:root{--bg:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;--grid:#e1e0d9;
+--axis:#c3c2b7;--up:#2a78d6;--down:#e34948;--grey:#a9a79f;--warn:#fff4d6;--warnline:#e8c25a;color-scheme:light}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0d0d0d;--surface:#1a1a19;
+--ink:#f0efec;--ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;--up:#3987e5;--down:#e66767;
+--grey:#6b6a64;--warn:#2a2416;--warnline:#8a6d1f;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0d0d0d;--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#898781;
+--grid:#2c2c2a;--axis:#383835;--up:#3987e5;--down:#e66767;--grey:#6b6a64;--warn:#2a2416;--warnline:#8a6d1f;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
+font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:1000px;margin:0 auto;padding:16px}h1{font-size:24px;margin:8px 0 4px}
+h2{font-size:18px;margin:28px 0 6px}.sub,.note{color:var(--ink2);font-size:13px}
+.banner{background:var(--warn);border-left:4px solid var(--warnline);padding:4px 14px;border-radius:6px}
+.banner p{margin:8px 0}.bar{position:sticky;top:0;background:var(--bg);padding:10px 0;z-index:500;
+display:flex;gap:12px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--grid)}
+.bar label{max-width:100%}select{max-width:100%;font:inherit;padding:4px 6px;background:var(--surface);color:var(--ink);border:1px solid var(--axis);border-radius:6px}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+.tw{overflow-x:auto;margin:8px 0}th,td{text-align:right;padding:4px 8px;border-bottom:1px solid var(--grid);white-space:nowrap}
+th:first-child,td:first-child{text-align:left;white-space:normal;min-width:140px}th{color:var(--ink2);font-weight:600}
+.plot{background:var(--surface);border:1px solid var(--grid);border-radius:8px;padding:8px;overflow-x:auto}
+.plot svg{display:block;width:100%;min-width:520px;height:auto}.plot text{fill:var(--ink2);font-size:12px}
+.thin{color:var(--ink2);font-size:13px}#map{height:460px;border-radius:8px;border:1px solid var(--grid);background:var(--surface)}
+.k{font-size:16px}.k.up{color:var(--up)}.k.down{color:var(--down)}.k.grey{color:var(--grey)}
+.tag{display:inline-block;padding:0 6px;border-radius:4px;font-size:12px}.tag.up{color:#fff;background:var(--up)}
+.tag.down{color:#fff;background:var(--down)}.tag.grey{color:var(--ink2);border:1px solid var(--grid)}
+#tip{position:fixed;pointer-events:none;background:var(--surface);color:var(--ink);border:1px solid var(--axis);
+border-radius:6px;padding:6px 8px;font-size:12px;max-width:300px;z-index:1100;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.method li{margin:4px 0;color:var(--ink2);font-size:13px}code{font-size:12px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 4px}.tabs button{font:inherit;font-size:13px;
+padding:4px 10px;border-radius:14px;border:1px solid var(--axis);background:var(--surface);color:var(--ink);cursor:pointer}
+.tabs button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+section[hidden]{display:none}h3{font-size:15px;margin:18px 0 4px}
+.exp{font-size:12px;color:var(--ink2);border:1px dashed var(--axis);border-radius:6px;padding:4px 8px;display:inline-block}
+th.sortable{cursor:pointer;user-select:none}th.sortable:after{content:" \2195";color:var(--muted)}
+th[aria-sort="ascending"]:after{content:" \2191"}th[aria-sort="descending"]:after{content:" \2193"}
+.spark{display:block;width:140px;height:30px}.spark .z{stroke:var(--axis);stroke-dasharray:3 3}
+.spark polyline{fill:none;stroke:var(--ink2);stroke-width:1.5}.spark circle{fill:var(--ink2)}
+tr.br td{color:var(--ink2);border-bottom-style:dashed}tr.br td:first-child{padding-left:20px}
+table.groups th:first-child,table.groups td:first-child{position:sticky;left:0;z-index:1;background:var(--bg);
+min-width:150px;max-width:190px}
+.lines{padding-left:20px}.lines li{margin:6px 0}
+.xb{font:inherit;font-size:12px;padding:0 6px;margin-right:4px;border-radius:4px;border:1px solid var(--axis);
+background:var(--surface);color:var(--ink);cursor:pointer}
+/* The layout of 7 Nov 2026 (html()'s nav, OVERVIEW_SECTION, fold()), from
+ * here down, overriding what is above where the two meet. */
+/* Wider on a laptop: the tables are wide and 1000px left half a 1280 screen empty. */
+main{max-width:1120px}.head h1{margin-bottom:2px}
+/* The nav: the one part that stays put. Groups on one row, the chosen
+   group's tabs under it, sideways-scrolling on a phone and wrapping on a
+   laptop. Above Leaflet's panes and controls (400-1000), under the tooltip. */
+.nav{position:sticky;top:0;z-index:1050;background:var(--bg);margin:8px -16px 0;padding:0 16px;
+border-bottom:1px solid var(--grid)}
+.groups{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}.groups::-webkit-scrollbar{display:none}
+.groups button{flex:none;font:inherit;font-size:14px;font-weight:600;min-height:44px;padding:8px 10px;border:0;
+border-bottom:3px solid transparent;background:none;color:var(--ink2);cursor:pointer}
+.groups button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--up)}
+/* On a phone the four share the width equally and a long name wraps onto
+   two lines: measured at 375px, the four in one line need 384px of a 343px
+   column, and a group scrolled off the edge is a group nobody finds. */
+@media (max-width:480px){.groups{display:grid;grid-template-columns:repeat(4,1fr)}
+.groups button{font-size:13px;padding:6px 2px;line-height:1.15;white-space:normal}}
+.nav .tabs{position:relative;flex-wrap:nowrap;overflow-x:auto;margin:0;padding:6px 0 8px;scrollbar-width:thin}
+.nav .tabs[hidden]{display:none}.tg{display:contents}.tg[hidden]{display:none}
+.nav .tabs button{flex:none;min-height:36px;padding:4px 12px}
+@media (min-width:760px){.nav .tabs{flex-wrap:wrap;overflow:visible}}
+/* The gist of the old banner, under the nav on every tab but the Overview. */
+.strip{font-size:12px;color:var(--ink2);margin:6px 0 0}.strip[hidden]{display:none}.strip.warn{color:var(--ink)}
+.bar{position:static;border-bottom:0;padding:8px 0 0}.bar[hidden]{display:none}
+/* A heading a link lands on clears the sticky nav. */
+h3,details.fold{scroll-margin-top:110px}
+/* Folds: the heading is the handle, with a marker that says which way. */
+details.fold{margin:4px 0}details.fold>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;min-height:40px}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary:before{content:"\25B8";color:var(--muted);font-size:12px;width:12px}
+details.fold[open]>summary:before{content:"\25BE"}details.fold>summary h3{margin:8px 0}
+/* Tables on a phone: the name column stays while the figures scroll under it. */
+.tw th:first-child,.tw td:first-child{position:sticky;left:0;z-index:1;background:var(--bg)}
+/* A row under its floor: muted, so it never reads as loud as one over it. */
+tr.thinrow td{color:var(--muted);font-style:italic}
+.pblocks{margin:8px 0}.prow{margin:0 0 10px}.pname{font-size:13px;font-weight:600}
+.pbar{display:flex;height:14px;margin:2px 0;border-radius:3px;overflow:hidden;background:var(--grid)}
+.pbar i,.plegend i{display:block;height:100%}.ptaken{background:var(--up)}.pphone{background:var(--up);opacity:.45}
+.ppassed{background:var(--grey)}.pbusy{background:repeating-linear-gradient(45deg,var(--axis) 0 3px,transparent 3px 6px)}
+.pfig{font-size:12px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.plegend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--ink2)}
+.plegend i{display:inline-block;width:12px;height:12px;margin-right:4px;vertical-align:-2px;border-radius:2px}
+/* Charts: the wide curve on a laptop, the small one on a phone; a fluid
+   plot scales to its box instead of scrolling inside it. */
+.plot.small{display:none}@media (max-width:640px){.plot.wide{display:none}.plot.small{display:block}}
+.plot.small svg,.plot.fluid svg{min-width:0}.plot text.sm{font-size:11px}
+/* The Overview. */
+.lead{font-size:16px;line-height:1.5;margin:12px 0}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:10px;margin:12px 0}
+.tile{display:flex;flex-direction:column;gap:2px;background:var(--surface);border:1px solid var(--grid);
+border-radius:10px;padding:10px 12px;color:inherit;text-decoration:none;min-width:0}
+.tile:hover,.tile:focus{border-color:var(--axis)}.tile .tl{font-size:12px;color:var(--ink2);font-weight:600}
+.tile .tv{font-size:24px;font-weight:700;line-height:1.15;font-variant-numeric:tabular-nums}
+.tile .tv small{font-size:13px;font-weight:600;color:var(--ink2)}
+.tile .ts{font-size:13px;color:var(--ink)}.tile .tf{font-size:11px;color:var(--muted);margin-top:auto;padding-top:4px}
+.tile.warn{background:var(--warn);border-color:var(--warnline)}
+.pair{display:grid;grid-template-columns:1fr;gap:16px}@media (min-width:760px){.pair{grid-template-columns:1fr 1fr}}
+.pair .plot{max-width:460px}a.more{font-size:13px;font-weight:400;margin-left:6px}
+details.caveats>summary{cursor:pointer}details.caveats>summary h3{display:inline}
+.dir{display:grid;grid-template-columns:1fr;gap:4px 24px}@media (min-width:760px){.dir{grid-template-columns:repeat(3,1fr)}}
+.dir h4{margin:10px 0 2px;font-size:14px}.dir ul{margin:0;padding-left:18px;font-size:13px;color:var(--ink2)}
+.dir li{margin:3px 0}a{color:var(--up)}
+/* When & where's hour strip: two rows of twelve on a phone (a 28px cell
+   holds "12p" over "5.1"), one row of twenty-four from a laptop up. */
+.wwstrip{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:3px;margin:8px 0 2px}
+@media (min-width:760px){.wwstrip{grid-template-columns:repeat(24,minmax(0,1fr))}}
+.wwstrip button{font:inherit;font-size:11px;line-height:1.25;min-height:40px;padding:3px 0;min-width:0;display:flex;
+flex-direction:column;align-items:center;justify-content:center;border:1px solid var(--grid);border-radius:5px;
+background:var(--surface);color:var(--ink);cursor:pointer;font-variant-numeric:tabular-nums}
+.wwstrip .hl{font-size:10px;color:var(--ink2)}.wwstrip button.up{background:var(--up);border-color:var(--up);color:#fff}
+.wwstrip button.down{background:var(--down);border-color:var(--down);color:#fff}
+.wwstrip button.up .hl,.wwstrip button.down .hl{color:#fff}
+.wwstrip button.thin{background:transparent;color:var(--muted);font-style:italic}
+.wwstrip button.none{background:transparent;color:var(--muted);border-style:dashed;opacity:.45}
+/* R1: on a phone, When & where's P90 and Uber · DD columns become a line
+   under the area's name. */
+#wwTable small.narrow{display:none}@media (max-width:759px){#wwTable .wide{display:none}
+#wwTable small.narrow{display:block;font-size:11px;color:var(--ink2);white-space:nowrap}}
+.wwstrip button.in{box-shadow:inset 0 -3px 0 var(--ink2)}.wwstrip button.on{outline:2px solid var(--ink);outline-offset:1px}
+/* Offers around you: the map (or the dots on a blank square without the
+   internet), and the three bar charts as rows, a phone's width each. */
+.amap{height:460px;border-radius:8px;border:1px solid var(--grid);background:var(--surface);overflow:hidden}
+.amap svg{display:block;width:100%;height:100%}
+.hbars{display:grid;gap:4px;margin:6px 0 10px;font-size:13px;font-variant-numeric:tabular-nums}
+.hb{display:grid;grid-template-columns:minmax(84px,30%) minmax(0,1fr) auto;gap:8px;align-items:center}
+.hb .nm{overflow-wrap:anywhere}.hb .fig{text-align:right;color:var(--ink2);white-space:nowrap;font-size:12px}
+.hb .track{position:relative;height:16px;background:var(--grid);border-radius:3px}
+.hb .fill{position:absolute;left:0;top:0;bottom:0;background:var(--grey);border-radius:3px}
+.hb .fill.up{background:var(--up)}.hb .fill.down{background:var(--down)}
+.hb .wh{position:absolute;top:7px;height:2px;background:var(--ink)}
+.hb.thinrow .nm,.hb.thinrow .fig{color:var(--muted);font-style:italic}
+/* On a phone the figures go under the bar: beside it they pushed the page sideways. */
+@media (max-width:640px){.hb{grid-template-columns:minmax(70px,32%) minmax(0,1fr)}
+.hb .fig{grid-column:2;text-align:left;white-space:normal}}

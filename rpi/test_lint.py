@@ -1439,6 +1439,16 @@ for _named in sorted(set(re.findall(r'`([A-Za-z0-9_./-]+\.(?:js|py|html|css|md|s
     ok_('CLAUDE.md names a file that exists: %s' % _named,
         os.path.exists(os.path.join(ROOT, _named)))
 
+# leaflet.css arrives after each page's own sheet (MV.needLeaflet adds it when
+# the map is first wanted), so a bare `.leaflet-container` rule in the page
+# loses to Leaflet's own grey on order and colours nothing. map.html's was
+# given its id (3e7db76); journal.html kept one, dead, after that.
+_bare_lc = [_p for _p in ('journal.html', 'map.html', 'live.html')
+            if re.search(r'(?m)^\s*\.leaflet-container\s*\{',
+                         open(os.path.join(ROOT, _p), encoding='utf-8').read())]
+eq('no page that loads Leaflet after its own sheet styles a bare .leaflet-container',
+   _bare_lc, [])
+
 # No model names anywhere in the repository's text: a convention CLAUDE.md
 # states, held across every file the repo ships.
 _MODEL = re.compile(r'\b(Opus|Sonnet|Haiku)\b|claude-(?:opus|sonnet|haiku|instant|[0-9])', re.I)

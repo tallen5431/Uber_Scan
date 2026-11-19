@@ -5925,7 +5925,7 @@
            rankLead: rankLead, standings: standings,
            accused: accused,
            byPlace: byPlace, chain: chain,
-           Geocoder: Geocoder, placeAll: placeAll, needLeaflet: needLeaflet,
+           Geocoder: Geocoder, placeAll: placeAll, needLeaflet: needLeaflet, LEAFLET_SRI: LEAFLET_SRI,
            BOX_MILES: BOX_MILES, ANCHOR_STEP: ANCHOR_STEP,
            FAR_MILES: FAR_MILES, GAP_MS: GAP_MS,
            searchPlan: searchPlan, searchText: searchText, storeName: storeName,

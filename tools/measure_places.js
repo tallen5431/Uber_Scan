@@ -98,12 +98,9 @@ function tally(list) {
   return out;
 }
 
-function median(nums) {
-  if (!nums.length) return null;
-  var s = nums.slice().sort(function (a, b) { return a - b; });
-  var mid = Math.floor(s.length / 2);
-  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-}
+// advice.js's median, the one the reports share; this file had its own copy,
+// the same rule to the line ((a + b) / 2 of the middle two, null for none).
+var median = A.median;
 
 /* --- could the driver's own legs answer it? -------------------------------
  *
