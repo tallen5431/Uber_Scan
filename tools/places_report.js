@@ -1246,9 +1246,31 @@ function poissonCI(k, conf) {
  * on the page through R.cells, as every cell is) — so it holds no name and
  * no coordinate the report does not already. Worked out here, once; the page
  * only picks a slot and sorts. */
-function whenWhere(offers, waiting) {
+/* The report's rulers, worked out ONCE (the reporting review's F4): the top
+ * 10/20/30/50% of every counted offer's $/hr in the range, as dollar cuts,
+ * each with how many offers it is over and how many sit at or over it. When
+ * & where reads them and the Strategy tab's section 7 is handed them, so
+ * the two never draw two lines over one report: they did — section 7 had
+ * T.ruler over its own rated offers (a card with no perHour rated off pay
+ * and minutes), and on one invented report put "good" at $36.60 over 90
+ * offers while When & where put it at $39.60 over 60. Ties at a cut count
+ * as good, as trends.js `ruler` documents. */
+function reportRulers(offers) {
   var rates = offers.filter(counted).map(function (o) { return o.perHour; });
-  var cuts = WW_TOPS.map(function (p) { return rates.length ? round2(quantile(rates, 1 - p / 100)) : null; });
+  var out = { tops: WW_TOPS, n: rates.length, days: A.outingsIn(offers.filter(counted)), byTop: {} };
+  out.cuts = WW_TOPS.map(function (p) {
+    var c = rates.length ? round2(quantile(rates, 1 - p / 100)) : null;
+    out.byTop[p] = { cut: c, n: rates.length, days: out.days,
+                     over: c === null ? 0 : rates.filter(function (v) { return v >= c; }).length };
+    return c;
+  });
+  return out;
+}
+
+function whenWhere(offers, waiting, rulers) {
+  var ru = rulers || reportRulers(offers);
+  var rates = { length: ru.n };
+  var cuts = ru.cuts;
   var memo = Object.create(null);
   function ci(k) { return memo[k] || (memo[k] = poissonCI(k, WW_CONF)); }
   var line = (waiting || []).map(function (w) {
@@ -2729,8 +2751,11 @@ function strategyOrders(taken, records, fixes, earnings) {
     // miles where its trip was matched (earnings.js uberTimingFor): labelled
     // so for the Strategy tab, never in place of the rig's own timing.
     var ub = real ? null : E.uberTimingFor(earnings, t.id, t.tookAt);
+    // `by`, the drop row's: section 7 leaves a Took taken back out of what
+    // was taken (strategy.js TAKEN_BACK), as earnings.js does.
+    var by = typeof t.by === 'string' ? t.by : null;
     if (ub) {
-      return { id: t.id, tookAt: t.tookAt, endedAt: typeof t.endedAt === 'number' ? t.endedAt : null,
+      return { id: t.id, tookAt: t.tookAt, endedAt: typeof t.endedAt === 'number' ? t.endedAt : null, by: by,
                app: t.app || null, pay: t.pay, cardMinutes: t.minutes, cardMiles: t.miles,
                addon: t.addon === true, carried: t.carried, actualMinutes: ub.minutes,
                actualMiles: ub.miles, milesFrom: ub.miles !== null ? 'uber' : null, timedBy: 'uber',
@@ -2749,7 +2774,7 @@ function strategyOrders(taken, records, fixes, earnings) {
         if (g !== null) { miles = g; from = 'log'; }
       }
     }
-    return { id: t.id, tookAt: t.tookAt, endedAt: typeof t.endedAt === 'number' ? t.endedAt : null,
+    return { id: t.id, tookAt: t.tookAt, endedAt: typeof t.endedAt === 'number' ? t.endedAt : null, by: by,
              app: t.app || null, pay: t.pay, cardMinutes: t.minutes, cardMiles: t.miles,
              addon: t.addon === true, carried: t.carried, actualMinutes: real ? real.mins : null,
              actualMiles: miles, milesFrom: from, clockStepped: stepped };
@@ -2867,7 +2892,8 @@ function analyse(offers, taken, placed, dropAt, opts) {
   function waitCellKey(o) { var w = waitBy.get(o); return w ? w.cell : null; }
   function waitTownKey(o) { var w = waitBy.get(o); return w ? w.town : null; }
   // When & where: the same line, by the driver's weekday and block.
-  var whenwhere = whenWhere(offers, waiting);
+  var rulers = reportRulers(offers);
+  var whenwhere = whenWhere(offers, waiting, rulers);
   var tookRuns = (taken || []).filter(function (t) { return t && typeof t.tookAt === 'number'; });
   // Spells parked with no order in the car (main reads them off the GPS
   // log): each to its 2-mile cell and, where the NucBox named one, the town
@@ -3009,6 +3035,8 @@ function analyse(offers, taken, placed, dropAt, opts) {
   // earnings screenshots and matched to orders (/api/earnings): the card
   // against what was paid, under the curve.
   var strategy = S.analyse({ offers: offers, orders: strategyIn, areaOf: townKey, appOf: appOf,
+                             // One ruler for section 7 and When & where.
+                             rulers: rulers.byTop,
                              target: targetLine(counts, opts.now), boots: opts.boots,
                              earnings: Array.isArray(opts.earnings) ? opts.earnings : undefined,
                              // The Gold card's goal and Uber's own figures,
@@ -3456,7 +3484,12 @@ function html(r) {
   // (GROUPS' fourth field), so the script does not keep a second list.
   var hourly = [];
   GROUPS.forEach(function (g) { g[2].forEach(function (t) { if (t[3]) hourly.push(t[0]); }); });
-  var data = JSON.stringify(Object.assign({}, r, { hourly: hourly })).replace(/</g, '\\u003c');
+  // The page reads no single wait (the reporting review's R3): section 7's
+  // lists of every wait, kept on the analysis for a check that wants them,
+  // are left out of the page's data, where nothing read them.
+  var data = JSON.stringify(Object.assign({}, r, { hourly: hourly }), function (k, v) {
+    return k === 'minutes' && v && Array.isArray(v.good) && Array.isArray(v.take) ? undefined : v;
+  }).replace(/</g, '\\u003c');
   var span = r.span ? new Date(r.span[0]).toISOString().slice(0, 10) + ' to '
     + new Date(r.span[1]).toISOString().slice(0, 10) : 'no offers';
   var cvAll = r.coverage.all, placedTotal = cvAll.placed.n + cvAll.unplaced.n;
@@ -3991,19 +4024,21 @@ function PASSED_PART(s) {
       + seg.map(function (x) {
         return x[1] ? '<i class="p' + x[0] + '" style="width:' + pctOf(x[1]) + '" title="' + esc(x[0]) + ' ' + x[1] + '"></i>' : '';
       }).join('') + '</div><div class="pfig">' + g.good + ' good · took ' + g.taken
-      + (g.shareTaken !== null ? ' (' + Math.round(g.shareTaken * 100) + '%)' : '') + ' · let go ' + g.passed
-      + (g.declined ? ' (' + g.declined + ' marked)' : '') + (g.phone ? ' · phone ' + g.phone : '') + ' · busy ' + g.busy
+      + (g.shareTaken !== null ? ' (' + Math.round(g.shareTaken * 100) + '%)' : '') + ' · no answer ' + g.unanswered
+      + ' · let go ' + g.passed + (g.declined ? ' (' + g.declined + ' marked)' : '') + (g.phone ? ' · phone ' + g.phone : '')
+      + ' · busy ' + g.busy
       + ' · ' + esc(wait(g.wait)) + '</div></div>';
   }).join('');
   var w = p.waits, wc = w.counts;
   function waitSay(x) {
-    return x.p50 === null ? '(too few waits to give a median: n=' + x.n + ')'
-      : 'after <b>a median ' + x.p50 + ' min</b> (P75 ' + x.p75 + ' min; n=' + x.n + ')';
+    var open = x.open ? ', ' + x.open + ' still open' : '';
+    return x.p50 === null ? '(too few waits to give a median: n=' + x.n + open + ')'
+      : 'after <b>a median ' + x.p50 + ' min</b> (P75 ' + x.p75 + ' min; n=' + x.n + open + ')';
   }
   function waitCell(x) { return x.p50 === null ? (x.n ? 'n=' + x.n + ' (too few)' : '—') : x.p50 + ' / ' + x.p75 + ' min (n=' + x.n + ')'; }
   var blockCols = [['name', ''], ['good', 'good seen'], ['taken', 'taken'],
                    [function (g) { return g.shareTaken === null ? null : Math.round(g.shareTaken * 100) + '%'; }, 'of taken + let go'],
-                   ['passed', 'let go'], ['declined', '…marked passed'], ['unanswered', '…no answer'],
+                   ['unanswered', 'no answer'], ['passed', 'let go'], ['declined', '…marked passed'],
                    ['phone', 'on the phone, no Took'], ['busy', 'order already in the car'],
                    [function (g) { return waitCell(g.wait); }, 'to the next good: median / P75']];
   var topCols = [[function (t) { return 'top ' + t.top + '%' + (t.top === p.top ? ' (shown)' : ''); }, 'good ='],
@@ -4012,17 +4047,22 @@ function PASSED_PART(s) {
                  ['passed', 'let go'], ['phone', 'phone'], ['busy', 'busy'],
                  [function (t) { return waitCell(t.waitGood); }, 'to the next good'],
                  [function (t) { return waitCell(t.waitTake); }, 'to the next take']];
-  return '<h3 id="s-passed">The good offers you passed on</h3>'
-    + '<p class="note">Good is the top ' + p.top + '% of this record\'s own panel $/hr: <b>$' + p.cut.toFixed(2)
-    + '/hr or more</b> (' + p.over + ' of ' + p.n + ' offers), one dollar line held fixed across days and blocks — the '
-    + 'offers page\'s Trends ruler, worked out by the same function. <b>Taken</b> is a Took or your ✓ on the card; a card '
+  return '<h3 id="s-passed">Good offers not taken on the record</h3>'
+    + '<p class="note">Good is the top ' + p.top + '% of ' + (p.report ? 'this report\'s ' + p.n + ' offers over its '
+      + (p.days || 0) + ' days' : 'this record\'s own panel $/hr') + ': <b>$' + p.cut.toFixed(2)
+    + '/hr or more</b> (' + p.over + ' of ' + p.n + ' offers), one dollar line held fixed across days and blocks — '
+    + (p.report ? 'the same line When &amp; where reads, worked out once for the whole report. '
+      : 'the offers page\'s Trends ruler, worked out by the same function. ')
+    + '<b>No answer</b> is most of what is not taken: a card nobody ticked or Took, counted before <b>let go</b>, '
+    + 'which adds the ones you marked passed. <b>Taken</b> is a Took or your ✓ on the card; a card '
     + 'nobody answered for is not taken (silence is never an accept). <b>Busy</b>: it came inside an order\'s hold, Took to '
     + 'its end, or was an Uber add-on — no free driver was choosing it, and an order you never Took leaves its cards '
     + 'reading free. <b>On the phone</b>: Uber\'s earnings screen matched it with no Took, so it is neither taken nor let '
-    + 'go here. <b>The wait</b> is minutes online from a card let go to the next good card that was not busy, and to your '
-    + 'next take. Minutes with the rig off are not counted (' + wc.acrossOff + ' of ' + wc.origins + ' waits ran across '
-    + 'such a stretch)' + (wc.openGood ? '; ' + wc.openGood + ' with no good card after it in the record ' + (wc.openGood === 1
-      ? 'is' : 'are') + ' in no median' : '') + (wc.lone ? '; ' + wc.lone + ' let go alone, outside any run, start no wait' : '')
+    + 'go here. <b>The wait</b> is minutes online and free from a card let go to the next good card that was not busy, '
+    + 'and to your next take: minutes with the rig off are not counted (' + wc.acrossOff + ' of ' + wc.origins
+    + ' waits ran across such a stretch), nor the minutes of a trip you took meanwhile (' + (wc.throughHold || 0)
+    + ' ran through one)' + (wc.openGood ? '; ' + wc.openGood + ' with no good card after it in the record ' + (wc.openGood === 1
+      ? 'is' : 'are') + ' still open, said beside each median and in none' : '') + (wc.lone ? '; ' + wc.lone + ' let go alone, outside any run, start no wait' : '')
     + '. A median needs ' + s.floors.dist + ' waits. History, not advice: no verdict, target or '
     + 'panel line reads it, and the blocks are rows, not a line tuned to the hour.</p>'
     + '<div class="plegend"><span><i class="ptaken"></i>taken</span><span><i class="pphone"></i>on the phone, no Took</span>'
@@ -5889,7 +5929,7 @@ module.exports = {
   SHORT_MILES: SHORT_MILES,
   DEAD_MAX_MIN: DEAD_MAX_MIN, SIZE_BANDS: SIZE_BANDS, TAKE_SLACK_MS: TAKE_SLACK_MS,
   GROUPS: GROUPS, TABS: TABS, blockChart: blockChart, fold: fold,
-  whenWhere: whenWhere, wwSlotOf: wwSlotOf, poissonCI: poissonCI, WW_BLOCKS: WW_BLOCKS, WW_TOPS: WW_TOPS,
+  whenWhere: whenWhere, reportRulers: reportRulers, wwSlotOf: wwSlotOf, poissonCI: poissonCI, WW_BLOCKS: WW_BLOCKS, WW_TOPS: WW_TOPS,
   WW_TOP: WW_TOP, WW_MIN_HOURS: WW_MIN_HOURS, WW_MIN_DAYS: WW_MIN_DAYS, WW_CONF: WW_CONF,
 };
 

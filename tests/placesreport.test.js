@@ -1310,8 +1310,10 @@ function nbx() {
      && pageW.indexOf('<button type="button" data-tab="strategy">Strategy</button>')
         < pageW.indexOf('<button type="button" data-tab="targets">'));
   var sOrders = P.strategyOrders(wTaken, [], null);
+  // The report hands strategy.js its rulers, worked out once (the reporting
+  // review's F4); the same call here, so the one computation is the same.
   var sOwn = S.analyse({ offers: wRows, orders: sOrders, areaOf: function (o) { return MV.townFor(o, A.area); },
-                         appOf: P.appOf, target: 25 });
+                         appOf: P.appOf, target: 25, rulers: P.reportRulers(wRows).byTop });
   eq('...its figures are strategy.js\'s over the report\'s offers and takes (one computation)',
      [repW.strategy.curve, repW.strategy.seen, repW.strategy.actual, repW.strategy.lines],
      [sOwn.curve, sOwn.seen, sOwn.actual, sOwn.lines]);
@@ -1517,6 +1519,19 @@ function nbx() {
   var pW = repW.strategy.passed;
   eq('the good offers passed on: strategy.js\'s, over the report\'s offers and takes (one computation)',
      [pW.cut, pW.all, pW.waits], [sOwn.passed.cut, sOwn.passed.all, sOwn.passed.waits]);
+  eq('F4: section 7 and When & where read one ruler, worked out once over the report\'s offers, said over its days',
+     [repW.strategy.passed.tops.map(function (t) { return t.cut; }), repW.whenwhere.cuts, pW.report, pW.n, pW.days,
+      repW.whenwhere.offers], [repW.whenwhere.cuts, P.reportRulers(wRows).cuts, true, P.reportRulers(wRows).n, repW.outings,
+      P.reportRulers(wRows).n]);
+  ok('P1: the heading is "Good offers not taken on the record", and no answer is its own count ahead of let go',
+     /<h3 id="s-passed">Good offers not taken on the record<\/h3>/.test(stratW)
+     && pW.byBlock.every(function (g) { return stratW.indexOf(' · no answer ' + g.unanswered + ' · let go ' + g.passed) >= 0; })
+     && stratW.indexOf('<th>no answer</th><th>let go</th>') >= 0);
+  eq('F5: strategyOrders carries the drop row\'s `by`, so section 7 can leave a Took taken back out of what was taken',
+     P.strategyOrders([{ id: 'tb', tookAt: at(3, 18), endedAt: at(3, 18, 5), by: 'offers' }], [], null).map(function (o) {
+       return o.by; }), ['offers']);
+  ok('R3: the page\'s data carries no list of every wait (nothing reads it), the analysis still does',
+     Array.isArray(pW.waits.minutes.good) && pageW.indexOf('"minutes":{"good"') < 0);
   ok('...drawn under the curve\'s points and ahead of the slices, a bar line per block with its counts',
      stratW.indexOf('id="s-points"') < stratW.indexOf('id="s-passed"')
      && stratW.indexOf('id="s-passed"') < stratW.indexOf('id="s-slices"')

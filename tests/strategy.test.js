@@ -585,7 +585,7 @@ eq('...the minutes online to the next good one: 20, 30 across 4am, 38, and 12 ac
 eq('...and to the next take: 20, 80, 50, 12 (the night off left out of each), one open',
    [pp.waits.minutes.take, pp.waits.counts.openTake], [[20, 80, 50, 12], 1]);
 eq('...four waits are under the ten a median needs: the n alone', [pp.waits.good, pp.waits.take],
-   [{ n: 4, p50: null, p75: null }, { n: 4, p50: null, p75: null }]);
+   [{ n: 4, p50: null, p75: null, open: 1 }, { n: 4, p50: null, p75: null, open: 1 }]);
 var clk = S.onlineClock([[0, 10 * 60000], [60 * 60000, 70 * 60000]]);
 eq('the online clock: across an hour off only the 10 minutes on count, and it says it crossed', [
   clk(5 * 60000, 65 * 60000), clk(1 * 60000, 4 * 60000), clk(20 * 60000, 30 * 60000)],
@@ -614,15 +614,54 @@ eq('...the other rulers beside it, each worked by the same function (at 50%, the
    pp.tops.map(function (t) { return [t.top, t.cut, t.good]; }), [[10, 30, 10], [20, 14, 10], [30, 10, 50], [50, 10, 50]]);
 var pLines = S.passedLines(pp);
 eq('...in words, in the past tense, with each n',
-   pLines, ['The good offers you passed on (the top 20% of this record\'s offers, $14.00/hr or more on the panel): 10 seen; '
-            + '3 came with an order already in the car; of the 7 with none, you took 2 (29% of those taken or let go) and let 5 go '
-            + '(1 marked passed, 4 with no answer, which is not a take).',
-            'When you let one go with nothing in the car, the next good one came: too few to give a median (n=4), and your next '
-            + 'take came: too few to give a median (n=4). Minutes the rig was off are not counted (1 wait ran across a stretch it '
-            + 'was off); 1 had no good one after it in this record. History, not advice: nothing on the rig reads it.']);
+   pLines, ['Good offers not taken on the record (the top 20% of this record\'s offers, $14.00/hr or more on the panel): '
+            + '10 seen; 3 came with an order already in the car; of the 7 with none, you took 2 (29% of those taken or let go), '
+            + '4 had no answer (which is not a take) and 1 you marked passed: 5 let go.',
+            'When you let one go with nothing in the car, the next good one came: too few to give a median (n=4, 1 still open), '
+            + 'and your next take came: too few to give a median (n=4, 1 still open). Minutes the rig was off are not counted '
+            + '(1 wait ran across a stretch it was off). History, not advice: nothing on the rig reads it.']);
 ok('...are in the summary, and none of it says which card to take or let go',
    pLines.every(function (l) { return rP.lines.indexOf(l) >= 0; })
    && rP.lines.every(function (l) { return !/\byou should\b|\btake (this|it|only)\b|\bdecline (this|it)\b|\bnext time\b/i.test(l); }));
+// F5 (the reporting review): a Took taken back on the offers page (its drop
+// row `by: 'offers'`, the fold's accepted null) is not taken, as earnings.js
+// TAKEN_BACK and the Trends tab have it; its hold still makes G3 busy.
+var back = recP();
+back.offers.forEach(function (o) { if (o.id === 'G2') delete o.accepted; });
+back.orders.forEach(function (o) { if (o.id === 'G2') o.by = 'offers'; });
+var pb = S.analyse(Object.assign(back, { boots: 20 })).passed;
+eq('F5: a Took taken back on the offers page is let go, not taken, and the card in its hold stays busy',
+   [pb.all.taken, pb.all.busy, pb.all.passed, pb.all.unanswered], [1, 3, 6, 5]);
+var backPanel = recP();
+backPanel.offers.forEach(function (o) { if (o.id === 'G2') delete o.accepted; });
+backPanel.orders.forEach(function (o) { if (o.id === 'G2') o.by = 'untick'; });
+eq('...and so is one the panel took back', S.analyse(Object.assign(backPanel, { boots: 20 })).passed.all.taken, 1);
+eq('...while a ✓ standing on the row still makes it taken whatever the drop says',
+   S.analyse(Object.assign((function () { var r = recP(); r.orders.forEach(function (o) { if (o.id === 'G2') o.by = 'offers'; });
+     return r; }()), { boots: 20 })).passed.all.taken, 2);
+// S6: a wait that ran through a trip the driver took counts only the free
+// minutes. g1 let go at 7pm; an ordinary card Took at 7:02, on the trip to
+// 7:40; g2 good but inside that hold; g3 the next free good card at 7:41.
+(function () {
+  var t0 = new Date(2026, 9, 14, 19, 0).getTime(), M = 60000, offs = [];
+  // Eleven fillers and an ordinary take under three good cards: the top 20% of 15 falls between the take ($12) and the $40s, at $17.60.
+  for (var i = 0; i < 11; i++) offs.push({ id: 'f' + i, at: t0 - 60 * M + i * M, ph: 5 + i * 0.25, block: 6 });
+  offs.push({ id: 'g1', at: t0, ph: 40, block: 6 }, { id: 'tk', at: t0 + 2 * M, ph: 12, block: 6 },
+            { id: 'g2', at: t0 + 20 * M, ph: 40, block: 6 }, { id: 'g3', at: t0 + 41 * M, ph: 40, block: 6 });
+  offs.sort(function (a, b) { return a.at - b.at; });
+  var byId = {}; offs.forEach(function (o) { byId[o.id] = { id: o.id }; });
+  var p = S.passedOf(offs, byId, { tk: 'took' }, offs.map(function (o) { return { id: o.id, seen: o.at }; }),
+                     [[t0 - 60 * M, t0 + 60 * M]], [[t0 + 2 * M, t0 + 40 * M]], 20);
+  eq('S6: from g1 to the next free good card is 3 free minutes (2 before the Took, 1 after the drop), not 41; '
+     + 'the open wait (g3, none after it) said beside the n',
+     [p.cut, p.waits.minutes.good, p.waits.counts.throughHold, p.waits.good.open, p.waits.minutes.take], [17.6, [3], 1, 1, [2]]);
+  // F4: a ruler handed in (the places report's, over its own offers) is the line used, with its n and days.
+  var pg = S.passedOf(offs, byId, { tk: 'took' }, offs.map(function (o) { return { id: o.id, seen: o.at }; }),
+                      [[t0 - 60 * M, t0 + 60 * M]], [[t0 + 2 * M, t0 + 40 * M]], 20, { cut: 39, n: 500, over: 100, days: 12 });
+  eq('F4: a ruler handed in is the one used, said over the report\'s offers and days',
+     [pg.cut, pg.n, pg.over, pg.days, pg.report, pg.all.good, /report's 500 offers over its 12 days/.test(S.passedLines(pg)[0])],
+     [39, 500, 100, 12, true, 3, true]);
+}());
 eq('...and the offers page\'s light answer (/api/gold) works none of it out',
    S.analyse(Object.assign(recP(), { light: true })).passed, undefined);
 
