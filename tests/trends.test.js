@@ -788,6 +788,123 @@ function offer(x) {
   ok('12,500 offers packed, read back and summed every way in under 3 s (' + took + ' ms), in about half a MB ('
      + Math.round(packed.length / 1024) + ' kB)', took < 3000 && packed.length < 700 * 1024);
 
+  /* === The every-offer CSV and Excel-friendly tables (the owner, Nov 2026:
+     "the CSV download does not seem to include the GPS data", and dates
+     Excel can chart) === */
+  function csvRows(text) {
+    // A small reader: quoted cells, doubled quotes, no line breaks inside.
+    return text.trim().split('\n').map(function (line) {
+      var out = [], cur = '', q = false;
+      for (var i = 0; i < line.length; i++) {
+        var ch = line[i];
+        if (q) { if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; }
+        else if (ch === '"') q = true; else if (ch === ',') { out.push(cur); cur = ''; } else cur += ch;
+      }
+      out.push(cur);
+      return out;
+    });
+  }
+  function xo(id, ms, extra) {
+    var o = { id: id, at: ms, firstAt: ms, pay: 10, perHour: 20, minutes: 30, miles: 5, whole: true, state: 'no',
+              app: 'uber', target: 25 };
+    Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
+    return o;
+  }
+  // 1 Nov 2026: the clocks go back at 2am EDT. 1:30am comes twice.
+  var fbFirst = new Date('2026-11-01T05:30:00Z').getTime();    // 1:30 EDT
+  var fbSecond = new Date('2026-11-01T06:30:00Z').getTime();   // 1:30 EST
+  var xoffers = [
+    xo('x1', new Date(2026, 9, 30, 3, 59).getTime(), { perHour: 31.5, pay: 15.75, lat: 12.3456789, lon: 45.6123456,
+                                                       gpsOk: true, gpsErr: 7.25, gpsAge: 1.04, gpsMode: 3,
+                                                       pickup: '=HYPERLINK("http://example.invalid")',
+                                                       dropoff: '742 Example Ave, Faketown', accepted: true, state: 'go' }),
+    xo('x2', new Date(2026, 9, 30, 4, 0).getTime(), { perHour: 12, lat: 12.31, lon: 45.61, gpsOk: false, gpsWhy: 'rough',
+                                                      gpsErr: 129.2, pickup: '+ 1 order', accepted: false }),
+    xo('x3', fbFirst, { perHour: 25, boost: 2.5, state: 'warn' }),
+    xo('x4', fbSecond, { perHour: 18, boost: false, pickup: '-3.50' }),
+    xo('x5', new Date(2026, 10, 1, 4, 0).getTime(), { perHour: 40, suspect: true, doubt: 'speed' }),
+    xo('x6', new Date(2026, 10, 2, 20, 15, 9).getTime(), { perHour: null, pay: 1.68, payUnread: true, suspect: true,
+                                                           corrected: { from: 1.68, to: null } }),
+    xo('x7', new Date(2026, 10, 3, 21, 0).getTime(), { perHour: 22, pay: 11, corrected: { from: 1.1, to: 11 }, miles: 0.05 }),
+  ];
+  // A second copy of x7, older: the newest copy wins, as the fold.
+  xoffers.push(xo('x7', new Date(2026, 10, 3, 20, 59).getTime(), { perHour: 99 }));
+  var made = T.offersCsv(xoffers, { busy: { x2: true } });
+  var xr = csvRows(made.text), xh = xr[0];
+  function col(row, name) { return row[xh.indexOf(name)]; }
+  function rowOf(id) { return xr.filter(function (r) { return col(r, 'offer_id') === id; })[0]; }
+  eq('[offers csv] the columns, in a stable order: the clock, the card, what the page knows, the flags, the GPS, the places',
+     xh, ['datetime', 'date', 'time', 'weekday', 'hour', 'driver_day', 'driver_weekday', 'week_start', 'app', 'pay',
+          'boost', 'card_minutes', 'card_miles', 'per_hour', 'per_mile', 'panel_said', 'driver_marked', 'during_job',
+          'good_top20_of_range', 'counted', 'suspect', 'doubt', 'pay_reread', 'pay_unread', 'lat', 'lon', 'gps_ok',
+          'gps_err_m', 'gps_age_s', 'pickup', 'dropoff', 'offer_id']);
+  eq('[offers csv] one row per offer id, oldest first, the newest copy of each', [made.rows, xr.slice(1).map(function (r) {
+    return col(r, 'offer_id'); }), col(rowOf('x7'), 'per_hour')], [7, ['x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7'], '22']);
+  var r1 = rowOf('x1'), r2 = rowOf('x2');
+  eq('[offers csv] 3:59am Friday: a date-time Excel reads, the calendar day, and Thursday\'s driver day and week',
+     ['datetime', 'date', 'time', 'weekday', 'hour', 'driver_day', 'driver_weekday', 'week_start'].map(function (k) { return col(r1, k); }),
+     ['2026-10-30 03:59:00', '2026-10-30', '03:59', 'Fri', '3', '2026-10-29', 'Thu', '2026-10-26']);
+  eq('[offers csv] ...4am is Friday\'s own driver day', [col(r2, 'driver_day'), col(r2, 'driver_weekday'), col(r2, 'hour')],
+     ['2026-10-30', 'Fri', '4']);
+  eq('[offers csv] the clocks go back (1 Nov): both 1:30ams print as the wall read and belong to Saturday\'s driver day; '
+     + '4am Sunday starts Sunday, in the week of 26 Oct', [col(rowOf('x3'), 'datetime'), col(rowOf('x4'), 'datetime'),
+       col(rowOf('x3'), 'driver_day'), col(rowOf('x4'), 'driver_day'), col(rowOf('x5'), 'driver_day'),
+       col(rowOf('x5'), 'week_start'), col(rowOf('x6'), 'week_start')],
+     ['2026-11-01 01:30:00', '2026-11-01 01:30:00', '2026-10-31', '2026-10-31', '2026-11-01', '2026-10-26', '2026-11-02']);
+  eq('[offers csv] plain numbers, no $ or commas: pay, minutes, miles, $/hr, $/mi', ['pay', 'card_minutes', 'card_miles',
+     'per_hour', 'per_mile'].map(function (k) { return col(r1, k); }), ['15.75', '30', '5', '31.5', '3.15']);
+  eq('[offers csv] what the page knows: the panel\'s word, the driver\'s own mark only (taken, passed, else empty), '
+     + 'and during a job', [[col(r1, 'panel_said'), col(r1, 'driver_marked'), col(r1, 'during_job')],
+       [col(r2, 'panel_said'), col(r2, 'driver_marked'), col(r2, 'during_job')],
+       [col(rowOf('x3'), 'panel_said'), col(rowOf('x3'), 'driver_marked')]],
+     [['ACCEPT', 'taken', ''], ['PASS', 'passed', 'yes'], ['CLOSE CALL', '']]);
+  // The ruler, held equal to trends.js's own over the same offers.
+  var xRule = T.ruler(T.readRows(T.rowsOf(xoffers)), 20);
+  var xGood = T.readRows(T.rowsOf(xoffers)).filter(function (r) { return T.isGood(r, xRule.cut); }).length;
+  eq('[offers csv] good_top20_of_range is trends.js\'s ruler over the same range (cut ' + xRule.cut + ', '
+     + xGood + ' good), empty where the money does not count', [made.cut, xr.slice(1).filter(function (r) {
+       return col(r, 'good_top20_of_range') === 'yes'; }).length, col(rowOf('x5'), 'good_top20_of_range'),
+       col(rowOf('x6'), 'good_top20_of_range'), col(r1, 'good_top20_of_range')], [xRule.cut, xGood, '', '', 'yes']);
+  eq('[offers csv] the flags: suspect and its doubt, counted, the pay re-read, the pay unread (and then no pay)',
+     [['suspect', 'doubt', 'counted'].map(function (k) { return col(rowOf('x5'), k); }),
+      ['pay', 'pay_unread', 'counted', 'per_hour'].map(function (k) { return col(rowOf('x6'), k); }),
+      ['pay_reread', 'per_mile'].map(function (k) { return col(rowOf('x7'), k); })],
+     [['yes', 'speed', 'no'], ['', 'yes', 'no', ''], ['yes', '']]);
+  eq('[offers csv] boost as the card said it: an amount, no, or empty when unknown',
+     [col(rowOf('x3'), 'boost'), col(rowOf('x4'), 'boost'), col(r1, 'boost')], ['2.5', 'no', '']);
+  eq('[offers csv] GPS where the row has a fix: six places, the gate\'s word, metres and seconds; a refused fix says no',
+     [['lat', 'lon', 'gps_ok', 'gps_err_m', 'gps_age_s'].map(function (k) { return col(r1, k); }),
+      ['lat', 'gps_ok', 'gps_err_m'].map(function (k) { return col(r2, k); }), made.gps],
+     [['12.345679', '45.612346', 'yes', '7.3', '1'], ['12.31', 'no', '129.2'], 2]);
+  eq('[offers csv] ...and empty, never null or NaN, on a row with no fix',
+     ['lat', 'lon', 'gps_ok', 'gps_err_m', 'gps_age_s'].map(function (k) { return col(rowOf('x3'), k); }), ['', '', '', '', '']);
+  ok('[offers csv] ...no cell anywhere says null, NaN or undefined', !/(^|,)(null|NaN|undefined)(,|$)/m.test(made.text));
+  eq('[offers csv] a formula is defused with an apostrophe: =HYPERLINK, "+ 1 order"; a plain -3.50 keeps its sign',
+     [col(r1, 'pickup'), col(r2, 'pickup'), col(rowOf('x4'), 'pickup')],
+     ['\'=HYPERLINK("http://example.invalid")', '\'+ 1 order', '-3.50']);
+  eq('[offers csv] T.safeCell: = + - @ tab and CR, not a number', ['=1+1', '@Home Kitchen', '-', '\tx', '+15.00', '-2', 'Oak']
+     .map(T.safeCell), ['\'=1+1', '\'@Home Kitchen', '\'-', '\'\tx', '+15.00', '-2', 'Oak']);
+  var off = T.offersCsv(xoffers, { keepPlaces: false }), offR = csvRows(off.text);
+  var offRow = offR.filter(function (r) { return r[offR[0].indexOf('offer_id')] === 'x1'; })[0];
+  eq('[offers csv] keepPlaces off: the GPS and place columns stay, and are empty on every row',
+     [offR[0].join(','), ['lat', 'lon', 'gps_ok', 'gps_err_m', 'gps_age_s', 'pickup', 'dropoff'].map(function (k) {
+       return offRow[offR[0].indexOf(k)]; }), off.gps], [xh.join(','), ['', '', '', '', '', '', ''], 0]);
+  eq('[offers csv] the page puts a byte-order mark in front, so Excel reads it as UTF-8', T.BOM.charCodeAt(0), 0xfeff);
+  ok('[offers csv] ...and the text itself starts with its header', made.text.indexOf('datetime,') === 0);
+  // The Trends tables: week_start and the weekday appended, the hour's label.
+  var xp = T.periods(T.readRows(T.rowsOf(xoffers)), 'day');
+  var xpd = csvRows(T.csvPeriods(xp, [], 'day', 19)), xpw = csvRows(T.csvPeriods(T.periods(T.readRows(T.rowsOf(xoffers)), 'week'), [], 'week', 19));
+  eq('[trends csv] daily: the first column kept, week_start (a Monday) and the weekday appended last',
+     [xpd[0][0], xpd[0].slice(-2), xpd[1][0], xpd[1].slice(-2)], ['day', ['week_start', 'weekday'], '2026-10-29', ['2026-10-26', 'Thu']]);
+  eq('[trends csv] weekly: week_of is the Monday, week_start the same date, no weekday',
+     [xpw[0][0], xpw[1][0], xpw[1].slice(-2)], ['week_of', '2026-10-26', ['2026-10-26', '']]);
+  var xhCsv = csvRows(T.csvHourly(T.hourly(T.readRows(T.rowsOf(xoffers)), {}), 'all'));
+  eq('[trends csv] hourly: the hour a bare integer, its label appended (4am first, as the day runs)',
+     [xhCsv[0].slice(0, 2), xhCsv[0].slice(-1), xhCsv[1][1], xhCsv[1].slice(-1)[0], xhCsv[24][1], xhCsv[24].slice(-1)[0]],
+     [['hours', 'hour'], ['hour_label'], '4', '04:00-05:00', '3', '03:00-04:00']);
+  ok('[trends csv] ...and no table says null or NaN', !/(^|,)(null|NaN|undefined)(,|$)/m.test(T.csvPeriods(xp, [], 'day', null)
+     + T.csvHourly(T.hourly(T.readRows(T.rowsOf(xoffers)), {}), 'all')));
+
   /* --- /api/trends, through a real server --- */
   var dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trends-'));
   var journal = path.join(dir, 'journal.jsonl');
@@ -841,6 +958,11 @@ function offer(x) {
        [ans.status, j1.ok, j1.total, j1.rows.n], [200, true, 5999, 5999]);
     ok('...with the runs of scanning and the target', Array.isArray(j1.runs) && j1.runs.length >= 1 && j1.target === 25);
     ok('...and no place or position in it', !/lat|lon|pickup|dropoff|"text"/.test(ans.body));
+    // The every-offer CSV's GPS comes from /api/journal, which the owner's
+    // own browser asks of his own server, never from /api/trends.
+    var jj = JSON.parse((await get(full.port, '/api/journal?days=30&limit=5')).body);
+    eq('...the fix reaches the offers page by /api/journal alone, with the rig\'s keepPlaces (none heard: no scanner)',
+       [jj.offers.some(function (o) { return o.lat === 12.3 && o.gpsOk === true; }), jj.keepPlaces], [true, null]);
     var takenAt = [];
     j1.rows.cols.flags.forEach(function (f, i) { if (f & T.F_TAKEN) takenAt.push(i); });
     var srvT = T.unpack(j1.rows).filter(function (r) { return r.taken; });

@@ -974,6 +974,19 @@ REC_TWO = {
     'money': {'pay': 10.0, 'minutes': 15.0, 'perHour': 40.0, 'delivery': True},
     'flags': [], 'missing': ['drive: no odometer reading kept for this order']}
 FEEDS['records'] = dict(FEEDS['took six'], records=[REC_TWO, REC_ONE])
+# [every offer csv] The Offers tab's every-offer CSV (the owner, Nov 2026:
+# "the CSV download does not seem to include the GPS data"). The twelve
+# offers, two with the car's fix (one the gate refused) at the suites'
+# invented open-water point, one pickup that reads as a formula; the rig's
+# keepPlaces on, then off; and a range whose list was capped, so the file
+# asks again with no cap.
+_EO = [dict(o) for o in TOOK_SIX]
+_EO[0].update(lat=12.3456789, lon=45.6, gpsOk=True, gpsErr=6.0, gpsAge=1.0, gpsMode=3)
+_EO[2].update(lat=12.31, lon=45.61, gpsOk=False, gpsWhy='rough', gpsErr=129.2)
+_EO[1].update(pickup='=HYPERLINK("http://example.invalid")')
+FEEDS['every offer'] = dict(FEEDS['took six'], offers=_EO, keepPlaces=True)
+FEEDS['every offer no places'] = dict(FEEDS['every offer'], keepPlaces=False)
+FEEDS['every offer capped'] = dict(FEEDS['every offer'], total=99, truncated=True)
 # [reread] The 17 Nov evening's offers, as the server's fold now hands them
 # over (server.js withPay): one whose payout another reading of the same offer
 # gave, one whose text held only its Boost+ amount, and an ordinary one.
@@ -1492,16 +1505,43 @@ const TEXT = (sel) => {
         if (d1) d1.open = true;
         const block = (d) => d && d.querySelector('dl.record');
         const a = document.getElementById('recordsCsv');
-        let csv = null;
+        let csv = null, bom = null;
         if (!a.hidden && a.href) {
           try { csv = await (await fetch(a.href)).text(); } catch (e) { csv = 'ERR ' + e; }
+          // .text() drops a byte-order mark; the bytes keep it.
+          try { bom = Array.from(new Uint8Array(await (await fetch(a.href)).arrayBuffer()).slice(0, 3)); } catch (e) { bom = null; }
         }
-        return { head: document.getElementById('recordsHead').hidden ? null
+        return { bom: bom, head: document.getElementById('recordsHead').hidden ? null
                    : flat(document.getElementById('recordsHead')),
                  lead: flat(document.getElementById('recordsLead')),
                  one: flat(block(d1)), two: flat(block(row('r2'))), three: !!block(row('r3')),
                  csvShown: !a.hidden, download: a.getAttribute('download'), csv: csv,
                  asked: (window.__asked || []).filter((u) => u.indexOf('blob:') !== 0) };
+      });
+    }
+    // [every offer csv] The Offers tab's every-offer file: made only on the
+    // press (trends.js fetched then, not before), read back through the link.
+    if (name.indexOf('every offer') === 0) {
+      out[name].everyOffer = await page.evaluate(async () => {
+        const flat = (el) => el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : '';
+        const a = document.getElementById('offersCsv');
+        const before = { trends: typeof window.Trends, href: a.getAttribute('href'),
+                         says: flat(document.getElementById('offersCsvSays')),
+                         shown: !document.getElementById('offersCsvLine').hidden };
+        a.click();
+        for (let i = 0; i < 200 && !/^(blob|data):/.test(a.getAttribute('href') || ''); i++) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        const href = a.getAttribute('href') || '';
+        let bytes = null, csv = null;
+        if (/^blob:/.test(href)) {
+          const buf = new Uint8Array(await (await fetch(href)).arrayBuffer());
+          bytes = Array.from(buf.slice(0, 3));
+          csv = new TextDecoder('utf-8').decode(buf);
+        }
+        return { before: before, scheme: href.split(':')[0], bytes: bytes, csv: csv,
+                 download: a.getAttribute('download'), says: flat(document.getElementById('offersCsvSays')),
+                 asked: (window.__asked || []).filter((u) => u.indexOf('/api/journal') === 0) };
       });
     }
     if (name === 'gold') {
@@ -2501,6 +2541,49 @@ try:
        sorted(set(u.split('?')[0] for u in _rec.get('asked') or [])),
        sorted(set(u.split('?')[0] for u in ((got.get('took six') or {}).get('records') or {})
                   .get('asked') or [])))
+    eq('[order record csv] ...with a byte-order mark in front, so Excel reads it as UTF-8, and its columns '
+       'unmoved (the header above is the report\'s, word for word)', _rec.get('bom'), [0xef, 0xbb, 0xbf])
+
+    # --- [every offer csv] the Offers tab's spreadsheet of every offer -------
+    _eo = (got.get('every offer') or {}).get('everyOffer') or {}
+    _eob = _eo.get('before') or {}
+    eq('[every offer csv] nothing is made before the press: no trends.js, no file, the line shown with its lead',
+       (_eob.get('trends'), _eob.get('href'), _eob.get('shown'), 'GPS fix' in (_eob.get('says') or '')),
+       ('undefined', '#', True, True))
+    _erows = list(_csv.reader(_io.StringIO(_eo.get('csv') or '')))
+    _ehead = _erows[0] if _erows else []
+    eq('[every offer csv] the press makes it here, a file with a byte-order mark, one row per offer, Excel\'s '
+       'date-time first', (_eo.get('scheme'), _eo.get('bytes'), len(_erows) - 1, _ehead[:8]),
+       ('blob', [0xef, 0xbb, 0xbf], 12, ['datetime', 'date', 'time', 'weekday', 'hour', 'driver_day',
+                                         'driver_weekday', 'week_start']))
+    _eby = {r[_ehead.index('offer_id')]: dict(zip(_ehead, r)) for r in _erows[1:]} if 'offer_id' in _ehead else {}
+    _e0, _e1, _e2, _e5 = (_eby.get(k, {}) for k in ('r0', 'r1', 'r2', 'r5'))
+    _t0 = time.localtime(NOW / 1000.0)
+    eq('[every offer csv] the card\'s moment on this clock, and the GPS of a row with a fix: six places, yes, metres',
+       (_e0.get('datetime'), _e0.get('lat'), _e0.get('lon'), _e0.get('gps_ok'), _e0.get('gps_err_m')),
+       (time.strftime('%Y-%m-%d %H:%M:%S', _t0), '12.345679', '45.6', 'yes', '6'))
+    eq('[every offer csv] ...a fix the gate refused is written and says no; a row with none is empty',
+       (_e2.get('lat'), _e2.get('gps_ok'), _e5.get('lat'), _e5.get('gps_ok')), ('12.31', 'no', '', ''))
+    eq('[every offer csv] the driver\'s own tick is "taken"; a card nobody answered for is empty, never a take',
+       (_e0.get('driver_marked'), _eby.get('r9', {}).get('driver_marked')), ('taken', ''))
+    ok_('[every offer csv] a pickup that reads as a formula is defused (%r)' % _e1.get('pickup'),
+        (_e1.get('pickup') or '').startswith("'=HYPERLINK"))
+    ok_('[every offer csv] the line then says how many, how many with a fix, the cut, and that silence is no take (%r)'
+        % _eo.get('says'), re.search(r'^12 offers, 2 with a GPS fix\. good_top20_of_range is a \$/hr of \$[\d.]+ or '
+                                     r'more, the top 20% of this range\..*left empty\.$', _eo.get('says') or ''))
+    ok_('[every offer csv] ...named for its day (%r), and nothing asked but the load\'s own journal question'
+        % _eo.get('download'), re.match(r'^every-offer-\d{4}-\d\d-\d\d\.csv$', _eo.get('download') or '')
+        and len(_eo.get('asked') or []) == 1)
+    _en = (got.get('every offer no places') or {}).get('everyOffer') or {}
+    _enr = list(_csv.reader(_io.StringIO(_en.get('csv') or '')))
+    _en0 = dict(zip(_enr[0], [r for r in _enr[1:] if r[-1] == 'r0'][0])) if len(_enr) > 1 else {}
+    eq('[every offer csv] keepPlaces off: the columns stay, empty, and the line says so before and after the press',
+       (_enr[0] if _enr else None, _en0.get('lat'), _en0.get('gps_ok'), _en0.get('pickup'),
+        'keepPlaces is off' in ((_en.get('before') or {}).get('says') or ''), 'keepPlaces is off' in (_en.get('says') or '')),
+       (_ehead, '', '', '', True, True))
+    _ec = (got.get('every offer capped') or {}).get('everyOffer') or {}
+    ok_('[every offer csv] a range whose list was capped asks again with no cap for the file (%r)' % _ec.get('asked'),
+        len(_ec.get('asked') or []) == 2 and 'limit=0' in (_ec.get('asked') or ['', ''])[1])
 
     # --- what the page opens on ---------------------------------------------
     #

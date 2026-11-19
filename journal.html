@@ -177,11 +177,14 @@
   #runsAll[hidden] { display: none; }
   /* The order records' download, shaped like the button above it: a link
      because it is one (a file made here, from rows already on the page). */
-  #recordsCsv { display: inline-block; font-size: 12px; font-weight: 700;
+  #recordsCsv, #offersCsv { display: inline-block; font-size: 12px; font-weight: 700;
                 min-height: 52px; line-height: 38px; padding: 6px 12px;
                 color: var(--text); border: 1px solid var(--line); border-radius: 8px;
                 text-decoration: none; }
-  #recordsCsv[hidden] { display: none; }
+  #recordsCsv[hidden], #offersCsvLine[hidden] { display: none; }
+  /* ...but at the page's 15px floor: the Offers tab is on screen at the
+     panel sizes rpi/test_layout.py measures, where 12px fails. */
+  #offersCsv { font-size: 15px; }
   /* What the app paid (the owner, 7 Nov: "compare what uber actually paid
      compared to the expected pay of the order"). A box like the review's,
      its one big control the file picker's label, a finger's 52px like every
@@ -1206,6 +1209,15 @@
   <p class="hint" id="findNote" hidden></p>
   <div id="log"></div>
   <p class="hint" id="more"></p>
+  <!-- Every offer in this range as a spreadsheet (the owner, Nov 2026: "the
+       CSV download does not seem to include the GPS data ... could the CSV
+       output be improved so the dates and times are also Excel friendly").
+       Made here on the press, by trends.js offersCsv, from the rows this page
+       asks /api/journal for; nothing goes anywhere else. Hidden in lite,
+       which never loads trends.js. -->
+  <p class="hint" id="offersCsvLine"><a id="offersCsv" href="#" download="every-offer.csv">⤓ Every offer (CSV)</a>
+    <span id="offersCsvSays">One row per offer in this range, for a spreadsheet: Excel dates, the car's GPS fix
+      where the card has one.</span></p>
   </section>
   </div>
 
@@ -1748,7 +1760,7 @@
    'took', 'tookHead', 'chips', 'sorts', 'week', 'weekHead',
    'pairs', 'pairsHead', 'pairsLead', 'runsAll',
    'real', 'realHead', 'realLead', 'waits', 'waitsHead', 'waitsLead',
-   'recordsHead', 'recordsLead', 'recordsCsv',
+   'recordsHead', 'recordsLead', 'recordsCsv', 'offersCsvLine', 'offersCsv', 'offersCsvSays',
    'earnings', 'earningsFiles', 'earningsSays', 'earningsInstall', 'earningsNeeds',
    'earningsNone', 'earningsReread', 'earningsForget', 'earningsDays', 'earningsDay',
    'ppm', 'ppmHead', 'ppmLead', 'err', 'errHead', 'errLead',
@@ -3948,9 +3960,17 @@
   function f2(v) { return typeof v === 'number' && isFinite(v) ? v.toFixed(2) : ''; }
   function fg(v) { return typeof v === 'number' && isFinite(v) ? String(+v.toFixed(6)) : ''; }
   // Quoted as Python's csv module quotes: only a field holding a comma, a
-  // quote or a line break, with its quotes doubled.
+  // quote or a line break, with its quotes doubled. And defused where a
+  // spreadsheet would run it as a formula: a store's name, a door or a note
+  // is what a reader made of a phone, and one that opens with = + - @ (a
+  // misread icon row, "+ 1 order") gets an apostrophe in front. trends.js
+  // safeCell's rule, copied because this list is drawn without that script;
+  // a plain number such as paid_minus_card's -3.50 keeps its sign.
+  var CSV_FORMULA_LEAD = /^[=+\-@\t\r]/;
+  var CSV_PLAIN_NUMBER = /^[-+]?(\d+\.?\d*|\.\d+)$/;
   function csvCell(v) {
     var s = String(v === null || v === undefined ? '' : v);
+    if (CSV_FORMULA_LEAD.test(s) && !CSV_PLAIN_NUMBER.test(s)) s = "'" + s;
     return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
 
@@ -4029,7 +4049,10 @@
     var last = recs[recs.length - 1].times && recs[recs.length - 1].times.took;
     el.recordsCsv.setAttribute('download', 'order-records-' + dateOf(first)
       + (dateOf(last) !== dateOf(first) ? '-to-' + dateOf(last) : '') + '.csv');
-    var text = recordsCsv(recs);
+    // With a byte-order mark in front, so Excel opens it as UTF-8 (a store's
+    // "é" or the "->" words otherwise come out as noise); the columns and
+    // their order are the report's and do not move.
+    var text = '\ufeff' + recordsCsv(recs);
     try {
       recordsUrl = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
       el.recordsCsv.href = recordsUrl;
@@ -4037,6 +4060,105 @@
       // No Blob URL (an old browser): the same text as a data: link.
       el.recordsCsv.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(text);
     }
+  }
+
+  /* EVERY OFFER AS A SPREADSHEET (#offersCsv; trends.js offersCsv says what
+     each column is and why). Nothing is made until the press: trends.js is
+     fetched then, as the Trends tab fetches it, so a driver who never saves
+     one pays nothing on a range press. The rows are the range's own — this
+     page's copy where it holds every offer in the range, else the same
+     question asked again with no cap, because the JSON cap guards the list,
+     not a file (see load()). The busy marks are Advice.busy over those rows,
+     as render() works them, and a pairing is the server's own record. One
+     file per range: the next load throws the last one away. */
+  var offersCsvUrl = null;
+  var offersCsvBusy = false;
+  var offersCsvSeq = 0;
+  var OFFERS_CSV_LEAD = 'One row per offer in this range, for a spreadsheet: Excel dates, the car\'s GPS fix '
+    + 'where the card has one.';
+  // What keepPlaces means for the file, said before the press: the server
+  // says the rig's setting (null where it has not heard, as at home).
+  function offersCsvPlaces(data) {
+    return data && data.keepPlaces === false
+      ? ' keepPlaces is off on the rig, so lat, lon, gps_* and the pickup and dropoff columns are left empty.'
+      : '';
+  }
+  function resetOffersCsv(data) {
+    offersCsvSeq += 1;
+    offersCsvBusy = false;
+    if (offersCsvUrl && window.URL && URL.revokeObjectURL) URL.revokeObjectURL(offersCsvUrl);
+    offersCsvUrl = null;
+    if (!el.offersCsv) return;
+    el.offersCsv.setAttribute('href', '#');
+    el.offersCsv.setAttribute('download', 'every-offer.csv');
+    el.offersCsvSays.textContent = OFFERS_CSV_LEAD + offersCsvPlaces(data);
+  }
+  function needTrends(done, failed) {
+    if (window.Trends && typeof window.Trends.offersCsv === 'function') { done(window.Trends); return; }
+    var s = document.createElement('script');
+    s.src = 'trends.js';
+    s.onload = function () { if (window.Trends) done(window.Trends); else failed(); };
+    s.onerror = failed;
+    document.head.appendChild(s);
+  }
+  function offersCsvRows(data, done, failed) {
+    var have = (data.offers || []).length;
+    if (!(typeof data.total === 'number' && data.total > have)) { done(data); return; }
+    fetch('/api/journal?limit=0&' + windowQuery())
+      .then(function (r) { return r.json(); })
+      .then(function (all) { if (all && Array.isArray(all.offers)) done(all); else failed(); })
+      .catch(failed);
+  }
+  if (el.offersCsv) {
+    el.offersCsv.addEventListener('click', function (e) {
+      // Made for this range already: the link is the file, and the browser
+      // saves it.
+      if (offersCsvUrl) return;
+      e.preventDefault();
+      if (offersCsvBusy || !lastData) return;
+      offersCsvBusy = true;
+      var seq = offersCsvSeq;
+      var base = lastData;
+      el.offersCsvSays.textContent = 'Making the file…';
+      function failed() {
+        if (seq !== offersCsvSeq) return;
+        offersCsvBusy = false;
+        el.offersCsvSays.textContent = 'The file could not be made (the scanner or the trends script did not '
+          + 'answer). Press again to try once more.';
+      }
+      needTrends(function (T) {
+        offersCsvRows(base, function (data) {
+          if (seq !== offersCsvSeq) return;
+          var busy = {};
+          try { busy = Advice.busy(Advice.usable(data.offers || [])) || {}; } catch (err) { busy = {}; }
+          var paired = {};
+          (data.pairs || []).forEach(function (p) { if (p && p.id) paired[p.id] = true; });
+          var made = T.offersCsv(data.offers || [], { busy: busy, paired: paired, keepPlaces: data.keepPlaces });
+          var times = (data.offers || []).map(function (o) {
+            return typeof o.firstAt === 'number' ? o.firstAt : o.at;
+          }).filter(function (t) { return typeof t === 'number' && isFinite(t); });
+          var first = times.length ? Math.min.apply(null, times) : null;
+          var last = times.length ? Math.max.apply(null, times) : null;
+          el.offersCsv.setAttribute('download', 'every-offer' + (first === null ? '' : '-' + dateOf(first)
+            + (dateOf(last) !== dateOf(first) ? '-to-' + dateOf(last) : '')) + '.csv');
+          try {
+            offersCsvUrl = URL.createObjectURL(new Blob([T.BOM + made.text], { type: 'text/csv;charset=utf-8' }));
+          } catch (err) {
+            offersCsvUrl = 'data:text/csv;charset=utf-8,' + encodeURIComponent(T.BOM + made.text);
+          }
+          el.offersCsv.href = offersCsvUrl;
+          offersCsvBusy = false;
+          el.offersCsvSays.textContent = made.rows + (made.rows === 1 ? ' offer, ' : ' offers, ') + made.gps
+            + ' with a GPS fix. ' + (made.cut === null ? ''
+              : 'good_top' + made.top + '_of_range is a $/hr of ' + money(made.cut, 2) + ' or more, the top '
+                + made.top + '% of this range. ')
+            + 'driver_marked is only your own ✓ or Passed: a card nobody answered for is left empty.'
+            + offersCsvPlaces(data);
+          // The press that asked for it saves it.
+          el.offersCsv.click();
+        }, failed);
+      }, failed);
+    });
   }
 
   /* WHAT THE APP PAID (the owner, 7 Nov: "compare what uber actually paid
@@ -5242,6 +5364,8 @@
 
   function render(data) {
     lastData = data;
+    // The last range's file is not this range's.
+    resetOffersCsv(data);
     // Rows the scanner was not sure of are kept in the file on purpose, and
     // must not shift a percentile. `whole` is the one that matters most: a
     // reading missing a leg is not merely noisy, it is biased upwards — the
@@ -6046,6 +6170,9 @@
         // keystroke redrew the previous window's rows beneath "Cannot reach
         // the scanner".
         view = null;
+        // ...and no file of the last range under this one's buttons.
+        lastData = null;
+        resetOffersCsv(null);
         showPairs([]);
         showReal([]);
         showRecords([]);
@@ -6928,6 +7055,10 @@
       if (ans.lite) {
         var t = document.getElementById('trendsTab');
         if (t) t.hidden = true;
+        // ...and the every-offer file, which is made by trends.js: lite
+        // never loads that script, and keeps the list itself.
+        var oc = document.getElementById('offersCsvLine');
+        if (oc) oc.hidden = true;
         return;
       }
       document.getElementById('blocksCard').hidden = true;
@@ -8486,7 +8617,8 @@
         + T.csvHourly(T.hourly(rows, { days: 'weekend' }), 'weekend').split('\n').slice(1).join('\n');
       [['trCsvDays', day, 'trends-' + (st.by === 'week' ? 'weekly' : 'daily') + '.csv'],
        ['trCsvHours', hours, 'trends-hourly.csv']].forEach(function (c) {
-        var u = URL.createObjectURL(new Blob([c[1]], { type: 'text/csv' }));
+        // T.BOM in front, so Excel opens the file as UTF-8 (trends.js, CSV).
+        var u = URL.createObjectURL(new Blob([T.BOM + c[1]], { type: 'text/csv;charset=utf-8' }));
         urls.push(u);
         $(c[0]).href = u;
         $(c[0]).setAttribute('download', c[2]);

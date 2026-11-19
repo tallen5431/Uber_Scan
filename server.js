@@ -15693,6 +15693,15 @@ function route(req, res) {
                                       // towns (targetsOut). Over the offers
                                       // listed, as the page's own replay is.
                                       targets: targetsOut(offers, taken),
+                                      // The rig's "keepPlaces" as the
+                                      // scanner last said it (null where it
+                                      // has not: the copy at home), for the
+                                      // every-offer CSV, which leaves its
+                                      // GPS and place columns empty while it
+                                      // is off (trends.js offersCsv). A
+                                      // setting, not a place.
+                                      keepPlaces: typeof scanner.keepPlaces === 'boolean'
+                                        ? scanner.keepPlaces : null,
                                       offers: offers }),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });
