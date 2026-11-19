@@ -2064,6 +2064,23 @@ function nbx() {
      [wn.perHour, wn.good, wn.stays, wn.staysGood, wn.toGood, ws.good, ws.staysGood, ws.toGood],
      [25, 1, 4, 1, 0, 0, 0, null]);
   ok('[waited] ...each with its median $/hr and an interval', wn.median > 28 && wn.medianCi && ws.median < 19);
+  // R1: the median bootstrap's typed-array path gives what the plain one gave, seed for seed.
+  (function () {
+    var r9 = (function (seed) { var x = seed >>> 0; return function () { x = (Math.imul(1664525, x) + 1013904223) >>> 0; return x / 4294967296; }; }(41));
+    var same = true;
+    [2, 3, 10, 11, 57, 400].forEach(function (n) {
+      var v = []; for (var i = 0; i < n; i++) v.push(Math.round(r9() * 4000) / 100 + (i % 7 === 0 ? 0 : 0.005));
+      [1, 77, 123456].forEach(function (sd) {
+        if (JSON.stringify(P.bootCI(v, sd)) !== JSON.stringify(P.bootCIPlain(v, sd))) same = false;
+      });
+    });
+    ok('[R1] the median bootstrap\'s typed-array path gives the plain path\'s interval for the same seed (6 sizes x 3 seeds)', same);
+  }());
+  ok('[waited] F8: the stays\' columns say "at target" (the card\'s own target), not "good", which is When & where\'s cut',
+     (function (t) {
+       var names = t.cols.map(function (c) { return c.h; }).join('|');
+       return /min to first card at target/.test(names) && /stays with a card at target/.test(names) && !/first good/.test(names);
+     }(P.waitedTable(P.waitingLine(wRowsA, wTakenA, wTown, {}), 'town', function (x) { return x; }, 'town'))));
   var wPage = P.html(repWA);
   ok('[waited] the page has the tab and says it is offered, not earned, and dispatched near the car',
      /<section data-tab="waited">/.test(wPage) && /Offered, not earned/.test(wPage)
@@ -2340,6 +2357,33 @@ function nbx() {
   // a coordinate would carry five places)
   ok('[privacy] ...and holds no coordinate, pickup, dropoff or id of a card',
      !/"(lat|lon|pickup|dropoff|id|at|text)"/.test(wwJson) && !/\d\.\d{3,}/.test(wwJson) && !/"e[xyzth]\d/.test(wwJson));
+
+  /* --- the whole journal, page by page (the reporting review's R2) --- */
+  // A fake server listing at most 20, the newest, before `until`; two offers
+  // share the moment the first page is cut at. And one from before `until`,
+  // which sends the same page whatever it is asked.
+  var jr = [];
+  for (var ji = 1; ji <= 45; ji++) jr.push({ id: 'j' + ji, at: 1000 * (ji === 26 ? 25 : ji) });
+  function fakeServer(knowsUntil) {
+    return async function (u) {
+      var m = /[?&]until=(\d+)/.exec(u), until = knowsUntil && m ? Number(m[1]) : 0;
+      var win = jr.filter(function (o) { return !until || o.at < until; });
+      return { ok: true, status: 200, body: { offers: win.slice(-20), total: win.length, count: Math.min(20, win.length),
+                                              truncated: win.length > 20, taken: [{ id: 'first page only' }] } };
+    };
+  }
+  var jAll = await P.loadJournal('http://fake', null, fakeServer(true));
+  eq('[R2] past the server\'s limit the report pages back with `until` and reads every offer once, oldest first',
+     [jAll.offers.length, jAll.pages, jAll.truncated, jAll.offers[0].id, jAll.offers[44].id,
+      jAll.offers.filter(function (o, i, a) { return a.indexOf(o) !== i; }).length, jAll.taken.length],
+     [45, 3, false, 'j1', 'j45', 0, 1]);
+  var jOld = await P.loadJournal('http://fake', null, fakeServer(false));
+  eq('[R2] ...a server that cannot page sends the same page again: it stops, and says the read is cut',
+     [jOld.offers.length, jOld.pages, jOld.truncated, jOld.total], [20, 2, true, 45]);
+  var capRep = Object.assign({}, repSW, { source: { truncated: true, count: 20, total: 45 } });
+  ok('[R2] ...and the page says so at its head, not only on stdout',
+     /id="capped"><b>Not the whole journal:<\/b> the server sent 20 of 45 offers/.test(P.html(capRep))
+     && P.html(repSW).indexOf('id="capped"') < 0);
 
   console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
                    : '\nAll ' + pass + ' places-report checks passed');

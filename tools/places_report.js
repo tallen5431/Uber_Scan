@@ -198,14 +198,41 @@ function seedOf(text) {
 
 /* A percentile bootstrap interval for the median, 95%, or null under two.
  * `stat` another statistic of the resample in its place (a quantile, a mean). */
+/* The median's own path (the reporting review's R1): the resample in a
+ * Float64Array sorted in place, numerically by the engine, where MV.median
+ * copied every resample into a new array and sorted it through a compare
+ * function — the report's largest single cost on a 3x record. The same
+ * draws in the same order, the same middle value (or the mean of the two
+ * middle ones), so the same interval for the same seed: a check holds it. */
 function bootCI(values, seed, reps, stat) {
   if (!values || values.length < 2) return null;
   reps = reps || BOOTS;
-  stat = stat || MV.median;
+  var r = rng(seed), n = values.length, meds = new Float64Array(reps), k, i;
+  if (!stat) {
+    var tb = new Float64Array(n), mid = Math.floor(n / 2), odd = n % 2 === 1;
+    for (k = 0; k < reps; k++) {
+      for (i = 0; i < n; i++) tb[i] = values[Math.floor(r() * n)];
+      tb.sort();
+      meds[k] = odd ? tb[mid] : (tb[mid - 1] + tb[mid]) / 2;
+    }
+  } else {
+    var buf = new Array(n);
+    for (k = 0; k < reps; k++) {
+      for (i = 0; i < n; i++) buf[i] = values[Math.floor(r() * n)];
+      meds[k] = stat(buf);
+    }
+  }
+  meds.sort();
+  return [round2(meds[Math.floor(0.025 * reps)]), round2(meds[Math.ceil(0.975 * reps) - 1])];
+}
+// The way it was, kept for the check that the fast path gives the same.
+function bootCIPlain(values, seed, reps) {
+  if (!values || values.length < 2) return null;
+  reps = reps || BOOTS;
   var r = rng(seed), n = values.length, meds = new Array(reps), buf = new Array(n);
   for (var k = 0; k < reps; k++) {
     for (var i = 0; i < n; i++) buf[i] = values[Math.floor(r() * n)];
-    meds[k] = stat(buf);
+    meds[k] = MV.median(buf);
   }
   meds.sort(function (a, b) { return a - b; });
   return [round2(meds[Math.floor(0.025 * reps)]), round2(meds[Math.ceil(0.975 * reps) - 1])];
@@ -999,11 +1026,16 @@ function dropTable(trips, keyName, hold) {
  *     car was at the earlier card. The Busy tab's spells, off the GPS log,
  *     are the measured version where --gps is given.
  *   - Takes the driver never pressed Took on leave their drive in as waiting.
- *   - Minutes to the first good offer start at the first CARD seen in an
- *     area, not at arrival (arrival is not on the record without the log),
- *     so a stay whose first card was good reads 0.
- * "Good" is the row's own target at the time (perHour >= target), the
- * offers page's Trends tab's word; "rig said take" elsewhere is the verdict. */
+ *   - Minutes to the first card at target start at the first CARD seen in
+ *     an area, not at arrival (arrival is not on the record without the
+ *     log), so a stay whose first card was at target reads 0.
+ * "At target" here is the row's own target at the time (perHour >= target),
+ * and said so on the page (the reporting review's F8): it is NOT the
+ * offers page's Trends ruler nor When & where's "good", which are one
+ * dollar cut, the top X% of the whole range — this comment once called it
+ * the Trends tab's word, from before Trends moved to its ruler, and the
+ * columns said "first good", which on this report means the other thing.
+ * "Rig said take" elsewhere is the verdict. */
 var CREDIT_MAX_MIN = 10;
 
 function goodOf(o) {
@@ -1075,8 +1107,8 @@ function waitedTable(line, keyName, label, what) {
   return { cols: [C('name', what, 't'), C('block', 'hours', 't'), C('n', 'offers', 'n'), C('days', 'days', 'n'),
                   C('hours', 'hours there (inferred)', 'h'), C('perHour', 'offers / hr there', 'r'),
                   C('median', 'median $/hr', '$'), C('medianCi', '95%', '$ci'), C('good', 'cleared target', '%'),
-                  C('stays', 'stays', 'n'), C('staysGood', 'stays with a good offer', '%'),
-                  C('toGood', 'min to first good (from first card)', 'min')], rows: out };
+                  C('stays', 'stays', 'n'), C('staysGood', 'stays with a card at target', '%'),
+                  C('toGood', 'min to first card at target (from first card)', 'min')], rows: out };
 }
 
 /* --- when & where: which area, at the weekday and hours picked -----------
@@ -3575,8 +3607,9 @@ function html(r) {
     + wd.creditMaxMin + ' minutes and none across a silence over ' + r.nextGapMin + ', credited to where the car was at '
     + 'the earlier card (the Busy tab\'s spells, off the GPS log, are the measured version). <b>Cleared target</b> is '
     + 'the card\'s $/hr at or over the target the panel judged it by. A <b>stay</b> is consecutive cards in one area '
-    + 'with no silence; its minutes to the first good offer start at its first CARD, not at arrival, so a stay whose '
-    + 'first card was good reads 0. Figures at ' + r.descMinN + ' offers on ' + r.minOutings + ' shift days.</p>'
+    + 'with no silence; its minutes to the first card at target start at its first CARD, not at arrival, so a stay '
+    + 'whose first card was at target reads 0. At target is each card\'s own target at the time, not the top-X% '
+    + '"good" of When &amp; where and section 7. Figures at ' + r.descMinN + ' offers on ' + r.minOutings + ' shift days.</p>'
     + fold('f-waitedAreaTown', 'By town', '<div id="m-waitedAreaTown"></div>')
     + fold('f-waitedAreaGrid', 'By ' + r.gridMi + '-mile cell', '<div id="m-waitedAreaGrid"></div>')
     + '<h3>From a drop to the next Took</h3>'
@@ -3620,7 +3653,12 @@ function html(r) {
       }).join('') + '</span>';
     }).join('') + '</div></nav>\n';
   var strip = '<p class="strip" id="strip"><b>Offered, not earned</b>; only places near where you wait; '
-    + pct(cvAll.unplaced.n, placedTotal) + ' of pickups unplaced. <a href="#overview">Read before the numbers</a></p>\n';
+    + pct(cvAll.unplaced.n, placedTotal) + ' of pickups unplaced. <a href="#overview">Read before the numbers</a></p>\n'
+    // A capped read said on the page, not only on stdout (the reporting
+    // review's R2): every figure below is over what was read.
+    + (r.source && r.source.truncated ? '<p class="strip warn" id="capped"><b>Not the whole journal:</b> the server sent '
+      + r.source.count + ' of ' + r.source.total + ' offers and would not page further, so every figure here is over the '
+      + 'newest ' + r.source.count + '. Narrow the window with --since, or update the server.</p>\n' : '');
   return '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
     + '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
     + '<title>Strategy &amp; Places Report</title>\n'
@@ -4572,7 +4610,7 @@ var PAGE_CSS = [
   '.nav .tabs button{flex:none;min-height:36px;padding:4px 12px}',
   '@media (min-width:760px){.nav .tabs{flex-wrap:wrap;overflow:visible}}',
   // The gist of the old banner, under the nav on every tab but the Overview.
-  '.strip{font-size:12px;color:var(--ink2);margin:6px 0 0}.strip[hidden]{display:none}',
+  '.strip{font-size:12px;color:var(--ink2);margin:6px 0 0}.strip[hidden]{display:none}.strip.warn{color:var(--ink)}',
   '.bar{position:static;border-bottom:0;padding:8px 0 0}.bar[hidden]{display:none}',
   // A heading a link lands on clears the sticky nav.
   'h3,details.fold{scroll-margin-top:110px}',
@@ -5325,13 +5363,52 @@ async function getJson(u) {
   return { ok: res.ok, status: res.status, body: body };
 }
 
-async function loadJournal(base, sinceMs) {
-  var u = base.replace(/\/+$/, '') + '/api/journal?days=3650&limit=20000'
+/* The whole journal, a page of JOURNAL_PAGE at a time (the reporting
+ * review's R2). The server lists at most 20,000 offers, the newest, and the
+ * report read one answer, so past 20,000 it quietly described the newest
+ * 20,000 and said so only on stdout. It now asks again for the offers before
+ * the oldest it holds (`until`, the server's), keeping the first answer's
+ * takes, records and every figure the server worked over the whole window,
+ * until the server says nothing was cut. A server from before `until` sends
+ * the same page again: no new offer, so it stops, and the answer keeps
+ * `truncated`, which the page now says at its head. `getter` stands in for
+ * the network in the checks. */
+var JOURNAL_PAGE = 20000;
+var JOURNAL_PAGES_MAX = 50;
+async function loadJournal(base, sinceMs, getter) {
+  var get = getter || getJson;
+  var root = base.replace(/\/+$/, '') + '/api/journal?days=3650&limit=' + JOURNAL_PAGE
     + (sinceMs ? '&since=' + sinceMs : '');
-  var got = await getJson(u);
-  if (!got.ok || !got.body) throw new Error(u + ' answered ' + got.status);
-  if (got.body.unreadable) throw new Error('the server could not read its journal (' + got.body.unreadable + ')');
-  return got.body;
+  async function one(until) {
+    var u = root + (until ? '&until=' + until : '');
+    var got = await get(u);
+    if (!got.ok || !got.body) throw new Error(u + ' answered ' + got.status);
+    if (got.body.unreadable) throw new Error('the server could not read its journal (' + got.body.unreadable + ')');
+    return got.body;
+  }
+  var body = await one(null);
+  var offers = Array.isArray(body.offers) ? body.offers.slice() : [];
+  var seen = Object.create(null);
+  offers.forEach(function (o) { if (o && typeof o.id === 'string') seen[o.id] = true; });
+  var page = body, pages = 1;
+  while (page.truncated && pages < JOURNAL_PAGES_MAX) {
+    var oldest = Infinity;
+    (page.offers || []).forEach(function (o) { if (o && typeof o.at === 'number' && o.at < oldest) oldest = o.at; });
+    if (!isFinite(oldest)) break;
+    // One past the oldest, so a second offer at that same moment, cut off
+    // by the cap, comes too; the ids already held are skipped.
+    page = await one(oldest + 1);
+    pages += 1;
+    var fresh = (page.offers || []).filter(function (o) { return !(o && typeof o.id === 'string' && seen[o.id]); });
+    if (!fresh.length) break;
+    fresh.forEach(function (o) { if (o && typeof o.id === 'string') seen[o.id] = true; });
+    offers = fresh.concat(offers);
+  }
+  body.offers = offers;
+  body.pages = pages;
+  body.count = offers.length;
+  body.truncated = offers.length < (body.total || 0);
+  return body;
 }
 
 /* A Nominatim jsonv2 list as server.js's relay hands it to a page (nbxHits):
@@ -5681,7 +5758,9 @@ async function main(argv) {
   var offers = Array.isArray(body.offers) ? body.offers : [];
   if (body.truncated) {
     console.error('warning: the server sent ' + body.count + ' of ' + body.total
-                  + ' offers (its limit). Narrow the window with --since.');
+                  + ' offers (its limit, and it did not page: an older server?). Narrow the window with --since.');
+  } else if (body.pages > 1) {
+    console.log('journal: ' + body.count + ' offers, read in ' + body.pages + ' pages of ' + JOURNAL_PAGE);
   }
 
   // The relay asked: --relay, else the journal's own server.
@@ -5869,7 +5948,7 @@ async function main(argv) {
     // tab's miles where an order left one. An older server sends none.
     records: Array.isArray(body.records) ? body.records : [],
     presses: presses, region: region, streetsSaid: st.said, roadSaid: roadSaid, waitsFrom: waitsFrom,
-    source: { server: o.server, count: body.count, total: body.total,
+    source: { server: o.server, count: body.count, total: body.total, pages: body.pages || 1,
               truncated: !!body.truncated, since: o.since } });
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, 'index.html'), html(report));
@@ -5929,6 +6008,7 @@ module.exports = {
   SHORT_MILES: SHORT_MILES,
   DEAD_MAX_MIN: DEAD_MAX_MIN, SIZE_BANDS: SIZE_BANDS, TAKE_SLACK_MS: TAKE_SLACK_MS,
   GROUPS: GROUPS, TABS: TABS, blockChart: blockChart, fold: fold,
+  bootCIPlain: bootCIPlain, loadJournal: loadJournal, JOURNAL_PAGE: JOURNAL_PAGE,
   whenWhere: whenWhere, reportRulers: reportRulers, wwSlotOf: wwSlotOf, poissonCI: poissonCI, WW_BLOCKS: WW_BLOCKS, WW_TOPS: WW_TOPS,
   WW_TOP: WW_TOP, WW_MIN_HOURS: WW_MIN_HOURS, WW_MIN_DAYS: WW_MIN_DAYS, WW_CONF: WW_CONF,
 };

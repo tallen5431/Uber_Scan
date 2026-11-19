@@ -985,6 +985,15 @@ function offer(x) {
     for (var j2 = 0; j2 < 6000; j2++) if (now - 20 * 86400000 + j2 * 240000 >= now - 7 * 86400000) inSeven += 1;
     ok('...the range is an honest span: 7 days holds the last 7 days\' offers (' + j7.total + ' of ' + inSeven + ')',
        Math.abs(j7.total - inSeven) <= 2);
+    // R2 (the reporting review): /api/journal's `until` lists only the older
+    // offers, so a reader past `limit` can page back; the window's figures stay.
+    var untilAt = now - 10 * 86400000;
+    var ju = JSON.parse((await get(full.port, '/api/journal?days=30&limit=100&until=' + untilAt)).body);
+    var before10 = 0;
+    for (var j3 = 0; j3 < 6000; j3++) if (j3 !== 5 && now - 20 * 86400000 + j3 * 240000 < untilAt) before10 += 1;
+    eq('R2: /api/journal\'s until lists the newest `limit` offers before it, its total those before it, said cut',
+       [ju.offers.length, ju.offers.every(function (o) { return o.at < untilAt; }), Math.abs(ju.total - before10) <= 1,
+        ju.truncated], [100, true, true, true]);
     var page = (await get(full.port, '/journal.html')).body;
     ok('the offers page has the Trends tab, and loads trends.js only when it is opened',
        /data-view="trends"/.test(page) && !/<script src="trends\.js">/.test(page) && /s\.src = 'trends\.js'/.test(page));

@@ -15509,6 +15509,11 @@ function route(req, res) {
     // figures, and only the browser knows where the driver is and therefore
     // when their day began.
     var since = clampNumber(q.since, 0, 4102444800000, 0);
+    // ...and an end, for a reader that must page past `limit` (the places
+    // report, the reporting review's R2): only the offers LISTED stop before
+    // `until`; the window, its takes, records and every figure over it are
+    // the same as without it, so a second page is only older offers.
+    var until = clampNumber(q.until, 0, 4102444800000, 0);
     var withHidden = q.hidden === '1';
     return readJournal(function (rows, readErr, torn) {
       // This one may degrade — a driver looking at the offers page is better
@@ -15570,15 +15575,16 @@ function route(req, res) {
       if (!withHidden) {
         offers = offers.filter(function (r) { return !r.hidden; });
       }
+      // The whole window, before the cap: the per-mile tables and the orders
+      // taken describe every offer in it, not the newest `limit` of them, and
+      // an order whose card fell under the cap was missing from `taken`.
+      var windowed = offers;
+      if (until) offers = offers.filter(function (r) { return (r.at || 0) < until; });
       // How many there really are in this window, kept before the cap. Without
       // it the page cannot tell a window of 5000 offers from a window of
       // 60000 truncated to 5000 — and it was labelling the second one "All",
       // computing the median and the $/hr ladder over an unannounced subset.
       var total = offers.length;
-      // The whole window, before the cap: the per-mile tables and the orders
-      // taken describe every offer in it, not the newest `limit` of them, and
-      // an order whose card fell under the cap was missing from `taken`.
-      var windowed = offers;
       if (limit && offers.length > limit) offers = offers.slice(-limit);
       if (pathname === '/api/journal.csv') {
         // A journal that could not be READ is refused here rather than
