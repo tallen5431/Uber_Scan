@@ -5201,7 +5201,7 @@ function orderRecords(rows, floor) {
 function storeWaitsOut() {
   return storeWaits().map(function (st) {
     var s = st.waits.map(function (w) { return w.s; }).sort(function (a, b) { return a - b; });
-    var mid = s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+    var mid = percentileOf(s, 0.5);
     // ...and how many were found from the stop pattern (stopWaitsOf, the
     // owner's 7 Nov night: most pickups never pinned), and the worst: what
     // the places report's Store waits tab shows beside the median.
@@ -5538,36 +5538,41 @@ function storeWaitHeard(h, pin, e, nearAt) {
  * (Assemble.chainName) and whose stores on record are all one place —
  * otherwise which branch is a guess, and a guess is not said. */
 function storeWaitFor(name, pin) {
+  var hits = storeHits(name, pin);
+  var waits = hits ? newestWaits(hits) : [];
+  if (waits.length < STORE_WAITS_MIN) return null;
+  var sorted = waits.slice().sort(function (a, b) { return a - b; });
+  return { n: waits.length, avgMin: Math.max(1, Math.round(sumOf(waits) / waits.length / 60)),
+           medianS: Math.round(percentileOf(sorted, 0.5)) };
+}
+
+/* The stores on record that `name` at `pin` can be, by storeWaitFor's rule
+ * above, or null where which one is a guess. One copy, since the server
+ * review (Nov 2026): storeWaitNote had rebuilt this filter for itself, and
+ * the next change to the rule would have reached one of them. */
+function storeHits(name, pin) {
   var said = storeNameSaid(name);
   if (!said) return null;
   var near = function (a, b) { return MV.crowMiles(a, b) * 1609.344 <= STORE_NEAR_M; };
   var hits = storeWaits().filter(function (st) { return Assemble.sameStore(st.name, said); });
   if (pin && typeof pin.lat === 'number' && typeof pin.lon === 'number') {
-    hits = hits.filter(function (st) { return near(st, pin); });
-  } else if (Assemble.chainName(said) || !hits.every(function (st) { return near(st, hits[0]); })) {
-    return null;
+    return hits.filter(function (st) { return near(st, pin); });
   }
+  if (Assemble.chainName(said) || !hits.every(function (st) { return near(st, hits[0]); })) return null;
+  return hits;
+}
+
+// ...their newest STORE_WAITS_KEEP waits, in seconds, oldest first.
+function newestWaits(hits) {
   var waits = [];
   hits.forEach(function (st) { waits = waits.concat(st.waits); });
-  waits = waits.sort(function (a, b) { return a.at - b.at; }).slice(-STORE_WAITS_KEEP)
+  return waits.sort(function (a, b) { return a.at - b.at; }).slice(-STORE_WAITS_KEEP)
     .map(function (w) { return w.s; });
-  if (waits.length < STORE_WAITS_MIN) return null;
-  var sorted = waits.slice().sort(function (a, b) { return a - b; });
-  var mid = sorted.length >> 1;
-  var median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-  return { n: waits.length, avgMin: Math.max(1, Math.round(sumOf(waits) / waits.length / 60)),
-           medianS: Math.round(median) };
 }
 
-// A held order's store, at its first pin that names a pickup.
-function storeWaitOfHold(h) {
-  var pin = (Array.isArray(h && h.pickupPins) ? h.pickupPins : []).filter(function (p) {
-    return typeof p.q === 'string';
-  })[0] || null;
-  return storeWaitFor(storeNameOf(h, pin ? pin.q : null), pin);
-}
-
-// ...and its usual wait at similar hours, for the card (storeWaitNote).
+// A held order's usual wait at similar hours, for the card (storeWaitNote),
+// at its first pin that names a pickup. (A storeWaitOfHold beside it, the
+// same pin for storeWaitFor, had no caller anywhere and is gone.)
 function storeWaitNoteOfHold(h, now) {
   var pin = (Array.isArray(h && h.pickupPins) ? h.pickupPins : []).filter(function (p) {
     return typeof p.q === 'string';
@@ -5749,15 +5754,10 @@ var STORE_WAIT_HOURS_MS = 2 * 3600000;
 var STORE_WAIT_NOTE_MIN = 3;
 
 function storeWaitNote(name, pin, now) {
-  var said = storeNameSaid(name);
-  // storeWaitFor's own answer first, for its rule of which stores: null for
-  // a chain with no pin, or a name on record at more than one place.
-  if (!said || !storeWaitFor(name, pin)) return null;
-  var near = function (a, b) { return MV.crowMiles(a, b) * 1609.344 <= STORE_NEAR_M; };
-  var hits = storeWaits().filter(function (st) { return Assemble.sameStore(st.name, said); });
-  if (pin && typeof pin.lat === 'number' && typeof pin.lon === 'number') {
-    hits = hits.filter(function (st) { return near(st, pin); });
-  }
+  // storeWaitFor's rule of which stores (null for a chain with no pin, or a
+  // name on record at more than one place) and its floor of visits first.
+  var hits = storeHits(name, pin);
+  if (!hits || newestWaits(hits).length < STORE_WAITS_MIN) return null;
   var day = 86400000;
   var clock = function (t) {
     var d = new Date(t);
@@ -5773,9 +5773,7 @@ function storeWaitNote(name, pin, now) {
   });
   if (s.length < STORE_WAIT_NOTE_MIN) return null;
   s.sort(function (a, b) { return a - b; });
-  var mid = s.length >> 1;
-  var median = s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-  return { n: s.length, usualMin: Math.max(1, Math.round(median / 60)) };
+  return { n: s.length, usualMin: Math.max(1, Math.round(percentileOf(s, 0.5) / 60)) };
 }
 
 /* One heartbeat, for the pickups: each named pin of each order in the car,
