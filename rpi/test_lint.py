@@ -812,6 +812,48 @@ ok_('...and it is the zone the rig runs in, on the line that sets it (%r)'
     % (_tz_line.group(0) if _tz_line else None),
     _tz_line is not None and 'America/New_York' in _tz_line.group(0))
 
+# ...and that the suites which cannot share the machine never do.
+#
+# tools/test.sh runs most suites in a pool, several at once, and a named few
+# alone before it (ALONE there): the ones whose verdict is a budget on wall
+# time, which a busy machine fails for them, and the ones that read the whole
+# tree while another suite might be writing in it. A suite that times its own
+# work with perf_counter, process.hrtime or performance.now is the first kind
+# by construction, so it is held here by that and not by memory: one left off
+# the list passes alone and fails only on the day the pool is busy beside it,
+# which is a failure nobody can reproduce. And every name the two lists give is
+# a suite that exists, since a renamed suite drops out of ALONE without a word
+# and into the pool.
+_lane = {}
+for _var in ('ALONE', 'LONGEST'):
+    _m = re.search(r'^%s="([^"]*)"' % _var, _runner, re.M)
+    _lane[_var] = set(_m.group(1).split()) if _m else set()
+_suite_paths = {os.path.basename(_p): _p for _p in
+                glob.glob(os.path.join(ROOT, 'rpi', 'test_*.py'))
+                + glob.glob(os.path.join(ROOT, 'tools', 'test_*.py'))
+                + glob.glob(os.path.join(ROOT, 'tests', '*.test.js'))}
+_self_timed = sorted(_n for _n, _p in _suite_paths.items()
+                     if _n != 'test_lint.py'    # this file, which names the pattern
+                     and re.search(r'perf_counter|process\.hrtime|performance\.now',
+                                   open(_p, encoding='utf-8').read()))
+ok_('tools/test.sh has a lane of suites that run alone (ALONE)', _lane['ALONE'])
+eq('every suite that times its own work runs alone in tools/test.sh',
+   sorted(set(_self_timed) - _lane['ALONE']), [])
+eq('...and ALONE and LONGEST name only suites that exist',
+   sorted((_lane['ALONE'] | _lane['LONGEST']) - set(_suite_paths)), [])
+# ...and each suite has a temporary directory of its own: test_server holds that
+# the gold reader leaves no uberscan-gold-* file in the temporary folder, which
+# a server another suite started could have written in the same second.
+ok_('tools/test.sh gives each suite its own TMPDIR',
+    re.search(r'^\s*export TMPDIR="\$dir/tmp"', _runner, re.M))
+# ...and counts the machine's cores, not the OMP_THREAD_LIMIT=1 it exports for
+# tesseract, which GNU nproc obeys: a bare `nproc` made the pool one wide.
+_jobs_line = re.search(r'^JOBS=.*$', _runner, re.M)
+ok_('...and sizes its pool by cores, with OMP_THREAD_LIMIT out of nproc\'s way (%r)'
+    % (_jobs_line.group(0) if _jobs_line else None),
+    _jobs_line is not None and 'nproc' in _jobs_line.group(0)
+    and '-u OMP_THREAD_LIMIT' in _jobs_line.group(0))
+
 # --- every screen names every reason a verdict can be withheld for ---------
 #
 # rate() can refuse to price a card for six reasons, and SEVEN surfaces turn
