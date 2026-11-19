@@ -9247,6 +9247,11 @@ node tests/trends.test.js       # 125 on the offers page's Trends tab: an offer
                                 #     timeline across Monday 4am and 1 Nov,
                                 #     B against A with no difference unshaded,
                                 #     /api/trends uncapped and refused in lite
+node tests/reportcheck.test.js  #  14 on tools/report_check.js, the reports
+                                #     checked against the real journal on the
+                                #     NucBox: aggregates only — every invented
+                                #     id, text, place, coordinate and pay
+                                #     looked for in what it prints, and none
 node tests/strategy.test.js     #  90 on what $/hr to expect and what holding
                                 #     out for a line paid: the curve's answer
                                 #     worked by hand, a thin tail never the
