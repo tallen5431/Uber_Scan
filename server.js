@@ -17574,6 +17574,14 @@ function shiftReported(day, done) {
   var finish = function (code, answer) {
     var waiting = shiftWaiting[day] || [];
     delete shiftWaiting[day];
+    // Past SHIFT_CACHE_MS an answer is never handed out again, only replaced
+    // by its day's next run, so it is dropped here rather than kept for the
+    // life of the process: shift.html can ask for any day, each answer is up
+    // to SHIFT_OUT_MAX of report, and nothing removed one (the server review,
+    // Nov 2026).
+    Object.keys(shiftKept).forEach(function (d) {
+      if (!(Date.now() - shiftKept[d].at < SHIFT_CACHE_MS)) delete shiftKept[d];
+    });
     if (code === 200) shiftKept[day] = { at: answer.at, answer: answer };
     waiting.forEach(function (d) { d(code, answer); });
   };

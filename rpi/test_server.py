@@ -15939,6 +15939,47 @@ finally:
     stop(proc)
 shutil.rmtree(_brdir, ignore_errors=True)
 
+# /api/shift's answers (shiftKept, one per day asked) were never dropped:
+# each is up to 4 MB of report and shift.html can ask for any day. An answer
+# past SHIFT_CACHE_MS is never handed out again, so it goes. Counted by what
+# the process still holds: the report stands in for tools/shift_report.py
+# (PYTHON), each answer 200 kB, and a preload counts the parsed reports a
+# forced collection has not reclaimed. Six days asked: one held, not six.
+_skdir = tempfile.mkdtemp()
+_skj = os.path.join(_skdir, 'offers.jsonl')
+open(_skj, 'w').close()
+_skfake = os.path.join(_skdir, 'fake_report')
+with open(_skfake, 'w') as _fh:
+    _fh.write('#!%s\nimport json\nprint(json.dumps({"invented": True, "pad": "x" * 200000}))\n'
+              % sys.executable)
+os.chmod(_skfake, 0o755)
+_COUNT_REPORTS = (
+    "var v8 = require('v8'); v8.setFlagsFromString('--expose_gc');\n"
+    "var gc = require('vm').runInNewContext('gc');\n"
+    "var live = 0, reg = new FinalizationRegistry(function () { live -= 1; });\n"
+    "var parse = JSON.parse;\n"
+    "JSON.parse = function (s) { var o = parse.apply(this, arguments);\n"
+    "  if (typeof s === 'string' && s.length > 100000 && o && typeof o === 'object') { live += 1; reg.register(o); }\n"
+    "  return o; };\n"
+    "process.on('SIGUSR2', function () { gc(); setTimeout(function () { gc();\n"
+    "  setTimeout(function () { process.stderr.write('reports held ' + live + '\\n'); }, 200); }, 200); });\n")
+proc, base, _sklog = _logged({'SCANNER': '0', 'PYTHON': _skfake, 'SHIFT_CACHE_MS': '1'}, _skj,
+                             preload=_COUNT_REPORTS)
+try:
+    _skc = [raw(base, '/api/shift?day=2026-11-0%d' % _d)[0] for _d in range(1, 7)]
+    time.sleep(0.1)
+    proc.send_signal(__import__('signal').SIGUSR2)
+    for _ in range(40):
+        if 'reports held' in _sklog():
+            break
+        time.sleep(0.1)
+    _skheld = __import__('re').findall(r'reports held (\d+)', _sklog())
+    eq('[shift] six days\' reports asked, each past its 1 ms keep before the next: one held, not six',
+       (_skc, _skheld[-1:] if _skheld else None), ([200] * 6, ['1']))
+finally:
+    stop(proc)
+shutil.rmtree(_skdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)
