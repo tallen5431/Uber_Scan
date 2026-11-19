@@ -1125,6 +1125,18 @@ left on the loop, and that one reordering took the worst gap from 113ms to 67ms.
 because a threading change to the loop that holds the camera should ship with a
 way back.
 
+On the loop's side a finished read lands in `digest()`, which is a list of
+named phases rather than one body: `price` (the merge, the rate, and the copy
+the panel is shown), `destination` (what the screen says about where the job
+ends, decided and not yet said), `screen_record`, `tell_screen` and
+`whole_saw_offer` for every read, then, for a card-box read only, `settle`,
+`tell_offer` and `keep`. Each is a closure in `main()` that names with
+`nonlocal` the loop's state it writes. The loop calls `watch_camera`, `beat`,
+`take_requests`, `follow_phone`, `adjust_gain` and `hand_over` the same way, and
+keeps inline the part that decides whether this frame is read. The split moved
+code and changed nothing it does: a replay of `main()` on a virtual clock gave
+the same bytes before and after (AUDITS.md, under the reader).
+
 Card height 900 with the card crop and a 900px read size is the recommended
 starting point: near the floor for speed, with real margin before reading
 collapses.
@@ -7371,9 +7383,9 @@ why the fix is not just "read once when the button is pressed":
 
 | | |
 |---|---|
-| the press opens a window | the request branch in the loop |
+| the press opens a window | the request branch in the loop (`take_requests` now) |
 | **the window keeps taking reads** | the beat beside the resample beat |
-| an address found there goes out | the branch at the top of `digest()` |
+| an address found there goes out | the branch at the top of `digest()` (now decided in `destination`, sent by `tell_screen`) |
 
 The screen showing a destination is a **navigation** screen. It does not move,
 so the motion gate scores it as nothing happening and produces no reads at all.
