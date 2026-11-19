@@ -1273,32 +1273,12 @@ function wwDayIn(opt, day) {
 }
 
 /* The exact (Garwood) interval on a Poisson mean from k events: the means at
- * which k or more, and k or fewer, are each (1 - conf) / 2 likely. Summed in
- * logs, so a count of hundreds does not underflow exp(-lam) as poissonLE's
- * plain sum would. Bisection to a part in 1e10. */
-function poissonCI(k, conf) {
-  var a = (1 - conf) / 2;
-  function le(x, lam) {
-    if (x < 0) return 0;
-    if (lam <= 0) return 1;
-    var t = -lam, s = t;
-    for (var i = 1; i <= x; i++) {
-      t += Math.log(lam / i);
-      s = s > t ? s + Math.log1p(Math.exp(t - s)) : t + Math.log1p(Math.exp(s - t));
-    }
-    return Math.min(1, Math.exp(s));
-  }
-  function root(x, want) {
-    var lo = 0, hi = x + 10 + 10 * Math.sqrt(x + 1);
-    while (le(x, hi) > want) hi *= 2;
-    for (var j = 0; j < 200 && hi - lo > 1e-10 * Math.max(1, hi); j++) {
-      var mid = (lo + hi) / 2;
-      if (le(x, mid) > want) lo = mid; else hi = mid;
-    }
-    return (lo + hi) / 2;
-  }
-  return [k === 0 ? 0 : root(k - 1, 1 - a), root(k, a)];
-}
+ * which k or more, and k or fewer, are each (1 - conf) / 2 likely. trends.js
+ * `poisCI`, the one copy, by its regularised gamma. This file had its own,
+ * a sum over whole terms, and wideCI hands it k / phi, which is rarely whole:
+ * the sum ran to floor(k), so 6.67 good drew the interval of 6 (1.54-15.66
+ * where the exact one is 1.87-16.65) and the marks leaned towards "below". */
+function poissonCI(k, conf) { return TR.poisCI(k, 1 - conf); }
 
 /* The tab's table: every (day choice, block choice) with any waiting in it,
  * keyed 'day|block', each with the slot's overall line and, by town and by

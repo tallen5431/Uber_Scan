@@ -23,6 +23,7 @@ var os = require('os');
 var P = require('../tools/places_report.js');
 var MV = require('../map-view.js');
 var A = require('../advice.js');
+var TR = require('../trends.js');
 
 var pass = 0, fail = 0;
 function eq(name, got, want) {
@@ -2215,6 +2216,12 @@ function nbx() {
      [[0, 5.298], [0.338, 10.977], [29.598, 65.341]]);
   ok('[whenwhere] ...and a count of thousands does not underflow',
      (function (b) { return b[0] > 1880 && b[0] < 1895 && b[1] > 2110 && b[1] < 2125; }(P.poissonCI(2000, 0.99))));
+  // The second review: wideCI hands it k / phi, and a sum over whole terms
+  // ran to floor(k), so 6.67 drew 6's interval (1.54-15.66).
+  eq('[whenwhere] ...and an effective count k / phi is not rounded down: 6.67 lies between 6 and 7, at trends.js poisCI\'s',
+     [6, 6.67, 7].map(function (k) { return P.poissonCI(k, 0.99).map(function (v) { return Math.round(v * 100) / 100; }); })
+       .concat([TR.poisCI(6.67, 0.01).map(function (v) { return Math.round(v * 100) / 100; })]),
+     [[1.54, 15.66], [1.87, 16.65], [2.04, 17.13], [1.87, 16.65]]);
 
   /* Three Fridays 8–11pm: an hour a night in Northfen's cell (half the cards
    * at $40), an hour in Saltmere's (one a night at $40), an hour in a cell
