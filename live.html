@@ -849,8 +849,11 @@
   @media (orientation: portrait) { #liveMap { min-height: 240px; } }
   #liveMap[hidden] { display: none; }
   /* Leaflet's own default is white, which on this panel is a flash of daylight
-     at a red light before the tiles land. */
-  #liveMap .leaflet-container { background: var(--panel); }
+     at a red light before the tiles land. #liveMap IS the container
+     (L.map(liveMap)), so the rule is on the element itself: written as a
+     descendant it matched nothing and the grey/white showed all along
+     (found in the round-two cleanup). */
+  #liveMap.leaflet-container { background: var(--panel); }
   /* The night palette (showNight in the script): after civil dusk at the
      car's position. The words and labels dimmer and closer to the page —
      the words from #eef4fb to #c3cfdb (17.4:1 on the page to 13.3), the

@@ -1448,6 +1448,14 @@ _bare_lc = [_p for _p in ('journal.html', 'map.html', 'live.html')
                          open(os.path.join(ROOT, _p), encoding='utf-8').read())]
 eq('no page that loads Leaflet after its own sheet styles a bare .leaflet-container',
    _bare_lc, [])
+# ...nor a descendant one under the map's own id: L.map(el) makes `el` the
+# container, so `#liveMap .leaflet-container` matched nothing and the live
+# map flashed Leaflet's default while its tiles loaded.
+_desc_lc = [_p for _p in ('journal.html', 'map.html', 'live.html')
+            if re.search(r'#\w+\s+\.leaflet-container\s*\{',
+                         open(os.path.join(ROOT, _p), encoding='utf-8').read())]
+eq('no page styles .leaflet-container as a descendant of a map id that is itself the container',
+   _desc_lc, [])
 
 # No model names anywhere in the repository's text: a convention CLAUDE.md
 # states, held across every file the repo ships.
