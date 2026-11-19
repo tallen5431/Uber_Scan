@@ -3789,6 +3789,41 @@ const framed = (page) => page.waitForFunction(
     await ctx.close();
   }
 
+  // --- a rig with no frame to give -------------------------------------------
+  stage = 'a rig with no frame to give';
+  //
+  // The stream refused and every still a 404, as a rig with no frame file
+  // answers. A 404 comes back at once, and the stills were asked again
+  // FRAME_GAP (30 ms) after each: 17 to 29 a second for as long as the panel
+  // was open (measured). Then the frames come back, and the picture must
+  // follow at the stills' own rate, not at the backed-off one. Real time:
+  // the chain is driven by the picture's own load and error events.
+  {
+    const ctx = await browser.newContext({ viewport: { width: 800, height: 480 } });
+    const page = await ctx.newPage();
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    let down = true;
+    const asked = { refused: 0, given: 0 };
+    await page.route('**/api/frame.mjpeg*', (route) => route.fulfill({ status: 404, body: 'not found' }));
+    await page.route('**/api/frame.jpg*', (route) => {
+      if (down) { asked.refused++; return route.fulfill({ status: 404, body: 'not found' }); }
+      asked.given++;
+      return route.fulfill({ status: 200, contentType: 'image/jpeg',
+                             body: Buffer.from(FRAMES.portrait, 'base64') });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 })
+              .catch(() => {});
+    await page.waitForTimeout(3000);
+    const refused = asked.refused;
+    down = false;
+    await page.waitForTimeout(2000);
+    out.noFrame = { refused: refused, given: asked.given,
+                    w: await page.evaluate(() => document.getElementById('view').naturalWidth) };
+    await page.close();
+    await ctx.close();
+  }
+
   // --- the shift line when the figures cannot be trusted -------------------
   stage = 'the shift line when the figures cannot be trusted';
   //
@@ -11263,6 +11298,15 @@ try:
         (_ds.get('asked') or {}).get('still', 0) >= 1
         and '/api/frame.jpg' in (_ds.get('src') or ''))
     ok_('[dead stream] ...and a picture is on it', (_ds.get('w') or 0) > 0 and not _ds.get('gone'))
+
+    # --- a rig with no frame to give --------------------------------------
+    _nf = got.get('noFrame') or {}
+    ok_('[no frame] every still a 404 for three seconds: the panel asks again, backing off '
+        '(%r asked; at the 30 ms floor it was 50 to 90)' % _nf.get('refused'),
+        1 <= (_nf.get('refused') or 0) <= 15)
+    ok_('[no frame] ...and once the rig has a frame again the picture is back at the stills\' '
+        'own rate (%r in two seconds) and on the pane' % _nf.get('given'),
+        (_nf.get('given') or 0) >= 8 and (_nf.get('w') or 0) > 0)
 
     # --- a reading with no verdict, and what it did read -----------------
     #
