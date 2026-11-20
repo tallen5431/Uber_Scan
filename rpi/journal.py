@@ -1005,8 +1005,25 @@ class OfferLog:
                     self.screen_wanted = self._owe_screen(at)
                     self.landed_id = self.id
                     return upgrade
+                # Not on disk, so not written: the next settled read tries
+                # again. See the same three lines below.
+                self.settled_written = False
+                self.seq -= 1
             return None
 
+        # Put back if the append fails. They moved before it, so a row that
+        # never reached the file still counted as said: the next identical read
+        # matched `content` and wrote nothing, and a card whose one append hit a
+        # full or read-only card for a moment was never recorded once the card
+        # came back, read after read of it on screen. The seq goes back with
+        # them, so the retry carries the number the lost row had and the card's
+        # rows stay 1, 2, 3 (the sync keys a row on (id, seq), and the failed
+        # row was never sent: it is not in the file to send). The one case
+        # where a failed append left its line in the file is a write that
+        # landed and an fsync that then raised; the retry is then a second row
+        # under the same pair, of the same reading, and the far end keeps
+        # whichever it was sent first.
+        was = (self.content, self.seq, self.settled_written)
         self.content = content
         self.settled_written = False
         self.seq += 1
@@ -1022,6 +1039,7 @@ class OfferLog:
             self.screen_wanted = self._owe_screen(at)
             self.landed_id = self.id
             return row
+        self.content, self.seq, self.settled_written = was
         return None
 
     def _corrects(self, parsed, at):

@@ -1997,6 +1997,35 @@ _two, _out = _restart('resume-corrected.jsonl', [_cb('1.09')] + [_cb('9.09')] * 
 eq('[resume] the correction is carried on the first row after a restart (%r)'
    % [(r['seq'], r['pay'], bool(r.get('corrected'))) for r in _two.journal.rows()],
    (_out[-1] or {}).get('corrected', {}).get('from'), 1.09)
+
+# --- an append that fails is tried again on the next read of the same card -------
+#
+# consider() moved `content`, `seq` and `settled_written` before the append and
+# left them moved when it returned False, so the next identical read matched
+# `content` and wrote nothing: a card whose one append met a full card for a
+# moment was never recorded, however long it stayed on screen.
+_fl = fresh('append-fails.jsonl')
+_fl_real = _fl.journal.append
+_fl.journal.append = lambda row: False
+_fl_p = P.parse(OFFER)
+_fl_r = P.rate(_fl_p, MONEY)
+eq('[append] a read whose append fails returns nothing',
+   _fl.consider(_fl_p, _fl_r, now=1_700_000_000.0), None)
+_fl.journal.append = _fl_real
+_fl_row = _fl.consider(_fl_p, _fl_r, now=1_700_000_000.5)
+ok_('[append] ...and the same card read again once the disk is back is written',
+    _fl_row is not None)
+eq('[append] ...under the seq the lost row had, so the card\'s rows still count 1, 2 (%r)'
+   % [r['seq'] for r in _fl.journal.rows()], [r['seq'] for r in _fl.journal.rows()], [1])
+# The settled upgrade the same way: one that fails is owed, not spent.
+_fl.journal.append = lambda row: False
+eq('[append] a settled upgrade whose append fails returns nothing',
+   _fl.consider(_fl_p, _fl_r, now=1_700_000_001.0, settled=True), None)
+_fl.journal.append = _fl_real
+_fl_up = _fl.consider(_fl_p, _fl_r, now=1_700_000_001.5, settled=True)
+eq('[append] ...and the next settled read writes it, as seq 2 (%r)'
+   % [(r['seq'], r['settled']) for r in _fl.journal.rows()],
+   [(r['seq'], r['settled']) for r in _fl.journal.rows()], [(1, False), (2, True)])
 shutil.rmtree(work, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
