@@ -159,14 +159,19 @@ $TOKEN_LINE
 # server here was moved off 8080, add: Environment=SYNC_LOCAL=http://127.0.0.1:PORT
 # Add --no-config if you would rather the calibration stayed in the car, and
 # --no-pull for the old one-way behaviour.
-ExecStart=$PYTHON $REPO/rpi/sync.py --quiet
+# The checkout's path quoted, here and in ReadWritePaths=: systemd splits both
+# at spaces, so a checkout under "Uber Scan" ran python on ".../Uber" and
+# ignored the write path ("path is not absolute, ignoring: Scan/rpi", in
+# systemd-analyze verify's words), and the timer failed every run with the
+# unit looking installed. WorkingDirectory= takes the rest of its line whole.
+ExecStart=$PYTHON "$REPO/rpi/sync.py" --quiet
 
 # It reads one file and writes nothing locally.
 PrivateTmp=yes
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=$REPO/rpi
+ReadWritePaths="$REPO/rpi"
 
 [Install]
 WantedBy=multi-user.target

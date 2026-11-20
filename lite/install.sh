@@ -92,7 +92,11 @@ fi
 LITE=1 SPEAK="$SPEAK" SUDO_USER="$RUN_USER" bash "$PROJECT/rpi/install-service.sh"
 
 # --- 3. the kiosk -------------------------------------------------------------
-KIOSK_CMD="bash $PROJECT/lite/kiosk.sh"
+# The path in double quotes, which all three readers below take as one word:
+# the labwc autostart (a shell line), the desktop entry's Exec= (the XDG spec's
+# quoting) and cage's unit's ExecStart= (systemd's). Bare, a checkout under
+# "Uber Scan" ran bash on ".../Uber" and the card never opened.
+KIOSK_CMD="bash \"$PROJECT/lite/kiosk.sh\""
 
 # A line in a file this script does not own, replaced by its marker.
 put_line() {
