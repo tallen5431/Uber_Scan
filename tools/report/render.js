@@ -371,7 +371,12 @@ function html(r) {
     + '<header class="head"><h1>Strategy &amp; places report</h1>\n'
     + '<p class="sub">' + esc(span) + ' · ' + r.coverage.offers + ' offers the rig stands behind, '
     + r.outings + ' shift days · made ' + esc(new Date(r.made).toISOString().slice(0, 16).replace('T', ' '))
-    + ' UTC on the NucBox · offline report, nothing on the rig reads it</p></header>\n'
+    + ' UTC on the NucBox · offline report, nothing on the rig reads it'
+    // The nightly's diagnostics beside the page (places_nightly.sh, --checks):
+    // report_check and twin_ids, counts only, so the double-filed cards'
+    // breakdown is read here rather than by running anything.
+    + (r.source && r.source.checks ? ' · <a href="' + esc(r.source.checks) + '">nightly checks</a>' : '')
+    + '</p></header>\n'
     + nav + strip
     + '<div class="bar" id="hoursBar"><label>Hours <select id="when"></select></label>'
     + '<span id="whenNote" class="note"></span></div>\n'
