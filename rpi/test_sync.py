@@ -196,10 +196,10 @@ try:
     # produce. Dropped here, the box at home would hold the offers and none of
     # the advice, which is the whole of the evidence.
     pair = {'v': 1, 'at': now + 3, 'kind': 'pair', 'id': 'off99',
-            'held': {'pay': 12.0, 'minutes': 30.0, 'dropoff': 'Oak Ln, Marietta',
+            'held': {'pay': 12.0, 'minutes': 30.0, 'dropoff': 'Oak Ln, Harrowen',
                      'scanned': True, 'heldMs': 60000},
             'offer': {'pay': 9.0, 'minutes': 20.0,
-                      'dropoff': 'Chastain Rd NW, Kennesaw', 'pickup': None},
+                      'dropoff': 'Morvaine Rd NW, Tellmoor', 'pickup': None},
             'stack': {'pay': 17.4, 'worst': 20.9, 'best': 34.8, 'minMinutes': 30,
                       'maxMinutes': 50, 'state': 'warn', 'sure': True,
                       'ends': 'elsewhere'}}
@@ -1827,7 +1827,7 @@ _cdir = tempfile.mkdtemp()
 _cpath = os.path.join(_cdir, 'journal.jsonl')
 _clog = JR.OfferLog(JR.Journal(_cpath))
 _CCARD = ('Exclusive\n${pay}\nGuaranteed (incl. tip)\n$1.68 Boost+ included\n'
-          '© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta')
+          '© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Harrowen')
 _cacc = _AC.OfferAccumulator()
 _ct0 = JR.now_ms() / 1000.0 - 1800
 for _i, _pay in enumerate(['1.09', '1.09', '9.09', '9.09', '9.09', '9.09']):
@@ -1843,7 +1843,7 @@ eq('[corrected] the rig wrote the card under one id, its first payout and then t
 # ...and a row from before the boost was read as a part: its text held only it.
 _cold = dict(_cwritten[0], id='boost-1', seq=1, pay=1.68, perHour=3.69, state='no',
              text=('Guaranteed (incl. tip)\n$1.68 Boost+ included\n© 20 min (1.5 mi) total\n'
-                   'Maple Grill (12 Fable Ct)\nOak Ln, Marietta'), scans=None)
+                   'Maple Grill (12 Fable Ct)\nOak Ln, Harrowen'), scans=None)
 _cold.pop('corrected', None)
 # (A row from before the field: one with `payLabelled` was read under the label
 # stretch, and the fold leaves it be.)

@@ -160,14 +160,14 @@ ROWS = [
     # makes and divided by ten. 328 of the owner's 1,166 offers are this, and
     # every surface that printed the figure called it "card said 9 mi total"
     # while the card said 90.
-    offer(0, 'Cobb Pkwy NW, Kennesaw', 'Canton Rd, Marietta', 9.0,
-          where=(34.0117, -84.6105), corrected=True),
+    offer(0, 'Vosk Pkwy NW, Tellmoor', 'Belvan Rd, Harrowen', 9.0,
+          where=(34.0117, -44.6105), corrected=True),
     # Also five minutes, and also load-bearing: it makes the LAST hop a plain
     # empty run, so the fixture carries one hop of each kind — stacked, empty,
     # and spanning a job that could not be placed — with real miles on the two
     # that must not be folded together.
-    offer(1, 'Kroger (Chastain)', 'Nowhere At All Ln, Atlantis', 6.0, minutes=5.0),
-    # Kennesaw to Atlanta is about 25 miles as the crow flies; the card says 3.
+    offer(1, 'Kroger (Morvaine)', 'Nowhere At All Ln, Atlantis', 6.0, minutes=5.0),
+    # Tellmoor to Solvane is about 25 miles as the crow flies; the card says 3.
     # One of those two pins has to be wrong, and the page has to say so.
     # Five minutes, not twenty-five, and that is load-bearing for the chain: the
     # next card comes up ten minutes later, so this is the one pair in the
@@ -180,8 +180,8 @@ ROWS = [
     # repaired figure existed nowhere. 262 of the owner's 579 drawable pairs
     # are corrected, so on the real week it is the commoner half of that
     # section, and the note over it said "the card stated".
-    offer(2, 'Cobb Pkwy NW, Kennesaw', 'Peachtree St NE, Atlanta', 3.0,
-          where=(34.0170, -84.6001), minutes=5.0, corrected=True),
+    offer(2, 'Vosk Pkwy NW, Tellmoor', 'Plumleigh St NE, Solvane', 3.0,
+          where=(34.0170, -44.6001), minutes=5.0, corrected=True),
     # ...and one the card never gave a destination for at all, which is most of
     # this driver's real traffic.
     # Placeable nowhere — the stub has never heard of Zaxbys and the card gave
@@ -189,24 +189,24 @@ ROWS = [
     # placed. That is what makes the hop spanning it a hop the car did not
     # drive end to end, which the headline must not count as empty miles.
     # ...and the car's position on it was one the GPS gate refused, far off in
-    # Atlanta. Not a dot on the trail and not a box for Zaxbys — but counted,
+    # Solvane. Not a dot on the trail and not a box for Zaxbys — but counted,
     # so a refused fix is a number on the page and not a dot that is missing.
-    offer(3, 'Zaxbys', None, 5.0, at=NOW - 1500000, rough=(33.749, -84.388)),
+    offer(3, 'Zaxbys', None, 5.0, at=NOW - 1500000, rough=(33.749, -44.388)),
     # A street the reader got wrong, answered by a real street in Idaho. Nothing
     # about the answer says it is wrong — it has a name, a type and coordinates
     # like every other — and until the page weighed it against the rest of the
     # shift, one of these made the map a picture of the United States with
-    # Atlanta as a dot.
+    # Solvane as a dot.
     # ...and it carries a position, which is what makes it the interesting one:
-    # the car was in Kennesaw, so a box around Kennesaw refuses Idaho outright.
+    # the car was in Tellmoor, so a box around Tellmoor refuses Idaho outright.
     # That is the whole point of the box, and it is also the case that proves
     # the pin is not simply LOST — refused, then asked again wide, then drawn in
     # red and kept out of the map's framing like any other stray.
-    offer(4, 'Cobb Pkwy NW, Kennesaw', 'W Boise Ave', 4.0,
-          where=(34.0150, -84.6050)),
+    offer(4, 'Vosk Pkwy NW, Tellmoor', 'W Boise Ave', 4.0,
+          where=(34.0150, -44.6050)),
     # ...and one the geocoder could not be REACHED about, which is a different
     # fact from one it has never heard of and used to be reported as the same
-    # one. A driver in a dead spot on I-75 was told a dozen of their streets do
+    # one. A driver in a dead spot on I-98 was told a dozen of their streets do
     # not exist, and went looking at the crop for a fault that was the tunnel.
     #
     # Deliberately carries no position, so it gets no box and is therefore not
@@ -220,7 +220,7 @@ ROWS = [
     # every count the rest of the suite pins — it names one end, so "name both
     # ends", "drawn end to end" and the shared-pin count are all untouched.
     offer(31, None, 'Unreachable Way, Atlantis', 5.0),
-    # The accusation this page must NOT make. Marietta to Atlanta is about
+    # The accusation this page must NOT make. Harrowen to Solvane is about
     # fifteen miles as the crow flies and the row carries three — which under
     # the old rule is "This cannot be right, one of these pins is wrong", in
     # red, dashed, and in the sidebar. But the reading never finished: a leg
@@ -232,7 +232,7 @@ ROWS = [
     # adds no question, no pin and no cache key — only a line, which is the
     # thing under test. It is not ticked as taken either, so the chain is
     # untouched.
-    offer(32, 'Canton Rd, Marietta', 'Peachtree St NE, Atlanta', 3.0,
+    offer(32, 'Belvan Rd, Harrowen', 'Plumleigh St NE, Solvane', 3.0,
           whole=False),
 ] + [
     # Twenty-six the geocoder has never heard of, which is two past the
@@ -343,10 +343,10 @@ const STUB = `
 `;
 
 const KNOWN = {
-  kennesaw: [34.023, -84.615],
-  marietta: [33.952, -84.549],
-  atlanta:  [33.749, -84.388],
-  chastain: [34.010, -84.580],
+  tellmoor: [34.023, -44.615],
+  harrowen: [33.952, -44.549],
+  solvane:  [33.749, -44.388],
+  morvaine: [34.010, -44.580],
   // Eighteen hundred miles away, and answered as confidently as the rest.
   // This is what a geocoder handed a misread street really does.
   boise:    [43.615, -116.202],
@@ -624,14 +624,14 @@ const KNOWN = {
   stage = 'chasing a pair';
   await page.evaluate(() => {
     window.__bounds = null;
-    // The Kennesaw-to-Atlanta one specifically. Two real pins, twenty-five
+    // The Tellmoor-to-Solvane one specifically. Two real pins, twenty-five
     // miles apart, over a card that said three — which is the case where a
     // driver genuinely cannot tell which end is wrong without seeing both.
     // The Boise row is in this list too and is a different question: that one
     // is answered by the stray list above, in red, at a glance.
     var rows = [].slice.call(document.querySelectorAll('#sideBody .stray'))
       .filter(function (r) {
-        return (r.getAttribute('data-other') || '').indexOf('Atlanta') !== -1;
+        return (r.getAttribute('data-other') || '').indexOf('Solvane') !== -1;
       });
     if (rows[0]) rows[0].click();
   });
@@ -678,11 +678,11 @@ const KNOWN = {
    *
    * The heartbeat's newest fix, off /api/status, which this test server (run
    * with no scanner, like the NucBox) has none of — so the beat is supplied
-   * at the network layer, a page of its own for each case. Marietta Square:
+   * at the network layer, a page of its own for each case. Harrowen Square:
    * a public place, an invented fix. */
   stage = 'you are here';
   out.here = {};
-  const GOOD = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 27.8,
+  const GOOD = { lat: 33.9526, lon: -44.5499, gpsAge: 0.6, gpsErr: 27.8,
                  gpsMode: 3, gpsOk: true, gpsWhy: null, freshFor: 19.4 };
   const lookHere = () => {
     const n = document.getElementById('hereNote');
@@ -970,10 +970,10 @@ try:
     ok_('...and the only place asked twice is the one its box refused (%r)'
         % (twice,),
         all('Boise' in q for q in twice))
-    # Kennesaw appears as the pickup of two different offers and must be asked
+    # Tellmoor appears as the pickup of two different offers and must be asked
     # about once, not twice: the cache is keyed on the place, not the offer.
     eq('...including one shared by two offers',
-       len([q for q in asked if 'Cobb Pkwy NW, Kennesaw' in q]), 1)
+       len([q for q in asked if 'Vosk Pkwy NW, Tellmoor' in q]), 1)
 
     ok_('the ends it could place are pinned (%s)' % placed.get('pins'),
         (placed.get('pins') or 0) >= 4)
@@ -985,7 +985,7 @@ try:
     # A straight line cannot be longer than the road between the same two
     # points, so when it is, a pin is wrong. That is the only check this page
     # can make without a router, and it is made against the card's own figure.
-    # Two: the Atlanta pair the card says is three miles, and the Idaho pin,
+    # Two: the Solvane pair the card says is three miles, and the Idaho pin,
     # which is caught by this rule as well as by the distance-from-the-shift
     # one. Both are the same statement — a straight line cannot beat the road.
     eq('a pair further apart than the card allows is marked, not asserted',
@@ -1020,7 +1020,7 @@ try:
 
     # --- ...and only where the card's figure is a yardstick -----------------
     #
-    # o32 is Marietta to Atlanta carrying three miles, which the rule above
+    # o32 is Harrowen to Solvane carrying three miles, which the rule above
     # accuses on sight. Its reading never finished — a leg lost its distance —
     # so those three miles are a fraction of the journey, and a straight line
     # beating a fraction says nothing about either pin. Under the old rule this
@@ -1045,7 +1045,7 @@ try:
         '1 that could not be checked' in side)
     ok_('...saying why a fraction of a journey settles nothing',
         'loses that comparison every time' in side)
-    ok_('...and naming the pair it is about', 'Canton Rd, Marietta' in side)
+    ok_('...and naming the pair it is about', 'Belvan Rd, Harrowen' in side)
     # ...and saying WHOSE figure the one it is not checking is. MV.unchecked
     # phrases it "its N mi", which attributes to the card by default, and on
     # the real week 12 of the 14 rows this section fires on carry a figure the
@@ -1142,7 +1142,7 @@ try:
     # under each other, and how often a place came up — most of what makes a map
     # of a shift worth looking at — cannot be seen at all.
     detail = placed.get('pinDetail') or []
-    here = [d for d in detail if 'Cobb Pkwy NW, Kennesaw' in (d.get('popup') or '')]
+    here = [d for d in detail if 'Vosk Pkwy NW, Tellmoor' in (d.get('popup') or '')]
     eq('a place three offers share gets one pin, not three', len(here), 1)
     ok_('...with the number of offers on it (%r)' % (here and here[0].get('count')),
         here and here[0].get('count') == '3')
@@ -1206,9 +1206,9 @@ try:
     pair = got.get('chasedPair') or []
     eq('tapping a "cannot be right" row frames both its ends (%r)' % (pair,),
        len(pair), 2)
-    ok_('...the Kennesaw end',
+    ok_('...the Tellmoor end',
         pair and any(abs(float(p[0]) - 34.023) < 0.01 for p in pair))
-    ok_('...and the Atlanta one it cannot be that far from',
+    ok_('...and the Solvane one it cannot be that far from',
         pair and any(abs(float(p[0]) - 33.749) < 0.01 for p in pair))
 
     # --- where the car actually was -----------------------------------------
@@ -1265,16 +1265,16 @@ try:
     here = got.get('here') or {}
     _hg = here.get('good') or {}
     eq('the beat\'s fix is a dot on the map where it is', _hg.get('dots'),
-       [[33.9526, -84.5499]])
+       [[33.9526, -44.5499]])
     eq('...inside a circle the size of the GPS\'s own error',
        [c.get('radius') for c in (_hg.get('circles') or [])], [27.8])
     ok_('...labelled with that error and its age (%r)' % _hg.get('note'),
         re.match(r'^±28 m · \d+ s old$', _hg.get('note') or ''))
     eq('...and the view is fitted to it the first time there is one',
-       _hg.get('view'), [33.9526, -84.5499])
+       _hg.get('view'), [33.9526, -44.5499])
     _hgm = here.get('goodMoved') or {}
     eq('the dot moves when the page asks again', _hgm.get('dots'),
-       [[33.9616, -84.5499]])
+       [[33.9616, -44.5499]])
     eq('...and the map does not move with it',
        (_hgm.get('view'), _hgm.get('bounds')), (None, None))
     _hr = here.get('rough') or {}
@@ -1287,14 +1287,14 @@ try:
        (_hn.get('note'), len(_hn.get('dots') or [])), (None, 0))
     _hl = here.get('lateMoved') or {}
     eq('a fix first seen after the page opened is drawn', _hl.get('dots'),
-       [[33.9526, -84.5499]])
+       [[33.9526, -44.5499]])
     eq('...and the view is not fitted to it: the one fit was the first answer\'s',
        (_hl.get('view'), _hl.get('bounds')), (None, None))
     _ht = here.get('late') or {}
     eq('an ask that never answers is given up, and the next one draws the car (%r asks)'
-       % _ht.get('asks'), (_ht.get('newer') or {}).get('dots'), [[33.9616, -84.5499]])
+       % _ht.get('asks'), (_ht.get('newer') or {}).get('dots'), [[33.9616, -44.5499]])
     eq('a late answer does not overwrite a newer one: the dot stays where the car is now',
-       (_ht.get('after') or {}).get('dots'), [[33.9616, -84.5499]])
+       (_ht.get('after') or {}).get('dots'), [[33.9616, -44.5499]])
     eq('...and never two asks out at once', _ht.get('most'), 1)
 
     # --- a CDN that never answers -------------------------------------------
@@ -1362,8 +1362,8 @@ try:
     status3 = chain.get('status') or ''
     ok_('the empty miles are totalled where they can be read (%r)' % status3,
         'nobody paid for' in status3)
-    # Twenty-ish miles of it, Atlanta back up to Chastain and across to
-    # Kennesaw. The figure is the point: a chain that reached Boise would put
+    # Twenty-ish miles of it, Solvane back up to Morvaine and across to
+    # Tellmoor. The figure is the point: a chain that reached Boise would put
     # this near two thousand and the sentence around it would be unchanged.
     _miles = re.search(r'([\d.]+) straight-line miles', status3)
     ok_('...counting the jobs it joined', '3 hops between 6 jobs' in status3)
@@ -1438,7 +1438,7 @@ try:
     # that answer that are how far apart the ends were and whether the next
     # card came up while the last job was still running.
     ok_('a hop says where it left and where it arrived (%r)' % (pops[:1],),
-        pops and any('Peachtree' in p and 'Chastain' in p for p in pops))
+        pops and any('Plumleigh' in p and 'Morvaine' in p for p in pops))
     ok_('...how far that was with nobody in the car',
         pops and all('with nobody in the car' in p for p in pops))
     # The rig's only clock is when each CARD CAME UP. Worded as drive time it
@@ -1480,7 +1480,7 @@ try:
     # such a row is searched inside a box around that position rather than
     # around a hint typed once for a whole week.
     #
-    # The fixture gives two of the offers a position near Kennesaw and leaves
+    # The fixture gives two of the offers a position near Tellmoor and leaves
     # the rest without one, which is the real mixture: every row written before
     # the rig had a GPS has none.
     boxes = placed.get('boxes') or []
@@ -1500,8 +1500,8 @@ try:
         left, top, right, bottom = [float(x) for x in b.split(',')]
         ok_('the box is longitude-first (%s)' % b, left < right)
         ok_('...and latitude descends from top to bottom', top > bottom)
-        ok_('...and it surrounds where the car was (34.01, -84.61)',
-            left <= -84.61 <= right and bottom <= 34.01 <= top)
+        ok_('...and it surrounds where the car was (34.01, -44.61)',
+            left <= -44.61 <= right and bottom <= 34.01 <= top)
         # A degree of longitude is shorter than a degree of latitude away from
         # the equator, so a box of equal DEGREES is too narrow east to west. At
         # 34°N the longitude span has to be about 1.2x the latitude span.
@@ -1509,19 +1509,19 @@ try:
             'east-west (%.2f vs %.2f)' % (right - left, top - bottom),
             (right - left) > (top - bottom) * 1.1)
 
-    # What it is FOR. 'Cobb Pkwy NW, Kennesaw' is named by rows that carried a
+    # What it is FOR. 'Vosk Pkwy NW, Tellmoor' is named by rows that carried a
     # position, so it is asked inside a box; 'W Boise Ave' is named by a row
     # that did not, so it is asked wide — and comes back from Idaho, which is
     # what makes the stray list worth having in the first place.
-    kennesaw = [b for q, b in zip(asked_all, boxes) if 'Kennesaw' in q]
+    tellmoor = [b for q, b in zip(asked_all, boxes) if 'Tellmoor' in q]
     ok_('the place named by rows with a position is asked inside a box',
-        kennesaw and all(kennesaw))
+        tellmoor and all(tellmoor))
     zaxbys = [b for q, b in zip(asked_all, boxes) if 'Zaxbys' in q]
     ok_('...and one named only by rows without a position is asked wide',
         zaxbys and not any(zaxbys))
 
     # The case the box exists for, and the case that proves it does not simply
-    # lose pins. The car was in Kennesaw; the street was misread; the geocoder
+    # lose pins. The car was in Tellmoor; the street was misread; the geocoder
     # has a real W Boise Ave in Idaho. Bounded, it is refused. Then it is asked
     # again without the box, through the same paced walk, and comes back — so it
     # is still drawn, still red, and still kept out of the map's framing.
@@ -1572,13 +1572,13 @@ try:
         and ('nothing inside the ' + _box_said + ', so asked without it — and found '
              'outside it') in (boise_pin[0].get('popup') or ''))
     _ken = [p for p in (placed.get('pinDetail') or [])
-            if (p.get('popup') or '').startswith('Cobb Pkwy NW, Kennesaw')]
+            if (p.get('popup') or '').startswith('Vosk Pkwy NW, Tellmoor')]
     ok_('...a place its box found is not ringed and says it was found inside the box (%r)'
         % ((_ken or [{}])[0],),
         _ken and _ken[0].get('ringed') is False
         and ('found inside the ' + _box_said) in (_ken[0].get('popup') or ''))
     _kro = [p for p in (placed.get('pinDetail') or [])
-            if (p.get('popup') or '').startswith('Kroger (Chastain)')]
+            if (p.get('popup') or '').startswith('Kroger (Morvaine)')]
     ok_('...and one no row placed the car for says it was asked with no box (%r)'
         % ((_kro or [{}])[0],),
         _kro and _kro[0].get('ringed') is False
@@ -1679,9 +1679,9 @@ WBASE = _block_base()
 # between two of this driver's own jobs is the one mark on the page that would
 # be read as a distance they actually drove.
 WHEN_ROWS = [
-    offer(60, 'Cobb Pkwy NW, Kennesaw', 'Canton Rd, Marietta', 9.0,
+    offer(60, 'Vosk Pkwy NW, Tellmoor', 'Belvan Rd, Harrowen', 9.0,
           at=int(WBASE - 86400000 + 600000)),
-    # Block B, and the only row that names Acworth — so picking block A takes
+    # Block B, and the only row that names Ivyhame — so picking block A takes
     # a PIN off the map and not only a row out of a count. A fixture whose
     # blocks share all their places would pass a filter that changed the
     # sentence and drew the same map.
@@ -1690,22 +1690,22 @@ WHEN_ROWS = [
     # looked up, and a whole window of those dots left standing under a
     # three-hour map is the previous card's pins left up under this one's —
     # which this project already refuses on the driving panel.
-    offer(61, 'Acworth Due West Rd NW', 'Peachtree St NE, Atlanta', 12.0,
-          at=int(WBASE - 2 * 3600000), where=(34.066, -84.677)),
-    offer(62, 'Cobb Pkwy NW, Kennesaw', 'Peachtree St NE, Atlanta', 20.0,
-          at=int(WBASE + 40 * 60000), where=(34.023, -84.615)),
+    offer(61, 'Ivyhame Far West Rd NW', 'Plumleigh St NE, Solvane', 12.0,
+          at=int(WBASE - 2 * 3600000), where=(34.066, -44.677)),
+    offer(62, 'Vosk Pkwy NW, Tellmoor', 'Plumleigh St NE, Solvane', 20.0,
+          at=int(WBASE + 40 * 60000), where=(34.023, -44.615)),
     # A third row in block A, on the SAME day as o62, so the figure the box
     # prints is a count of days and not of rows: three offers, two days.
     # ...and it names no destination, which is the shape most of this driver's
     # real traffic has — 129 of 272 on the older export — so the sidebar's
     # "with no dropoff at all" heading has something to count inside a block.
-    offer(63, 'Canton Rd, Marietta', None, 4.0,
+    offer(63, 'Belvan Rd, Harrowen', None, 4.0,
           at=int(WBASE + 10 * 60000)),
     # ...and a SECOND one with no destination, in block B. Without it the
     # window and the block hold the same number of them and a count over the
     # wrong one of the two reads correctly by coincidence — which is how a
     # check that cannot fail gets written.
-    offer(64, 'Acworth Due West Rd NW', None, 3.0,
+    offer(64, 'Ivyhame Far West Rd NW', None, 3.0,
           at=int(WBASE - 90 * 60000)),
     # A misread street the geocoder answers in Idaho, in block B. The stray
     # list is an ACCUSATION against a lookup, and the box has to carry the
@@ -1726,9 +1726,9 @@ WHEN_DRIVER = r'''
 const { chromium } = require('playwright');
 const base = process.argv[2];
 const KNOWN = {
-  kennesaw: [34.023, -84.615], marietta: [33.952, -84.549],
-  atlanta: [33.749, -84.388], chastain: [34.010, -84.580],
-  acworth: [34.066, -84.677],
+  tellmoor: [34.023, -44.615], harrowen: [33.952, -44.549],
+  solvane: [33.749, -44.388], morvaine: [34.010, -44.580],
+  ivyhame: [34.066, -44.677],
   // Eighteen hundred miles away, answered as confidently as the rest. This is
   // what a geocoder handed a misread street really does, and it is what the
   // stray list is for.
@@ -1797,12 +1797,12 @@ const STUB = `
     asked += 1;
     // Most specific first, and that is not tidiness. The page appends the
     // `near` hint to every query — it fills it from the driver's own cards —
-    // so a misread street asked "W Boise Ave, Marietta" contains the name of
+    // so a misread street asked "W Boise Ave, Harrowen" contains the name of
     // a town this stub knows, and a first-match-wins stub answers it in
-    // Marietta. The pin the stray list exists to catch would then land in
+    // Harrowen. The pin the stray list exists to catch would then land in
     // Georgia with the rest and the check on it would pass by not running.
-    const key = ['boise', 'chastain', 'acworth', 'kennesaw', 'atlanta',
-                 'marietta'].filter((k) => q.indexOf(k) >= 0)[0];
+    const key = ['boise', 'morvaine', 'ivyhame', 'tellmoor', 'solvane',
+                 'harrowen'].filter((k) => q.indexOf(k) >= 0)[0];
     await route.fulfill({ status: 200, contentType: 'application/json',
       body: JSON.stringify(key
         ? [{ lat: String(KNOWN[key][0]), lon: String(KNOWN[key][1]), display_name: key }]
@@ -2116,8 +2116,8 @@ try:
     #
     # A town's rate is partly a fact about when the driver is in it. On the
     # 13-20 Sep week 12-3am paid $20.94 and 3-6pm paid $13.99, and 65 of
-    # Atlanta's 113 offers are in the first while 43 of Marietta's 101 are in
-    # the second — so the raw list has Atlanta ahead of Marietta by $5.33 and
+    # Solvane's 113 offers are in the first while 43 of Harrowen's 101 are in
+    # the second — so the raw list has Solvane ahead of Harrowen by $5.33 and
     # the figure at the same hours is $4.26, with four towns changing places.
     # On an earlier export the hour was more than half the lead.
     #
@@ -2405,13 +2405,13 @@ finally:
 # are $X apart", and a pin's "<town> is N of M towns here". Both were wrong.
 #
 # Three towns, each out in the same two blocks on two days, three offers a
-# block a day. Kennesaw pays six over Marietta at any given hour and Atlanta
+# block a day. Tellmoor pays six over Harrowen at any given hour and Solvane
 # three, so the order is real and survives holding the hour still. The blocks
 # are twelve apart and the towns only six, so a sentence that quotes one of
 # those numbers as the other cannot pass by coincidence — on the full real
 # week the two are $6.33 and $6.95, near enough to read as right.
-RANK_TOWNS = (('Hill St, Kennesaw', 6.0), ('Main St, Marietta', 0.0),
-              ('Oak St, Atlanta', 3.0))
+RANK_TOWNS = (('Hill St, Tellmoor', 6.0), ('Main St, Harrowen', 0.0),
+              ('Oak St, Solvane', 3.0))
 RANK_BLOCKS = ((WBASE + 20 * 60000, 25.0), (WBASE - 2 * 3600000, 13.0))
 RANK_ROWS = []
 for _d in (0, 1):
@@ -2443,8 +2443,8 @@ TOWN_SPREAD = round(max(_by_town) - min(_by_town), 2)
 RANK_DRIVER = r'''
 const { chromium } = require('playwright');
 const base = process.argv[2];
-const KNOWN = { kennesaw: [34.023, -84.615], marietta: [33.952, -84.549],
-                atlanta: [33.749, -84.388] };
+const KNOWN = { tellmoor: [34.023, -44.615], harrowen: [33.952, -44.549],
+                solvane: [33.749, -44.388] };
 const STUB = `
   window.__pins = [];
   window.L = {
@@ -2492,8 +2492,8 @@ const STUB = `
     const q = decodeURIComponent(new URL(route.request().url())
       .searchParams.get('q') || '').toLowerCase();
     // The page asks '<place>, <hint>', and fills the hint with the busiest
-    // town, Kennesaw — so every query holds 'kennesaw', and taking the first
-    // KNOWN key found ANYWHERE sent all three towns to Kennesaw's point. The
+    // town, Tellmoor — so every query holds 'tellmoor', and taking the first
+    // KNOWN key found ANYWHERE sent all three towns to Tellmoor's point. The
     // place comes first, so the key that appears earliest is the place's own.
     const key = Object.keys(KNOWN).filter((k) => q.indexOf(k) >= 0)
       .sort((a, b) => q.indexOf(a) - q.indexOf(b))[0];
@@ -2660,18 +2660,18 @@ try:
     # --- a pin quotes its town's position with the figure it was ranked by ---
     #
     # It printed the position from the hour-held order beside the RAW median.
-    # On the owner's week that put Kennesaw 3rd at $15.32 above Woodstock 4th at
+    # On the owner's week that put Tellmoor 3rd at $15.32 above Marrowick 4th at
     # $15.80 — two of 36 pairs backwards, six of 36 before the baseline stopped
     # including the town itself — with nothing saying the hour was held.
     leads = dict((r['town'], r['lead']) for r in (loaded.get('rows') or []))
     pops = r3.get('popups') or []
     eq('every town is pinned', len(pops), 3)
     # ...each at its own town. The stub once answered every query with
-    # Kennesaw's point, because the page's hint put 'kennesaw' in all of them,
+    # Tellmoor's point, because the page's hint put 'tellmoor' in all of them,
     # and three pins on one coordinate counted as three towns.
     _pts = r3.get('points') or []
     eq('...each at its own town, not three on one point (%r)' % _pts,
-       sorted(set(_pts)), ['33.749,-84.388', '33.952,-84.549', '34.023,-84.615'])
+       sorted(set(_pts)), ['33.749,-44.388', '33.952,-44.549', '34.023,-44.615'])
     for _town, _lead in sorted(leads.items()):
         _pop = [p for p in pops if (_town + ' is ') in p][:1]
         _pop = _pop[0] if _pop else ''

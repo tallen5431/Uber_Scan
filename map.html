@@ -350,8 +350,8 @@
    * time of day" chart is also drawn on. This page had no way to ask the map a
    * question about a time at all, and the map answers a different question at
    * different hours: on the owner's real week, of the pickups this rig can put
-   * a town to, Atlanta is 78% of them between midnight and 3am and 3% between
-   * 3 and 6pm, where the map is Kennesaw, Marietta, Dallas and Acworth. The
+   * a town to, Solvane is 78% of them between midnight and 3am and 3% between
+   * 3 and 6pm, where the map is Tellmoor, Harrowen, Dorvan and Ivyhame. The
    * median goes $18.26 against $13.52 across the same cut. A map of the whole
    * week shows both piles at once and reads as one place. */
   Advice.BLOCK_NAMES.forEach(function (name, i) {
@@ -816,7 +816,7 @@
       return false;
     }
     mapSays(null);
-    map = L.map(el.map, { zoomControl: true }).setView([33.94, -84.58], 10);
+    map = L.map(el.map, { zoomControl: true }).setView([33.94, -44.58], 10);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19, attribution: '© OpenStreetMap'
     }).addTo(map);
@@ -1390,11 +1390,11 @@
     // `strata`, and the whole honesty of the answer is in it. A town's rate is
     // tangled with WHEN the driver is in it. On the 13–20 Sep week, among the
     // offers in towns with enough of them, 12–3am paid $20.94 and 3–6pm paid
-    // $13.99, and 65 of Atlanta's 113 offers are in the first while 43 of
-    // Marietta's 101 are in the second. Ranked raw, Atlanta leads Marietta by
+    // $13.99, and 65 of Solvane's 113 offers are in the first while 43 of
+    // Harrowen's 101 are in the second. Ranked raw, Solvane leads Harrowen by
     // $5.33; held at the same hours it is $4.26, the gap from best to worst
     // drops from $6.33 to $4.98, and four towns change places. On that week
-    // most of Atlanta's lead is the town, but not all of it, and on an
+    // most of Solvane's lead is the town, but not all of it, and on an
     // earlier export the hour was more than half of it. See Advice.areas.
     return Advice.areas(shown(), {
       // The town rule lives in advice.js and is handed over, not copied.
@@ -1488,7 +1488,7 @@
      * "where should I go" — the median beside it answers "what did I earn
      * there", which is a different question a driver will otherwise read as
      * the first one. On the owner's week the two orders are not the same list:
-     * Kennesaw is 4th by median and 3rd by this, Acworth 6th and 5th.
+     * Tellmoor is 4th by median and 3rd by this, Ivyhame 6th and 5th.
      *
      * Two spreads in one sentence, and they are two different quantities.
      * `hourSpread` is how far apart the three-hour blocks are — the reason for
@@ -1716,7 +1716,7 @@
        run asks again. Both arrive here as a missing pin, and reporting both as
        "could not find" told a driver whose phone lost signal for ten seconds
        that a dozen of their streets do not exist. They then go looking at the
-       crop and the focus for a fault that was the tunnel on I-75.
+       crop and the focus for a fault that was the tunnel on I-98.
 
        Read off `found` rather than off the judged end, because judge() folds
        the two into null deliberately — every other caller wants "this end has

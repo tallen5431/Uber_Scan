@@ -344,6 +344,73 @@ else:
     eq('no tracked file carries a Tailscale address (100.64/10); the docs '
        'write 100.x.y.z', _leaks, [])
 
+    # The places the suites, the corpus and the comments used to name: the
+    # metro the rig was built in, its towns, its roads, its ZIPs and its
+    # coordinates, all real, all committed (privacy2, 20 Nov 2026). They are
+    # invented now; this keeps them out. Held as hashes so this file does not
+    # spell what it forbids. That is about not writing them down here, not
+    # secrecy: a gazetteer reverses a hash of a town name in a second.
+    #
+    # Words: sha256 of the lowercased word, or two words joined by a space,
+    # first 16 hex digits. Coordinates: every pair of decimal numbers written
+    # close together, either way round, snapped to a quarter degree and
+    # hashed as "lat,lon" with two places; nine cells cover the metro. The
+    # list is modest on purpose: names nobody writes by accident, so an
+    # ordinary word never trips it. A hit gives the file and the line, not
+    # the name: look at the line.
+    import hashlib                                            # noqa: E402
+    _GONE_WORDS = {
+        '64d7e95f25fafcee', '6aa628b73c9c3060', 'eda0d7917034b973',
+        '81ce4d76dd956d02', 'd3ecc5b7fe38ffd3', '4303150a368b1744',
+        '80a6af5deee6f267', '744e144d67166c00', '0a6f7b55598783f7',
+        'eb0fcb14e75670a6', 'c0bcb8985d4e46a8', '56046694c3d53309',
+        'd31a682d79c2bcac', 'fbac49ad6b6973c8', '931d8eb211ec5665',
+        'e2447a5ef03f4609', '652be5a0a2711e7c', '220b2fcdd731c7dd',
+        '89755f51bb3abda2',
+    }
+    _GONE_PAIRS = {
+        'c6d9bf3ea3936f55', 'be7fcd7a32ea7725', 'ed1c017c1c370046',
+        '0ee97b9581cd9633', '97b15571734ec8c8', '03d261a4f9d9db19',
+    }
+    _GONE_CELLS = {
+        '872a5487b5f0afe2', '176a89cb972bc36a', '4ae50fdcd88a1e14',
+        'f61af572df08032a', '982d9527b0832ef7', '32945149787dd985',
+        '42d8ba1dc95c7fde', 'cd814efc1b7ea55a', 'e7f4316741c71009',
+    }
+
+    def _h(s):
+        return hashlib.sha256(s.encode('utf-8')).hexdigest()[:16]
+
+    def _cell(lat, lon):
+        if abs(lat) > 90 or abs(lon) > 180:
+            return None
+        return _h('%.2f,%.2f' % (round(lat * 4) / 4, round(lon * 4) / 4))
+
+    _num = re.compile(r'-?\d{1,3}\.\d+')
+    _gone = []
+    for p in tracked:
+        fp = os.path.join(ROOT, p)
+        if p.startswith('vendor/') or not os.path.isfile(fp) or os.path.getsize(fp) > BIG:
+            continue
+        with open(fp, 'rb') as fh:
+            text = fh.read().decode('utf-8', 'ignore')
+        for n, line in enumerate(text.split('\n'), 1):
+            # "\n" inside a string is a line break to a reader, not an "n".
+            toks = re.findall(r'[a-z]+|\d+', line.replace('\\n', ' ').lower())
+            hit = any(_h(t) in _GONE_WORDS for t in toks) or any(
+                _h(a + ' ' + b) in _GONE_PAIRS for a, b in zip(toks, toks[1:]))
+            if not hit:
+                nums = [(m.start(), m.end(), float(m.group(0))) for m in _num.finditer(line)]
+                for (s0, e0, a), (s1, e1, b) in zip(nums, nums[1:]):
+                    if s1 - e0 <= 24 and (_cell(a, b) in _GONE_CELLS
+                                          or _cell(b, a) in _GONE_CELLS):
+                        hit = True
+                        break
+            if hit:
+                _gone.append('%s:%d' % (p, n))
+    eq('no tracked file names a place of the metro the suites used to use, '
+       'or a coordinate in it (hashed list; look at the line)', _gone[:20], [])
+
 # The NucBox's Nominatim, as the README tells the driver to start it, is the
 # command the driver ran: with --shm-size=1g, which the README first left out
 # (Docker's 64 MB of shared memory is not enough for PostgreSQL's import).
@@ -657,7 +724,7 @@ if _seed and _parser_default:
 # in one place and the other port is checking a different shape.
 _tp = open(os.path.join(ROOT, 'rpi', 'test_parser.py')).read()
 _tj = open(os.path.join(ROOT, 'tests', 'parser.test.js')).read()
-_card = 'Little Caesars (3372 Canton Rd)'
+_card = 'Little Caesars (3372 Belvan Rd)'
 ok_('the two-delivery-card check exists on the Python side',
     'a total leg is never marked the approach' in _tp)
 ok_('...and on the JavaScript side',

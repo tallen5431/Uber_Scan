@@ -1853,10 +1853,10 @@ def why_no_address(text, stops=None, sheet=None, keep=3, width=40):
         'the state reads "GX"'            a state and ZIP that is no state
         'the ZIP reads "3O1A4"'           ...or no ZIP in use
         'a ZIP, no "Town, ST" before it'  find_address wants the comma
-        'a cross-street, no door'         "Oak St & Elm Ave", "Cobb Pkwy at Elm"
+        'a cross-street, no door'         "Oak St & Elm Ave", "Vosk Pkwy at Elm"
         'a door, no ", ST ZIP" after it'  a house number and street, no town
         'no house number'                 a street name alone
-        'a town, no street or ZIP'        "Kennesaw, GA"
+        'a town, no street or ZIP'        "Tellmoor, GA"
 
     — or, ahead of the lines, what took the screen's doors instead: a Trip
     Planner whose stops find_planner read (they go on the sighting, and the
@@ -1946,8 +1946,8 @@ def why_no_address(text, stops=None, sheet=None, keep=3, width=40):
 #     (real_words): a word of three letters or more with a vowel in it, and
 #     no more than half the line's tokens noise — a mark, a stray letter or
 #     two, a figure that is no number. "'a sie ee 2 e. ° ray st 1%" is five
-#     noise tokens in nine; "Turn right onto Cobb Pkwy NW", "1554 Ombre Hills
-#     Rd" and "Dropoff 3100 Esquire Dr N 14 min Start" have none.
+#     noise tokens in nine; "Turn right onto Vosk Pkwy NW", "1554 Ombre Hills
+#     Rd" and "Dropoff 3100 Elquine Dr N 14 min Start" have none.
 #
 # The rest is counted APART, "N unreadable screens since start with
 # street-like words" (`street_unreadable`, `streetUnreadable` on the `seen`
@@ -1956,7 +1956,7 @@ def why_no_address(text, stops=None, sheet=None, keep=3, width=40):
 # sequences.json, 678 distinct texts): of the 96 screens the count took, 95
 # are still counted — every planner, sheet, navigation screen and door with
 # no town — and the one set apart is a map's litter under an offer's title
-# ("= = £ \ The Townes at CHastain © f = g e"). The corpus was chosen for
+# ("= = £ \ The Townes at MOrvaine © f = g e"). The corpus was chosen for
 # readable screens; the road's 298 were not. Counted, not acted on, as the
 # count always was: nothing reads either figure to decide a read, a
 # destination, a row or a word on the panel.
@@ -6311,9 +6311,9 @@ def main():
         # yield one, because the merchant's branch address carries the same
         # `, ST ZIP` anchor a real address does:
         #
-        #     800 Forrest St NW, Atlanta, GA 30318   <- off a Delivery card
-        #     100 Rosemont Ct, Hiram, GA 30141
-        #     2603 E, GA 30106                       <- and two fragments
+        #     800 Garrest St NW, Solvane, GA 90818   <- off a Delivery card
+        #     100 Tullmont Ct, Telby, GA 90741
+        #     2603 E, GA 90706                       <- and two fragments
         #
         # Any one of them ends the window with the WRONG answer and stops it
         # looking: the order in the car is then recorded as ending where it
@@ -6344,8 +6344,8 @@ def main():
         # half that survives a lost payout. A navigation screen names no
         # merchant — it says "Dropoff <address> 12 min Start" and `places`
         # comes back empty. An offer card names one whether or not its payout
-        # survived the frame: the `800 Forrest St NW` case reads
-        # `places: ['Wingstop 800 Forrest St NW, Atlanta, GA 30318', ...]`
+        # survived the frame: the `800 Garrest St NW` case reads
+        # `places: ['Wingstop 800 Garrest St NW, Solvane, GA 90818', ...]`
         # with the payout stripped out of the text entirely.
         #
         # Measured on this driver's own 272 cards: not one carries a `, ST ZIP`
@@ -6481,9 +6481,9 @@ def main():
         # mid-scroll with its top edge between the first pickup's street and
         # town lines, no stop header in that read matched PLANNER_STOP, so
         # `planner` above was None and `found` was find_address's answer:
-        # "Kennesaw, GA 30144", the restaurant's town. It went out unprompted,
+        # "Tellmoor, GA 90744", the restaurant's town. It went out unprompted,
         # server.js filled the held order's empty destination with it, and
-        # /api/status said `dropoff: 'Kennesaw, GA 30144', dropoffScanned:
+        # /api/status said `dropoff: 'Tellmoor, GA 90744', dropoffScanned:
         # true` for an order going somewhere else — the stack line and the map
         # then measured every offer against a restaurant.
         #
@@ -6577,7 +6577,7 @@ def main():
         # names no merchant — it says 'Dropoff <address> 12 min Start' and
         # `places` comes back empty". That was measured on DoorDash. Uber's
         # post-accept screen names its destination the same way a card names a
-        # shop — `BCG Atlanta / 1075 Peachtree St NE Ste 3800, Atlanta, GA` off
+        # shop — `BCG Solvane / 1075 Plumleigh St NE Ste 3800, Solvane, GA` off
         # the screenshot this was built from — so the merchant arm would refuse
         # exactly the frames worth having, silently, and the corpus would come
         # back holding only the screens that happened to read badly.
@@ -6664,7 +6664,7 @@ def main():
         #
         # Counted, NOT acted on. A number saying how often a guard fired is
         # not an argument that it was wrong to fire; loosening find_address on
-        # the strength of it would put "89 Shanty Drive" — a background map
+        # the strength of it would put "89 Gristy Drive" — a background map
         # label — on the panel as a destination.
         # Counted off `an_offer`, not off the payout alone. The guard has two
         # arms now, and a counter that watched only one of them would make the
@@ -6909,7 +6909,7 @@ def main():
         # owner's snap of 7 Nov 21:35: ⌖ pressed six times over a one-store
         # card printing "Customer dropoff" (reads.json, kind "press", screen
         # dd.offer), and every press read the screen's TEXT, whose one full
-        # address is the store's door ("<n> <Name> Road Northwest, Atla…") —
+        # address is the store's door ("<n> <Name> Road Northwest, Solv…") —
         # refused, rightly, as an offer's (`an_offer` above) — while the
         # customer's pill "<n> <Name> Dr NW" stood on the map in the snap's
         # frame of 21:35:17, inside the presses' window (21:35:09-:21). The

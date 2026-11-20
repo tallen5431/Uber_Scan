@@ -275,7 +275,7 @@
    * The rig photographs whatever is on the phone, and between jobs that is the
    * map. One screen off this driver's own shift:
    *
-   *   The Townes at Chastain ... Windsor Drive ... 3min  11 min  $ 22min
+   *   The Townes at Morvaine ... Windsor Drive ... 3min  11 min  $ 22min
    *   3 min (1.0 mi)  Fastest route now due to traffic conditions
    *
    * Route alternatives, with a map glyph in front of one that read as a dollar
@@ -301,7 +301,7 @@
   /* ...and a number that is a bonus on every order, wearing a dollar sign.
    *
    * The app asks the driver to change zones with a prompt of its own — "GA:
-   * Marietta North / Switch to this zone / with peak pay! / +$1.00/order until
+   * Harrowen North / Switch to this zone / with peak pay! / +$1.00/order until
    * 8:20 PM / Avg. offer wait / 1min / Don't switch" — and five of them on the
    * owner's week were journalled as offers: the bonus read as the payout and
    * the zone's average wait as the job's duration, $12.00/hr PASS, $20.00/hr
@@ -893,7 +893,7 @@
 
      LEG_TAIL is a word list, and this driver's ride cards do not use those
      words. They label a leg with an ADDRESS — "12 min (8.1 mi) Oak Ln,
-     Marietta" — so both legs of a two-leg card count as travel only because
+     Harrowen" — so both legs of a two-leg card count as travel only because
      they carry distances. The moment one loses its distance it drops out of the
      set legsShortADistance counts, the count falls to one, and the rule that
      exists for exactly this damage returns false. Measured: it fires on ONE of
@@ -905,7 +905,7 @@
      between
 
          20 min (7.3 m1) trip                    <- the bracket is this leg's
-         Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Sedgefield Rd
+         Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Wedgemarsh Rd
 
      where a bracket appears in the wait line's tail too, but another leg's
      minutes come first. Searching the tail loosely instead fires on 43% of
@@ -1007,7 +1007,7 @@
      as the delivery card's own anchor: what followed it — the rest of the card
      — went into the journal as where the job went. One real shift stored the
      phrase itself as a place twice, and stored `1 min 23 min (8.4 mi) trip
-     Celebration Blvd, Acworth` as another.
+     Jamboreeton Blvd, Ivyhame` as another.
 
      Checked against the text before the match rather than with a lookbehind,
      which Safari did not have until 16.4. */
@@ -1028,7 +1028,7 @@
 
      Three patterns rather than one alternation, because the town test is the
      only one that cares about case and a single regex would need the `i` flag
-     for the street words — which is how the capital that makes ", Kennesaw"
+     for the street words — which is how the capital that makes ", Tellmoor"
      evidence and ", a oo" not would have been thrown away. */
   var STREET_WORD = 'st|street|rd|road|ave|avenue|blvd|bivd|pkwy|parkway|dr|drive|'
     + 'ln|lane|way|ct|court|hwy|highway|pl|place|ter|terrace|cir|circle|trce|'
@@ -1045,7 +1045,7 @@
 
      `total` is among them because a shop card prints "34 min (3.6 mi) total"
      and the merchant's name straight after it, so the leg tail begins with the
-     word: 5 of one shift's addresses were stored as "total Five Guys (3450 Cobb
+     word: 5 of one shift's addresses were stored as "total Five Guys (3450 Vosk
      Pkwy. NW)". */
   var PLACE_JUNK = /^(?:pickup|dropoff|customer|accept|decline|add\s+to\s+route|deliver(?:ed|y)?\s*by.*|verified|exclusive|guaranteed|tota?l|away|trip)\b[\s:.-]*/i;
 
@@ -1053,8 +1053,8 @@
      every word the card printed after an address rode along with it into the
      journal. The commonest by far is Uber's own "Avg. wait time at pickup",
      which sits directly under the pickup address: it was on 25 of one shift's
-     60 stored places, and what the offers page showed was `Cobb Pkwy NW,
-     Acworth Avg. wait time at pickup; Canton Rd, Marietta`.
+     60 stored places, and what the offers page showed was `Vosk Pkwy NW,
+     Ivyhame Avg. wait time at pickup; Belvan Rd, Harrowen`.
 
      A pipe ends one too. It is never in a street name and it is what the card's
      own dividers and its bottom icon row come back as.
@@ -1080,8 +1080,8 @@
 
   /* The commonest delivery card puts BOTH ends of the job after one total leg:
    *
-   *   27 min (7.3 mi) total  Rick's Hotwings (Kennesaw)  Hamby Place Dr NW &
-   *   Travistock Pl NW, Acworth
+   *   27 min (7.3 mi) total  Rick's Hotwings (Tellmoor)  Holby Place Dr NW &
+   *   Marlestock Pl NW, Ivyhame
    *
    * There is no "Pickup" label to anchor on and only one leg, so the leg-tail
    * rule picked the whole thing up as ONE place — 71 characters of merchant and
@@ -1092,9 +1092,9 @@
    * branch in brackets and where the job goes after that, so the closing
    * bracket is the seam.
    *
-   * 40 inside the brackets rather than 34, measured. `Wendy's (3442 Ernest W.
-   * Barrett Parkway N.W.)` is 35 and `Olive Garden (Ernest W Barrett Pkwy NW &
-   * Roberts Ct)` is 37, and on the driver's own 272-card export those two were
+   * 40 inside the brackets rather than 34, measured. `Wendy's (3442 Osbert W.
+   * Tallett Parkway N.W.)` is 35 and `Olive Garden (Osbert W Tallett Pkwy NW &
+   * Wilbert Ct)` is 37, and on the driver's own 272-card export those two were
    * the only cards the limit touched: both stored NOTHING, because the seam was
    * one character out of reach and the whole piece then failed the length check
    * below. */
@@ -1138,29 +1138,29 @@
   var MAX_PLACES = 4;
 
   /* ...and an address ends at its town. Nothing on the card marks the end of
-   * one, which is what left "Lakeview Ter & Windmill Dr, Dallas ill" in the
+   * one, which is what left "Lakeview Ter & Windmill Dr, Dorvan ill" in the
    * journal — the "ill" is the bottom icon row. A comma, a capitalised name or
    * two, and that is the whole address.
    *
    * The possessive is allowed because a card does not always end on a town:
-   * "1min (0.2 mi) Roswell Road, Johnny's Hideaway" ends on the venue, and a
-   * rule stopping at the first capitalised word cut it to "Roswell Road,
+   * "1min (0.2 mi) Ruswold Road, Johnny's Hideaway" ends on the venue, and a
+   * rule stopping at the first capitalised word cut it to "Ruswold Road,
    * Johnny". Lower case still ends it, which keeps the icon row out.
    *
    * ...and "a capitalised name or two" took its second name from the NEXT
    * LINE, because normalize() joins the reader's lines with a space. One frame
    * of the rig's Jimmy John's snap on 8 October caught the Accept button under
    * the card as `Pverel 8) 4 P`, and the dropoff went to the journal as
-   * `Shadowood Pkwy SE, Atlanta Pverel`. So the second name is its own group,
+   * `Gloamwood Pkwy SE, Solvane Pverel`. So the second name is its own group,
    * and findPlaces asks where the reader put it: an address that has reached
    * its town does not take a name that begins the next line unless that line
    * is address-shaped by looksLikeAPlace. A town that wraps survives it
-   * because its second line is a place word: `Sequoia Cir SE, Bartow` /
-   * `County`, and "Springs" on 56 of the 137 readings that print `, Powder
+   * because its second line is a place word: `Sequoia Cir SE, Garlow` /
+   * `County`, and "Springs" on 56 of the 137 readings that print `, Gorrel
    * Springs`.
    *
    * ...and where the town did not follow its comma - icon-row scraps between,
-   * `..., 28 kt Kennesaw` - the scraps come out first (townPastScraps), so two
+   * `..., 28 kt Tellmoor` - the scraps come out first (townPastScraps), so two
    * readings of one address are one place and not a two-stop route on the
    * offers page. See PLACE_ENDS_AT_TOWN in offer_parser.py for the week's
    * measurement. */
@@ -1169,9 +1169,9 @@
     '^(.*?,\\s*' + PLACE_TOWN_NAME + ')(\\s+(' + PLACE_TOWN_NAME + '))?\\b');
 
   /* The card's bottom bar — a row of icons — comes back as one and two
-     character scraps: `Kennesaw 4`, `Marietta %`, `Acworth ¥`, `Kennesaw 2c 4`.
+     character scraps: `Tellmoor 4`, `Harrowen %`, `Ivyhame ¥`, `Tellmoor 2c 4`.
      Two lists, not one: `S Main St NW` starts with a real single letter and
-     `Chick-fil-A (2555 Dallas Highway) s` ends with a false one. Length is the
+     `Chick-fil-A (2555 Dorvan Highway) s` ends with a false one. Length is the
      test rather than shape — "Papa John's Store 3317" ends in a number that
      belongs to it, and four characters is not a scrap. */
   var PLACE_TRAIL_KEEP = ['nw', 'ne', 'sw', 'se', 'st', 'rd', 'dr', 'ct', 'ln', 'pl', 'ga'];
@@ -1234,7 +1234,7 @@
 
      Parentheses survive on purpose, and the Pi's port never trimmed them
      either: a branch address is printed inside them — "Dollar General (925
-     Shiloh Rd Nw)" — so taking the closing one off leaves a dangling open
+     Merlah Rd Nw)" — so taking the closing one off leaves a dangling open
      bracket and a name that reads as truncated, and the two ports would store
      the same merchant under two different strings. */
   /* Is `at` inside a bracket the card opened and closes again?
@@ -1264,9 +1264,9 @@
    * it as a pipe at the head of whichever lines it crosses. Where that line
    * starts a place it is a divider, as it always was; where it finishes one it
    * is the drawing - the merchant's bracketed branch (`Los Portales Mexican
-   * Restaurant` / `| (Dallas)`, which split there read the branch fused to the
+   * Restaurant` / `| (Dorvan)`, which split there read the branch fused to the
    * destination as the PICKUP), or the address's last word and
-   * its town wrapped onto the line below (`| NE, Brookhaven`, which split there
+   * its town wrapped onto the line below (`| NE, Ashenhaven`, which split there
    * was published as the DROPOFF on rows 61, 277 and 309). See
    * _the_route_line in offer_parser.py. */
   function theRouteLine(value, at) {
@@ -1329,15 +1329,15 @@
    * than repaired. Repairing it — cutting everything up to the stray `)` —
    * was tried and measured on this driver's week: the stray sits past
    * position 20 on 7 of them, where it is icon-row sludge rather than a seam,
-   * and `'McDuffie Cir & Stanley Dr, . . Douglasville s ED) 5-10 bags'`
+   * and `'McTavish Cir & Merrick Dr, . . Harloweville s ED) 5-10 bags'`
    * becomes `'5-10 bags'`.
    *
    * ONE DIRECTION ONLY, and this is the line a reader will want to
    * symmetrise. An unmatched `(` is the ordinary end of the 130-character leg
    * window landing inside a merchant's bracket, and refusing those costs 29
    * of the 500 dropoffs and 8 of the 1,080 pickups this parser reads off the
-   * owner's 1,166-offer week — clean addresses, every one: 'Lakefield Ct &
-   * Lakefield Walk, Marietta', 'Scenic Mountain Dr SE, Acworth'. Measured, by
+   * owner's 1,166-offer week — clean addresses, every one: 'Pondfield Ct &
+   * Pondfield Walk, Harrowen', 'Lonely Mountain Dr SE, Ivyhame'. Measured, by
    * making it symmetrical and counting. Do not.
    *
    * It took a `mark` argument so it could be asked about `(` too, and no
@@ -1367,8 +1367,8 @@
 
   /* `value` with the scraps between its last comma and what follows taken
      out, where what comes before that comma is an address - a merchant's
-     line has commas in it too: row 397's `Come-N-Get It 1 ' , ' Farm Ridge Dr
-     NE & ...` lost its street to a "town" called Farm Ridge. Asked by
+     line has commas in it too: row 397's `Come-N-Get It 1 ' , ' Fold Ridge Dr
+     NE & ...` lost its street to a "town" called Fold Ridge. Asked by
      endsAtTown only when the town did not follow the comma. See
      _town_past_scraps in offer_parser.py. */
   function townPastScraps(value) {
@@ -1381,7 +1381,7 @@
 
   function trimPlace(value) {
     // The front first, and the tail after. Order matters: a pipe ends a place,
-    // but `oN | Cobb Pkwy NW, Kennesaw 'a` is a pipe with the sludge on the
+    // but `oN | Vosk Pkwy NW, Tellmoor 'a` is a pipe with the sludge on the
     // *near* side of it, and cutting there first threw the address away and
     // kept the "oN".
     var parts = String(value || '').split(/\s+/).filter(Boolean);
@@ -1409,7 +1409,7 @@
     return value ? value.replace(SYMBOL_RUN, ' ').trim() : value;
   }
 
-  /* A name the card put a bracket after - "Kroger (Shiloh Square)", "GoPuff
+  /* A name the card put a bracket after - "Kroger (Merlah Square)", "GoPuff
    * (Drive)". That is how these cards write a shop, and it is the one thing
    * that distinguishes the place a job STARTS from the place it ENDS. */
   var PLACE_IS_A_SHOP = /\([^)]{2,40}\)\s*$/;
@@ -1424,7 +1424,7 @@
      Uber DELIVERY card: one whose leg is a "total" ("24 min (3.6 mi)
      total"), which a ride card never prints. The owner, 20 Oct 20:44: the
      card's store line lost by the reader, its only place "<Del Lago> Cir NW &
-     <Ellison> Lakes Dr NW, Kennesaw" was taken as the pickup — on an Uber
+     <Ellison> Lakes Dr NW, Tellmoor" was taken as the pickup — on an Uber
      delivery card a corner is always the dropoff. So it is never the pickup
      there, and with no store read the pickup is null. A RIDE card's pickup IS
      a corner (the rider's), and it prints no total; DoorDash's stops card
@@ -1457,7 +1457,7 @@
   // Between the label and the shop there is nothing but marks - "@ Pickup |",
   // "@ Pickup 3)". Between the label and a LATER leg's address there is always
   // a leg, and a leg is spelled with letters: "at pickup: 1 min 10 mins
-  // (4.6 mi) N Cobb Pkwy NW". So "no letters in between" is the discriminator.
+  // (4.6 mi) N Vosk Pkwy NW". So "no letters in between" is the discriminator.
   var PICKUP_LABEL = /\bpick\s?up\b[^A-Za-z]*$/i;
 
   /* --- the address the card will not show you until you have taken the job ---
@@ -1470,7 +1470,7 @@
    *
    * The anchor is a two-letter state code followed by five digits. It is the
    * one part of a US address that is short, positional and CHECKABLE - "GA
-   * 30127" is a state and a ZIP or it is not, where a street name misread by
+   * 90727" is a state and a ZIP or it is not, where a street name misread by
    * one letter is still a perfectly plausible street name and nothing
    * downstream can tell. That checkability is the whole reason this is worth
    * doing: the alternative was sending the address to a geocoder, and a
@@ -1488,7 +1488,7 @@
    'MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV ' +
    'WI WY DC AS GU MP PR VI').split(' ').forEach(function (s) { STATES[s] = true; });
 
-  /* TOWN is the town's own words, named so the Trip Planner's "Marietta, GA"
+  /* TOWN is the town's own words, named so the Trip Planner's "Harrowen, GA"
      line (PLANNER_TOWN) is held to the same idea of a town as this. */
   var TOWN = '[A-Za-z][A-Za-z.\'’-]*(?:\\s+[A-Za-z][A-Za-z.\'’-]*){0,3}';
   // ...and only where a word begins: every letter of a run was a start, each
@@ -1502,7 +1502,7 @@
 
   /* A house number and a street, shown and never decided on - but WORDS, not
      "anything but a comma". A card printing "28 min (11.2 mi) total 100
-     Rosemont Ct" satisfies the loose version from the "28", and the driver is
+     Tullmont Ct" satisfies the loose version from the "28", and the driver is
      shown the offer's own arithmetic dressed up as a street name. And a
      house number starts a word: a name in front of the door, "Sal Os A 12 Elm
      Dr", is not "os A 12 Elm Dr" (see STREET in offer_parser.py). */
@@ -1512,8 +1512,8 @@
      comma - the case to EXPECT, not the exception: a screen puts the street and
      the town on two lines and normalize joins them with a space. The USPS
      suffix abbreviations, a list for the same reason STATES is one. The
-     optional trailing quadrant belongs to the street: "Chastain Rd NW
-     Kennesaw". */
+     optional trailing quadrant belongs to the street: "Morvaine Rd NW
+     Tellmoor". */
   var STREET_SUFFIX = 'st|street|rd|road|dr|drive|ln|lane|ave|avenue|blvd|boulevard|ct'
     + '|court|way|pkwy|parkway|cir|circle|trl|trail|hwy|highway|ter|terrace'
     + '|pl|place|xing|crossing|sq|square|loop|run|walk|path|row|bnd|bend';
@@ -1521,7 +1521,7 @@
     + '\\.?(?:\\s+(?:NW|NE|SW|SE|N|S|E|W))?\\s+', 'gi');
 
   /* Five characters as a ZIP that is in use, or null: fixDigits first, since
-     "3O127" is this OCR's commonest confusion, and 00501 to 99950 is the range
+     "9O727" is this OCR's commonest confusion, and 00501 to 99950 is the range
      in use. One rule for findAddress and the Trip Planner's town line. See
      a_zip in offer_parser.py. */
   function aZip(token) {
@@ -1532,7 +1532,7 @@
   }
 
   /* A single letter alone in front of a town is the icon row, not a word: "l
-     Atlanta", "j Powder Springs". PLACE_TOWN in advice.js tolerates exactly
+     Solvane", "j Gorrel Springs". PLACE_TOWN in advice.js tolerates exactly
      this, and the two have to agree about what a town is called or the same
      place read twice compares unequal to itself. */
   var CITY_JUNK = /^(?:[A-Za-z]\s+)+/;
@@ -1557,7 +1557,7 @@
       var before = text.slice(after, cityAt).replace(/\s+$/, '');
       if (before && before.charAt(before.length - 1) !== ',') {
         // ...unless the street named its own end. The LAST suffix in the group:
-        // a town that contains one - "Powder Springs Rd Marietta" - puts the
+        // a town that contains one - "Gorrel Springs Rd Harrowen" - puts the
         // real break at the later of the two.
         var split = null, sm;
         STREET_ENDS.lastIndex = 0;
@@ -1570,8 +1570,8 @@
           /* CITY_JUNK here as well as on the comma path above. The icon row
              lands between the street and the town whichever way the address was
              punctuated, and this is the path the code itself calls "the case to
-             expect". Stripped only there, "800 Forrest St NW l Atlanta, GA
-             30318" gave the town as "l Atlanta", which PLACE_TOWN in advice.js
+             expect". Stripped only there, "800 Garrest St NW l Solvane, GA
+             90818" gave the town as "l Solvane", which PLACE_TOWN in advice.js
              cannot read at all - its junk allowance covers a single UPPERCASE
              letter, not a lowercase one - so area() returns no town and the
              geography goes silent on exactly the orders the scan rescues. */
@@ -1598,7 +1598,7 @@
       if (city) parts.push(city);
       // What to SHOW, as opposed to what to decide on. When the city could not
       // be trusted the driver still gets everything that was read - they are
-      // looking at this to judge whether the scan worked, and "GA 30127" does
+      // looking at this to judge whether the scan worked, and "GA 90727" does
       // not tell them that. `city` stays null either way, so nothing downstream
       // treats the unsplit text as a town.
       var line = parts.length
@@ -1668,7 +1668,7 @@
   }
   /* The country after the ZIP: ", US", " USA", ", United States", at the END
      of a line after a ZIP and nowhere else. The owner's snap of 24 Oct printed
-     a pickup's door as "800 <Name> Street Northwest, Atlanta," over "GA 30318,
+     a pickup's door as "800 <Name> Street Northwest, Solvane," over "GA 90818,
      US", and the ", US" left no line under the label a town line: the stop
      lost its street, town and ZIP and the pickup was never pinned ("no house
      number"). The app's furniture, not the place's, so it goes. Capitals as
@@ -1682,7 +1682,7 @@
   var PLANNER_COUNTRY_TAIL = new RegExp('^' + PLANNER_COUNTRY + '$');
   var PLANNER_TOWN = new RegExp('^[^A-Za-z]{0,3}(' + TOWN + ') ?, ?([A-Za-z]{2})\\b ?(.*)$');
   /* ...and the comma read as a full stop ("<Town>. GA", the same planner) or
-     lost ("Marietta GA"): taken only with every word of the town capitalised,
+     lost ("Harrowen GA"): taken only with every word of the town capitalised,
      the state two capitals and not "NE" (a street's quadrant far more often
      here), and the line opening on a letter, never a short house number. See
      PLANNER_TOWN_LOOSE in offer_parser.py. */
@@ -1791,7 +1791,7 @@
      beside it carries something after its state that is not a ZIP - the
      screen's scroll bar is a column, and it marks every line it passes. With a
      clean town line the letter is kept as the quadrant it may be: 7 of the
-     week's 1,802 places carry a real one, Cobb Pkwy N and S among them. The
+     week's 1,802 places carry a real one, Vosk Pkwy N and S among them. The
      line carries the state only beside a ZIP, which is
      findAddress's line exactly; without one Advice.area could not take the
      town off its end. A lone letter after a two-letter QUADRANT is dropped on
@@ -1811,7 +1811,7 @@
         var z = PLANNER_ZIP.exec(rest);
         zip = z ? aZip(z[1]) : null;
         var after = (zip ? rest.slice(z[0].length) : rest).trim();
-        // The country after a ZIP ("GA 30318, US", the owner's snap of 24 Oct)
+        // The country after a ZIP ("GA 90818, US", the owner's snap of 24 Oct)
         // is the app's, not the scroll bar's: read as a mark it would take a
         // real quadrant off the street beside it. See PLANNER_COUNTRY_TAIL.
         if (zip && PLANNER_COUNTRY_TAIL.test(after)) after = '';
@@ -1857,9 +1857,9 @@
      a town at the last comma whose remainder is a town line, taking a bare ZIP
      the screen wrapped onto the line under - the third under the label, and
      no further. See _planner_address_lines. */
-  /* "Northwest, Marietta, GA 30060" under "4410 Fable W Lantern Parkway": the
+  /* "Northwest, Harrowen, GA 90660" under "4410 Fable W Lantern Parkway": the
      street's quadrant, wrapped off its end onto the town line, where TOWN
-     cannot take "Northwest, Marietta" for a town and the stop lost its town
+     cannot take "Northwest, Harrowen" for a town and the stop lost its town
      and ZIP on the driver's planner. The quadrant goes back on the street and
      the rest is read as the town line. See PLANNER_QUADRANT_LEAD in
      offer_parser.py. */
@@ -1939,10 +1939,10 @@
 
   function plannerAddressLines(block, label) {
     var under = block.slice(label + 1, label + 4);
-    // A town line broken after its comma ("..., Canton," over "GA 30114-6559"):
-    // one line. ...with the country after the ZIP ("..., Atlanta," over "GA
-    // 30318, US", the owner's snap of 24 Oct); and with the street line's
-    // separators misread ("<n> <Name> Pkwy . Kennesaw" over "GA 30144", the
+    // A town line broken after its comma ("..., Belvan," over "GA 90714-6559"):
+    // one line. ...with the country after the ZIP ("..., Solvane," over "GA
+    // 90818, US", the owner's snap of 24 Oct); and with the street line's
+    // separators misread ("<n> <Name> Pkwy . Tellmoor" over "GA 90744", the
     // 22 Oct shift), written back as "<street>, <Town>, ST ZIP". See
     // _planner_address_lines in offer_parser.py.
     if (under.length >= 2 && PLANNER_STATE_ZIP_LINE.test(under[1].trim())) {
@@ -1977,7 +1977,7 @@
       }
     }
     // ...or a line of marks between the street and the town (the owner's
-    // whole read of 22 Oct: "<n> <Name> Dr NW" / "e" / "Kennesaw, GA"): the
+    // whole read of 22 Oct: "<n> <Name> Dr NW" / "e" / "Tellmoor, GA"): the
     // town on the third line, only with no word on the second and a house
     // number opening the first. See _planner_address_lines.
     if (townAt === -1 && under.length >= 3 && /^\W{0,3}\d/.test(plannerEdgeHouse(under[0]))
@@ -2324,7 +2324,7 @@
 
   /* ...and, under its Dropoff header, the address in any layout the planner
      grammar reads (the owner's card-box read of 26 Oct, 20:38: a place line
-     over "<n> <Name> Ave NE, Atlanta, GA", street and town on one line): an
+     over "<n> <Name> Ave NE, Solvane, GA", street and town on one line): an
      "Address" label over one to three lines that plannerAddressLines reads
      as a street with a house number and a town. The headless block keeps the
      strict shape. See _planner_foot_address in offer_parser.py. */
@@ -3013,8 +3013,8 @@
   }
 
   /* The store's door off the line under its name (the owner's 17 Oct
-     afternoon shift): "113 <Name> St NE, Marietta, 30060 GA", ZIP before the
-     state, or "…, Marietta, 30." with the ZIP cut by the card's edge. A house
+     afternoon shift): "113 <Name> St NE, Harrowen, 90660 GA", ZIP before the
+     state, or "…, Harrowen, 30." with the ZIP cut by the card's edge. A house
      number (up to four icon marks in front), a street with two letters in a
      row, a comma, a town of capitalised words with three letters and no cut
      mark, then only the ZIP and the state, in either order, each once; a ZIP
@@ -3139,7 +3139,7 @@
 
   /* ...and never the store's printed door, however the map spells it (the
      owner's snap of 7 Nov 21:34: the store printed "<n> <Name> Road
-     Northwest, Atla…", the customer's label "<n> <Name> Dr NW"): a label
+     Northwest, Solv…", the customer's label "<n> <Name> Dr NW"): a label
      whose house number and first street word are a store door's first two
      words is that store's (labelSameDoor), and one running on past its
      type and quadrant ("<n> <Name> Road Northwest <Town>") is a whole door
@@ -3250,7 +3250,7 @@
        them - this reads exactly as it always did.
 
        The bracket rule is inside the narrowing rather than ahead of it, and
-       row 113 of the owner's week is why: `Brogdon Rd & Mendi Ct, Suwanee YF
+       row 113 of the owner's week is why: `Margdon Rd & Velmi Ct, Wemanee YF
        Long trip (45+ min)` ends in a bracket because UBER'S OWN BADGE is
        bracketed, so PLACE_IS_A_SHOP called the destination a merchant and
        returned it out of a list whose first entry was the real pickup. The
@@ -3335,8 +3335,8 @@
       var town = value.slice(value.lastIndexOf(',', m[1].length - 1), m[0].length);
       // Only an address that has already reached a town, by the parser's own
       // rule for one, PLACE_TOWN - three letters or more. Row 304 of the
-      // owner's week reads `Ridgewood Dr & Stockwood Ct, Dy` / `Woodstock 7`:
-      // `Dy` is the icon row and `Woodstock`, on the next line, is the town.
+      // owner's week reads `Ridgewood Dr & Stillwood Ct, Dy` / `Marrowick 7`:
+      // `Dy` is the icon row and `Marrowick`, on the next line, is the town.
       if (m[2] && PLACE_TOWN.test(town)) {
         var first = town.slice(1).trim().split(/\s+/)[0], name = m[3];
         for (var n = 0; n < lines.length; n++) {
@@ -3369,13 +3369,13 @@
       var start = tails[q][0], stop = tails[q][1], j = tails[q][2];
       // 130 rather than 80. On the single-total delivery card the tail holds
       // the merchant AND the address, and 80 cut the town off the end of the
-      // one that matters: "Double Branches Ln & Sagamore Ct. Dal".
+      // one that matters: "Triple Branches Ln & Tamarack Ct. Dor".
       var tail = text.slice(start, stop).slice(0, 130);
       tail = tail.split(PLACE_STOP)[0];
       // Trimmed before it is judged, not after. The test asks whether this is
       // an address, and the thing to ask it about is the string that would be
       // stored — `1 min ~ 4 . mins | . = | i oO < * ~~ agama ae ae; i Old
-      // Mountain Rd NW, Kennesaw` passes on the address buried at the end of it
+      // Mountain Rd NW, Tellmoor` passes on the address buried at the end of it
       // and then goes into the journal sludge and all.
       var pieces = [tail], bar = dividerBar(tail);
       if (bar >= 0 && looksLikeAPlace(trimPlace(tail.slice(bar + 1)))) {
@@ -3385,7 +3385,7 @@
         var piece = trimPlace(pieces[k]);
         // Two places in one tail, when the card wrote them that way. See
         // PLACE_MERCHANT: the merchant is kept without asking looksLikeAPlace,
-        // because "Rick's Hotwings (Kennesaw)" names no street and no town and
+        // because "Rick's Hotwings (Tellmoor)" names no street and no town and
         // is still exactly where the driver goes first.
         var pair = piece.match(PLACE_MERCHANT);
         if (pair) {
@@ -3398,7 +3398,7 @@
         // holds BOTH ends of the job with no bracket between them.
         //
         // This was a silent drop: `keep` refuses anything over 60 characters,
-        // so `Smash Hit Burgers - Kennesaw Allgood Rd & Monarch Dr, Marietta`
+        // so `Smash Hit Burgers - Tellmoor Ashgood Rd & Monarch Dr, Harrowen`
         // — sixty-one — went in the bin with the merchant, the junction and
         // the town in it, and the card stored no place at all. On the driver's
         // own 272 that happened 15 times. The cap is right: a journal full of
@@ -3411,12 +3411,12 @@
           while ((sm = PLACE_JUNCTION_AT.exec(piece)) !== null) seams.push(sm.index);
           // Exactly one, or the parser does not know which ampersand is the
           // seam and does not guess. Two means either the merchant's own name
-          // has an ampersand — `Freddy's Frozen Custard & Steakburgers Hamby
-          // Place Dr NW & Travistock Pl NW, Acworth`, where splitting at
+          // has an ampersand — `Freddy's Frozen Custard & Steakburgers Holby
+          // Place Dr NW & Marlestock Pl NW, Ivyhame`, where splitting at
           // either puts half a street name on the wrong side — or the
           // 130-character window cut through a merchant's bracket and left
-          // its back end here: `NW & Barretts Lake Blvd) Glencrest Dr &
-          // Sourwood Dr, Marietta`.
+          // its back end here: `NW & Talletts Lake Blvd) Fenmarrow Dr &
+          // Tallwick Dr, Harrowen`.
           //
           // That second one is why refusing is not merely cautious. The
           // destination in it is good, and keeping only that is still WRONG:
@@ -3744,9 +3744,9 @@
 
          $26.04
          8 min (3.2 mi)                                <- the drive TO the pickup
-         Ector Chase NW & Ector Overlook NW, Kennesaw  <- the pickup
+         Ostor Chase NW & Ostor Overlook NW, Tellmoor  <- the pickup
          39 mins (25.1 mi)                             <- the trip
-         Hale St NE & Inman Village Pkwy NE, Atlanta   <- the dropoff
+         Hale St NE & Ilsen Village Pkwy NE, Solvane   <- the dropoff
 
      The card's own statement is the ORDER: a leg, the place it arrives at, a
      leg, the place THAT one arrives at. So a leg followed by the pickup's name

@@ -880,7 +880,7 @@ def unglued(pickup, texts):
         lines = [_LINE_EDGE.sub('', ln.strip()) for ln in t.split('\n')]
         for a, b in zip(lines, lines[1:]):
             # ...and the line under it an address's: a comma after two words
-            # or more ("Center, College Park" is a name wrapped, not a street).
+            # or more ("Center, College Vale" is a name wrapped, not a street).
             if not a or not b or ',' in a or ',' not in b or a[:1].isdigit() \
                     or len(b.split(',')[0].split()) < 2:
                 continue
@@ -892,7 +892,7 @@ def unglued(pickup, texts):
 
 
 # A name whose part before the comma ENDS on a street's type, a quadrant
-# after it allowed ("Celebration Blvd, Faketown", "Wren Hollow Cir NW"): a
+# after it allowed ("Jamboreeton Blvd, Faketown", "Wren Hollow Cir NW"): a
 # street, not a store. offer_parser's STREET_SUFFIX, the USPS list the
 # readers already draw a street's end by, and the list assemble.js keeps the
 # same copy of for server.js (storeNameSaid asks Assemble.STREET_SUFFIX; the
@@ -912,7 +912,7 @@ def store_name(t):
 
     THE FAULT (the tools review, Nov 2026): the corner test was ' & ', which
     DoorDash's "Wren Hollow Cir NW &, Faketown" (the corner cut at its comma)
-    slipped past, and an UberX ride's pickup, the rider's street ("Celebration
+    slipped past, and an UberX ride's pickup, the rider's street ("Jamboreeton
     Blvd, Faketown"), passed whole: Restaurant waits printed both as stores.
     THE COST: a store named for its street ("Market Square, Faketown", "Noodle
     Way") and one with an '&' anywhere in its name ("Ash&Oak Grill"; one with

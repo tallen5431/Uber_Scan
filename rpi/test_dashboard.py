@@ -196,7 +196,7 @@ UNCERTAIN = {
 DEDUCTED = dict(UNCERTAIN, state='no', perHour=14.71, grossPerHour=20.97,
                 cost=2.4, perMile=0.7, milesUncertain=False, whole=True,
                 uncosted=False,
-                places=['Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'])
+                places=['Vosk Pkwy NW, Ivyhame', 'Belvan Rd, Harrowen'])
 # A delivery card states a deadline and no duration, so `minutes` is null and
 # the rate was worked out over `cardMinutes`. The raw row divided by `minutes`
 # and printed "$12.00 in -- min = $21.2/hr raw" — a sum with nothing under the
@@ -261,26 +261,26 @@ CUT_PAY = {
     'items': None, 'milesCorrected': False, 'milesUncertain': False,
     'cost': None, 'costPerMile': None, 'ms': 1651,
     'text': "gg Pit. Includes expected tip a © Est. delivery 4:15 PM- 8.6 mi | "
-            "Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100) Foothill Tri & "
-            "Northwoods Dr, Marietta @ Matching may take longer o",
+            "Dave's Hot Chicken (1985 Vosk Parkway NW, STE 100) Foothill Tri & "
+            "Farrowdene Dr, Harrowen @ Matching may take longer o",
     'legs': 0, 'mergedFrom': 0, 'grew': False, 'whole': False,
 }
 # ...the same text as the parser reads it now, with the deadline and both ends.
 CUT_PAY_NOW = dict(CUT_PAY, deliverBy=975,
-                   places=["Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100)",
-                           'Foothill Tri & Northwoods Dr, Marietta'],
-                   pickup="Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100)",
-                   dropoff='Foothill Tri & Northwoods Dr, Marietta')
+                   places=["Dave's Hot Chicken (1985 Vosk Parkway NW, STE 100)",
+                           'Foothill Tri & Farrowdene Dr, Harrowen'],
+                   pickup="Dave's Hot Chicken (1985 Vosk Parkway NW, STE 100)",
+                   dropoff='Foothill Tri & Farrowdene Dr, Harrowen')
 # A card whose time did not read: the $4.21 Jimmy John's card of 15:05 that day,
 # with its "23 min (5.2 mi) total" line gone, as the parser reads that text.
 NO_TIME = dict(CUT_PAY, pay=4.21, miles=None, ms=1567,
                text="Exclusive x $4.21 Guaranteed (incl. tip) Jimmy John's "
-                    "(1337 Powers Ferry Rd Se) Shadowood Pkwy SE, Atlanta")
+                    "(1337 Barley Ferry Rd Se) Gloamwood Pkwy SE, Solvane")
 # The app's zone prompt, which is no card at all: its average wait reads as
 # minutes and its bonus is refused as a payout (PAY_IS_PER_ORDER). It reads the
 # way a card missing its pay reads, which is why the line may not claim a card.
 ZONE = dict(CUT_PAY, miles=None, minutes=1.0,
-            text="GA: Marietta North Switch to this zone with peak pay! "
+            text="GA: Harrowen North Switch to this zone with peak pay! "
                  "+$1.00/order until 8:20 PM Avg. offer wait 1min Don't switch")
 # ...and one for each of the other two things a reading can carry with no pay,
 # each alone, so that every one of the four is what the line is said off: the
@@ -311,7 +311,7 @@ CLIPPED = dict(BLANK, mergedFrom=1, clipped=True)
 # for most of every delivery, and it may claim no card any more than the zone
 # prompt's may.
 MAP = dict(CUT_PAY, miles=1.0, minutes=39.0, legs=4, mergedFrom=1,
-           text='The Townes at Chastain 3min 8 11 min $ 22 min & 3 min (1.0 mi) '
+           text='The Townes at Morvaine 3min 8 11 min $ 22 min & 3 min (1.0 mi) '
                 'Fastest route now due to traffic conditions')
 
 # Uber's navigation to a held order's door, as the card box reads it in the car
@@ -326,7 +326,7 @@ NAV = dict(CUT_PAY, miles=1.1, minutes=3.0, legs=1, mergedFrom=0,
 # ...and the Trip Planner's stops, typed 'uber.planner'.
 PLANNER = dict(CUT_PAY, miles=None, minutes=None, legs=0, mergedFrom=0,
                text='Dropoff - 1 order | Pat Q. | Expected by 8:21 PM | Address | '
-                    '12 Fable Ct, Marietta, GA | View details | Stop New Requests',
+                    '12 Fable Ct, Harrowen, GA | View details | Stop New Requests',
                screen='uber.planner')
 
 READINGS = {'uncertain': UNCERTAIN, 'deducted': DEDUCTED, 'deadline': DEADLINE,
@@ -777,9 +777,9 @@ const framed = (page) => page.waitForFunction(
                miles: 5.0, cost: 1.75, dropoff: null, endRefused: true } }));
     await page.waitForTimeout(150);
     await page.evaluate(() => window.__es.push({ dropoff: {
-      line: '1234 Daffodil Ln, Powder Springs, GA 30127',
-      street: '1234 Daffodil Ln', city: 'Powder Springs',
-      state: 'GA', zip: '30127' } }));
+      line: '1234 Daffodil Ln, Gorrel Springs, GA 90727',
+      street: '1234 Daffodil Ln', city: 'Gorrel Springs',
+      state: 'GA', zip: '90727' } }));
     await page.waitForTimeout(200);
     out.destAfterScan = await page.evaluate(() => {
       const el = document.getElementById('dest');
@@ -974,11 +974,11 @@ const framed = (page) => page.waitForFunction(
   //
   // After civil dusk at the fix the page takes its night palette
   // (`html.night`): MV.nightFor on the page's own clock. Each case on a page
-  // whose clock is set to the moment it is about, in Atlanta (published
-  // civil dusk 21:20 EDT on 21 Jun 2026; see tests/mapview.test.js).
+  // whose clock is set to the moment it is about, at tests/mapview.test.js's
+  // invented fix (civil dusk 22:40 UTC on 21 Jun 2026, as worked there).
   out.night = {};
   {
-    const ATL = { lat: 33.7491, lon: -84.3880, gpsOk: true, gpsErr: 8, gpsAge: 1,
+    const FIX = { lat: 33.7491, lon: -44.3880, gpsOk: true, gpsErr: 8, gpsAge: 1,
                   gpsMode: 3, freshFor: 20 };
     const night = async (name, iso, beats, kept, runMs) => {
       const ctx = await browser.newContext({
@@ -1030,14 +1030,14 @@ const framed = (page) => page.waitForFunction(
       await ctx.close();
     };
     const beat = (fix) => ({ alive: true, at: 1, gps: fix ? { state: 'ok', fix: fix } : null });
-    await night('afterDusk', '2026-06-21T21:30:00-04:00', [beat(ATL)], null, 0);
-    await night('afternoon', '2026-06-21T15:00:00-04:00', [beat(ATL)], null, 0);
-    // Dusk arriving with nothing arriving: 21:15, then ten minutes of ticks.
-    await night('crossing', '2026-06-21T21:15:00-04:00', [beat(ATL)], null, 600000);
-    await night('lastFix', '2026-06-21T22:00:00-04:00', [beat(null)],
-                { lat: 33.75, lon: -84.39 }, 0);
-    await night('noFix', '2026-06-21T22:00:00-04:00', [beat(null)], null, 0);
-    await night('clock1970', null, [beat(ATL)], null, 0);
+    await night('afterDusk', '2026-06-21T22:50:00Z', [beat(FIX)], null, 0);
+    await night('afternoon', '2026-06-21T15:00:00Z', [beat(FIX)], null, 0);
+    // Dusk arriving with nothing arriving: 22:35, then ten minutes of ticks.
+    await night('crossing', '2026-06-21T22:35:00Z', [beat(FIX)], null, 600000);
+    await night('lastFix', '2026-06-22T02:00:00Z', [beat(null)],
+                { lat: 33.75, lon: -44.39 }, 0);
+    await night('noFix', '2026-06-22T02:00:00Z', [beat(null)], null, 0);
+    await night('clock1970', null, [beat(FIX)], null, 0);
   }
 
   // --- a map-view.js from before nightFor, and a tick step that throws -------
@@ -1055,7 +1055,7 @@ const framed = (page) => page.waitForFunction(
   out.oldMapView = {};
   {
     const mvSrc = await (await fetch(base + '/map-view.js')).text();
-    const ATL = { lat: 33.7491, lon: -84.3880, gpsOk: true, gpsErr: 8, gpsAge: 1,
+    const FIX = { lat: 33.7491, lon: -44.3880, gpsOk: true, gpsErr: 8, gpsAge: 1,
                   gpsMode: 3, freshFor: 20 };
     const staged = async (name, tail) => {
       const ctx = await browser.newContext({
@@ -1076,7 +1076,7 @@ const framed = (page) => page.waitForFunction(
       await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 })
                 .catch(() => {});
       await page.evaluate(() => { if (window.__es.onopen) window.__es.onopen(); });
-      const beat = { alive: true, at: 1, gps: { state: 'ok', fix: ATL } };
+      const beat = { alive: true, at: 1, gps: { state: 'ok', fix: FIX } };
       const look = () => page.evaluate(() => ({
         verdict: document.getElementById('verdict').className,
         age: ((document.querySelector('#detail .age') || {}).textContent || ''),
@@ -1300,14 +1300,14 @@ const framed = (page) => page.waitForFunction(
     // Planner that press read: a pickup, whose name the reader prefixed with
     // the icon's letters, ahead of the one dropoff.
     await push({ holding: { pay: 28.08, minutes: 40, holdId: 'h-in-car@1',
-                            dropoff: '4821 Kestrel Dr, Marietta, GA 30064', card: null,
+                            dropoff: '4821 Kestrel Dr, Harrowen, GA 90664', card: null,
                             endPinned: true, endWhy: null, arrived: false } });
     await push({ planner: { stops: [
       { kind: 'pickup', orders: 1, name: 'oe Burger Barn', expectedBy: 1066,
-        street: '310 Mill St', city: 'Roswell',
-        line: '310 Mill St, Roswell, GA 30075' },
+        street: '310 Mill St', city: 'Ruswold',
+        line: '310 Mill St, Ruswold, GA 90675' },
       { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 1105,
-        street: '4821 Kestrel Dr', city: 'Marietta', line: '4821 Kestrel Dr, Marietta' }],
+        street: '4821 Kestrel Dr', city: 'Harrowen', line: '4821 Kestrel Dr, Harrowen' }],
       unfiled: null, asked: true, ms: null, at: 1 } });
     await push({ ready: false, state: 'empty', track: null });
     await tick(300);
@@ -1318,7 +1318,7 @@ const framed = (page) => page.waitForFunction(
     // the driver swipes it.
     await push({ alive: true, at: Date.now(), atDropoff: false,
                  heldEnd: { endPinned: true, arrived: false, endWhy: null,
-                            visited: ['310 Mill St, Roswell, GA 30075'] } });
+                            visited: ['310 Mill St, Ruswold, GA 90675'] } });
     await tick(300);
     const visited = await held();
     // The server refuses the pin, and says so on the next beat.
@@ -1372,7 +1372,7 @@ const framed = (page) => page.waitForFunction(
     // An offer comes up while the order is in the car.
     await push(Object.assign({}, READINGS.deducted, {
       holding: { pay: 28.08, minutes: 40, holdId: 'h-in-car@1',
-                 dropoff: '4821 Kestrel Dr, Marietta, GA 30064', card: null,
+                 dropoff: '4821 Kestrel Dr, Harrowen, GA 90664', card: null,
                  endPinned: true, endWhy: null, arrived: false },
       stack: null }));
     await push({ alive: true, at: Date.now(), atDropoff: false,
@@ -1383,7 +1383,7 @@ const framed = (page) => page.waitForFunction(
     // under an offer and between offers. "2 drops" beside the pay.
     await push(Object.assign({}, READINGS.deducted, {
       holding: { pay: 28.08, minutes: 40, holdId: 'h-in-car@1',
-                 dropoff: '4821 Kestrel Dr, Marietta, GA 30064', card: null,
+                 dropoff: '4821 Kestrel Dr, Harrowen, GA 90664', card: null,
                  endPinned: true, endWhy: null, arrived: false, drops: 2 },
       stack: null }));
     await tick(300);
@@ -1398,7 +1398,7 @@ const framed = (page) => page.waitForFunction(
     await push({ ready: false, state: 'empty', track: null });
     // ...and a count of one is no batch: nothing said.
     await push({ holding: { pay: 28.08, minutes: 40, holdId: 'h-in-car@1',
-                            dropoff: '4821 Kestrel Dr, Marietta, GA 30064', card: null,
+                            dropoff: '4821 Kestrel Dr, Harrowen, GA 90664', card: null,
                             endPinned: true, endWhy: null, arrived: false, drops: 1 } });
     await tick(300);
     const oneDrop = await held();
@@ -1417,7 +1417,7 @@ const framed = (page) => page.waitForFunction(
     }, sel);
     await push(Object.assign({}, READINGS.deducted, {
       holding: { pay: 28.08, minutes: 40, holdId: 'h-in-car@1',
-                 dropoff: '4821 Kestrel Dr, Marietta, GA 30064', card: null,
+                 dropoff: '4821 Kestrel Dr, Harrowen, GA 90664', card: null,
                  endPinned: true, endWhy: null, arrived: false },
       stack: null }));
     await tick(300);
@@ -1477,14 +1477,14 @@ const framed = (page) => page.waitForFunction(
     await framed(page);
     const tick = (ms) => page.clock.runFor(ms);
     const OFFER_LINE = { id: 'o-drive', pay: READINGS.deducted.pay, minutes: 22.0,
-                         miles: READINGS.deducted.miles, pickup: 'Cobb Pkwy NW, Acworth',
-                         dropoff: 'Canton Rd, Marietta' };
+                         miles: READINGS.deducted.miles, pickup: 'Vosk Pkwy NW, Ivyhame',
+                         dropoff: 'Belvan Rd, Harrowen' };
     const push = (m) => page.evaluate((x) => window.__es.push(x), m);
     // A beat as the scanner sends it, its fix as beat_fix builds it, with
     // gps.py's word on whether the car is being driven. MOVING is that word
     // on a beat 0.4 s after a usable fix: 9.6 s of DRIVING_HOLD left, and
     // 19.6 s of the staleness rule.
-    const FIX = { lat: 33.9526, lon: -84.5499, gpsAge: 0.4, gpsErr: 12.0, gpsMode: 3,
+    const FIX = { lat: 33.9526, lon: -44.5499, gpsAge: 0.4, gpsErr: 12.0, gpsMode: 3,
                   gpsOk: true, gpsWhy: null, freshFor: 19.6, speed: 0.0, driving: false,
                   drivingFor: 0.0 };
     const MOVING = { speed: 13.4, driving: true, drivingFor: 9.6 };
@@ -1549,7 +1549,7 @@ const framed = (page) => page.waitForFunction(
     // The order in the car, a ⌖ read's Trip Planner, and an offer up beside
     // it with its pair line.
     const HOLD = { pay: 28.08, minutes: 40, holdId: 'h-drive@1',
-                   dropoff: '4821 Kestrel Dr, Marietta, GA 30064', card: null,
+                   dropoff: '4821 Kestrel Dr, Harrowen, GA 90664', card: null,
                    endPinned: true, endWhy: null, arrived: false };
     await push({ holding: HOLD });
     // The offer's line before the planner: a new offer on record forgets the
@@ -1557,12 +1557,12 @@ const framed = (page) => page.waitForFunction(
     await push({ offer: OFFER_LINE });
     await push({ planner: { stops: [
       { kind: 'pickup', orders: 1, name: 'Burger Barn', expectedBy: 1066,
-        street: '310 Mill St', city: 'Roswell', line: '310 Mill St, Roswell, GA 30075' },
+        street: '310 Mill St', city: 'Ruswold', line: '310 Mill St, Ruswold, GA 90675' },
       { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 1105,
-        street: '4821 Kestrel Dr', city: 'Marietta', line: '4821 Kestrel Dr, Marietta' }],
+        street: '4821 Kestrel Dr', city: 'Harrowen', line: '4821 Kestrel Dr, Harrowen' }],
       unfiled: null, asked: true, ms: null, at: 1 } });
     const OFFER = Object.assign({}, READINGS.deducted, {
-      holding: HOLD, places: ['Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'],
+      holding: HOLD, places: ['Vosk Pkwy NW, Ivyhame', 'Belvan Rd, Harrowen'],
       stack: { pay: 40.08, minMinutes: 40, maxMinutes: 62, worst: 21.4, best: 33.1,
                state: 'warn', sure: true, uncosted: false, ends: 'same-town',
                route: 'https://www.google.com/maps/dir/?api=1&origin=A&destination=B' } });
@@ -1626,9 +1626,9 @@ const framed = (page) => page.waitForFunction(
     await beat(MOVING, { blind: null });
     // ...and a reading whose places are three, the frames' union and not two
     // ends (MV.ends): the one line it is parked.
-    await push(Object.assign({}, OFFER, { places: ['Cobb Pkwy NW, Acworth',
-                                                   'Barrett Pkwy NW, Kennesaw',
-                                                   'Canton Rd, Marietta'] }));
+    await push(Object.assign({}, OFFER, { places: ['Vosk Pkwy NW, Ivyhame',
+                                                   'Tallett Pkwy NW, Tellmoor',
+                                                   'Belvan Rd, Harrowen'] }));
     const unionMoving = await look();
     await push(OFFER);
     await beat({ speed: 0.2, driving: false });
@@ -1729,7 +1729,7 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate((r) => window.__es.push(r),
       Object.assign({}, READINGS.deducted, {
         holding: { pay: 12, minutes: 30,
-                   dropoff: 'Cochran Ridge Rd & Jewel Cole Rd, Hiram' },
+                   dropoff: 'Pochard Ridge Rd & Pearl Dale Rd, Telby' },
         stack: { pay: 16.8, minMinutes: 30, maxMinutes: 50, worst: 20.2,
                  best: 33.6, state: 'warn', sure: true, ends: 'elsewhere',
                  route: 'https://www.google.com/maps/dir/?api=1&origin=A'
@@ -1858,7 +1858,7 @@ const framed = (page) => page.waitForFunction(
     // button is not asking to be pressed for something it cannot fix.
     await page.evaluate((r) => window.__es.push(r),
       Object.assign({}, READINGS.deducted, {
-        holding: { pay: 12, minutes: 30, dropoff: 'Oak Ln, Marietta' },
+        holding: { pay: 12, minutes: 30, dropoff: 'Oak Ln, Harrowen' },
         stack: { pay: 16.8, minMinutes: 30, maxMinutes: 50, worst: 20.2,
                  best: 33.6, state: 'warn', sure: true, ends: null,
                  route: null } }));
@@ -1885,7 +1885,7 @@ const framed = (page) => page.waitForFunction(
       Object.assign({}, r, {
         cost: 17.0, perHour: -14,
         holding: { pay: 4.0, minutes: 55.0, cost: 18.0,
-                   dropoff: 'Oak Ln, Marietta' },
+                   dropoff: 'Oak Ln, Harrowen' },
         stack: { pay: 7.0, minMinutes: 55, maxMinutes: 105,
                  worst: -16.0, best: -30.55, alone: -15.3, sure: false,
                  state: 'no', ends: 'elsewhere', route: null } })),
@@ -1925,7 +1925,7 @@ const framed = (page) => page.waitForFunction(
     // one claim on this row that outranks the arithmetic keeps its class.
     await page.evaluate((r) => window.__es.push(
       Object.assign({}, r, {
-        holding: { pay: 28.74, minutes: 53, dropoff: 'Oak Ln, Marietta' },
+        holding: { pay: 28.74, minutes: 53, dropoff: 'Oak Ln, Harrowen' },
         stack: { pay: 25.0, minMinutes: 40, maxMinutes: 60, worst: 27.82,
                  best: 40.73, alone: 36.83, sure: false, state: 'go',
                  ends: 'elsewhere', route: null } })),
@@ -2056,7 +2056,7 @@ const framed = (page) => page.waitForFunction(
       body: JSON.stringify({ ok: true, holding: false }) }));
     await page.evaluate((r) => window.__es.push(r),
       Object.assign({}, READINGS.deducted, {
-        holding: { pay: 12, minutes: 30, dropoff: 'Oak Ln, Marietta' },
+        holding: { pay: 12, minutes: 30, dropoff: 'Oak Ln, Harrowen' },
         stack: { pay: 16.8, minMinutes: 30, maxMinutes: 50, worst: 20.2,
                  best: 33.6, state: 'warn', sure: true, ends: 'same-town',
                  route: null } }));
@@ -2117,7 +2117,7 @@ const framed = (page) => page.waitForFunction(
     // ...and an address arriving afterwards clears it, rather than leaving a
     // failure standing over a button that has since worked.
     await page.evaluate(() => window.__es.push(
-      { dropoff: { line: '12 Oak Ln, Marietta', found: true, asked: true, at: 2 } }));
+      { dropoff: { line: '12 Oak Ln, Harrowen', found: true, asked: true, at: 2 } }));
     await page.waitForTimeout(200);
     Object.assign(out['destEmpty ' + panel[0]], { after: await page.evaluate(() => {
       const d = document.getElementById('dest');
@@ -2142,7 +2142,7 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => document.getElementById('dest').click());
     await page.waitForTimeout(150);
     await page.evaluate(() => window.__es.push(
-      { dropoff: { line: '9 Elm St, Acworth', found: true, asked: true, at: 9 } }));
+      { dropoff: { line: '9 Elm St, Ivyhame', found: true, asked: true, at: 9 } }));
     await page.waitForTimeout(150);
     await page.evaluate((r) => window.__es.push(r),
       Object.assign({}, READINGS.deducted, {
@@ -2166,19 +2166,19 @@ const framed = (page) => page.waitForFunction(
      *
      * 17 Oct: an order held with its planner's door on record, ⌖ pressed at
      * the restaurant over Uber's navigation to the store, and the button went
-     * green, "Dropoff read as <Town>, GA 30066", for an end the order was
+     * green, "Dropoff read as <Town>, GA 90666", for an end the order was
      * never given. server.js now answers that press with the refusal and the
      * end kept (dropoffArrived), and no line. Names and streets invented. */
     await page.evaluate((r) => window.__es.push(r),
       Object.assign({}, READINGS.deducted, {
-        holding: { pay: 11.09, minutes: 35, dropoff: '283 Quillon St NW, Smyrna' },
+        holding: { pay: 11.09, minutes: 35, dropoff: '283 Quillon St NW, Pyrnel' },
         stack: null }));
     await page.waitForTimeout(200);
     await page.evaluate(() => document.getElementById('dest').click());
     await page.waitForTimeout(150);
     await page.evaluate(() => window.__es.push(
       { dropoff: { line: null, found: false, asked: true, refused: 'a pickup screen',
-                   kept: '283 Quillon St NW, Smyrna', at: 5 } }));
+                   kept: '283 Quillon St NW, Pyrnel', at: 5 } }));
     await page.waitForTimeout(200);
     const destLook = () => {
       const d = document.getElementById('dest');
@@ -2193,7 +2193,7 @@ const framed = (page) => page.waitForFunction(
     // the navigation screen read on its own once the car leaves the store —
     // takes its place, green as ever.
     await page.evaluate(() => window.__es.push(
-      { dropoff: { line: '61 Saddlebrook Ln, Smyrna', found: true, asked: false, at: 6 } }));
+      { dropoff: { line: '61 Haddlecombe Ln, Pyrnel', found: true, asked: false, at: 6 } }));
     await page.waitForTimeout(200);
     out['destStore ' + panel[0]].after = await page.evaluate(destLook);
     // Back to the state the checks below start from: an answered empty press.
@@ -2312,7 +2312,7 @@ const framed = (page) => page.waitForFunction(
     // that teaches people to ignore the bar.
     await page.evaluate((r) => window.__es.push(r),
       { offer: { id: 'o-known', pay: 8.04, minutes: 23, perHour: 14.71,
-                 dropoff: 'Oak Ln, Marietta', endRefused: false }, at: 5 });
+                 dropoff: 'Oak Ln, Harrowen', endRefused: false }, at: 5 });
     await page.waitForTimeout(250);
     out['screening-known ' + panel[0]] = await page.evaluate(() =>
       document.getElementById('dest').hidden);
@@ -2610,7 +2610,7 @@ const framed = (page) => page.waitForFunction(
       // which gives the card the same box.
       ['stackedmoving', null, { moving: true, like: 'stacked' }],
       ['noticesmoving', Object.assign({}, READINGS.uncertain, {
-         places: ['Birch Market (88 Juniper Way)', 'Sycamore Ridge Dr, Kennesaw'] }),
+         places: ['Birch Market (88 Juniper Way)', 'Sycamore Ridge Dr, Tellmoor'] }),
        { tooBright: true, moving: true }],
       ['scene', READINGS.divides, { scene: true }],
       ['untimed', READINGS.untimed, {}],
@@ -2636,7 +2636,7 @@ const framed = (page) => page.waitForFunction(
          places: ['Lark Owl Pizza (Example Plaza)', 'Make-Believe Noodles (Quill St)', 'Other Town'] }),
        { tooBright: true }],
     ];
-    const FIX = { lat: 33.95, lon: -84.55, gpsAge: 0.4, gpsErr: 12.0, gpsMode: 3, gpsOk: true,
+    const FIX = { lat: 33.95, lon: -44.55, gpsAge: 0.4, gpsErr: 12.0, gpsMode: 3, gpsOk: true,
                   gpsWhy: null, freshFor: 19.6, speed: 0.0, driving: false, drivingFor: 0.0 };
     const FIGS = () => {
       const L = (css) => {
@@ -3251,7 +3251,7 @@ const framed = (page) => page.waitForFunction(
       const inside = (r, b) => r.left >= b.left - 0.5 && r.top >= b.top - 0.5
         && r.right <= b.right + 0.5 && r.bottom <= b.bottom + 0.5;
       const glass = { left: 0, top: 0, right: vw, bottom: vh };
-      // Five points: the centre and halfway to each corner, which stays
+      // Nine rivers: the centre and halfway to each corner, which stays
       // clear of a button's rounded corners (hit testing honours them).
       const hits = (el, r) => [[.5, .5], [.25, .25], [.75, .25], [.25, .75], [.75, .75]]
         .every(([fx, fy]) => {
@@ -4065,11 +4065,11 @@ const framed = (page) => page.waitForFunction(
       // and the card's size — a 12 mi printed total, a yardstick. Spread into
       // the map stages' offers, and the held card into their holds: the held
       // order came up at the same fix and printed 9 mi in all, which reaches
-      // Powder Springs Rd (7.9 mi off) on a straight line. Invented points.
-      window.__CARD = { lat: 34.010, lon: -84.600, gpsAge: 1.2, gpsErr: 12.0,
+      // Gorrel Springs Rd (7.9 mi off) on a straight line. Invented points.
+      window.__CARD = { lat: 34.010, lon: -44.600, gpsAge: 1.2, gpsErr: 12.0,
                         gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 12.0,
                         hasTotal: true, legs: 2, whole: true };
-      window.__HELD = { lat: 34.010, lon: -84.600, gpsAge: 0.8, gpsErr: 12.0,
+      window.__HELD = { lat: 34.010, lon: -44.600, gpsAge: 0.8, gpsErr: 12.0,
                         gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 9.0,
                         hasTotal: true, legs: 2, whole: true };
       window.__lmap = null; window.__marks = []; window.__lines = [];
@@ -4100,7 +4100,7 @@ const framed = (page) => page.waitForFunction(
           // it; a drag only when the test fires one.
           var hands = {};
           window.__pans = [];
-          window.__lmap = { node: node && node.id, centre: [33.94, -84.58], zoom: 11,
+          window.__lmap = { node: node && node.id, centre: [33.94, -44.58], zoom: 11,
             on: function (ev, fn) { (hands[ev] = hands[ev] || []).push(fn); return this; },
             fire: function (ev) { (hands[ev] || []).forEach(function (fn) { fn({}); }); return this; },
             later: function (evs) { var m = this;
@@ -4189,13 +4189,13 @@ const framed = (page) => page.waitForFunction(
   {
     stage = 'the map mode';
     const PLACES = {
-      "Chipotle (Barrett Pkwy)": [34.020, -84.580],
-      "Canton Rd, Marietta":     [33.980, -84.500],
-      "Powder Springs Rd":       [33.900, -84.640],
+      "Chipotle (Tallett Pkwy)": [34.020, -44.580],
+      "Belvan Rd, Harrowen":     [33.980, -44.500],
+      "Gorrel Springs Rd":       [33.900, -44.640],
       // The reader is looking at a photograph of somebody's phone. What comes
       // back is whatever the OCR made of it, and these popups are the one
       // place on this page that builds markup from a string it did not write.
-      "<b>Kroger</b> & Co \"Deli\"":  [34.030, -84.560],
+      "<b>Kroger</b> & Co \"Deli\"":  [34.030, -44.560],
       // Eighteen hundred miles away, and answered as confidently as the rest.
       // This is what a geocoder handed a misread street really does.
       "W Boise Ave":             [43.615, -116.202],
@@ -4208,14 +4208,14 @@ const framed = (page) => page.waitForFunction(
     // Map view used to anchor on the newest row that carried a fix the gate
     // passed — another card's car, up to twenty minutes old. These are newer
     // than any card pushed below and miles from this card's own fix
-    // (34.010, -84.600, on window.__CARD), so a page still asking the journal
+    // (34.010, -44.600, on window.__CARD), so a page still asking the journal
     // puts the car in the wrong place.
     await page.route('**/api/journal*', (route) => route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({ offers: [
-        { id: 'newer', at: Date.now() + 60000, lat: 34.500, lon: -84.900,
+        { id: 'newer', at: Date.now() + 60000, lat: 34.500, lon: -44.900,
           gpsAge: 0.4, gpsErr: 9.0, gpsMode: 3, gpsOk: true },
-        { id: 'rough', at: Date.now() + 60000, lat: 34.300, lon: -84.300, gpsAge: 0.5,
+        { id: 'rough', at: Date.now() + 60000, lat: 34.300, lon: -44.300, gpsAge: 0.5,
           gpsErr: 129.2, gpsMode: 3, gpsOk: false, gpsWhy: 'rough' } ] }) }));
     await page.route('**/nominatim.openstreetmap.org/**', async (route) => {
       const u = new URL(route.request().url());
@@ -4234,11 +4234,11 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
       minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd',
                  card: window.__HELD },
       offer: { id: 'o-map', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
-               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
-               dropoff: 'Canton Rd, Marietta',
+               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Tallett Pkwy)',
+               dropoff: 'Belvan Rd, Harrowen',
                ...window.__CARD } }));
     await page.waitForTimeout(400);
     // BEFORE the press. Nothing may have been asked, and the pane is a
@@ -4373,7 +4373,7 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => { window.__sizedW = []; });
     await page.evaluate(() => window.__es.push(
       { ready: false, state: 'empty', track: null,
-        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd',
                    card: window.__HELD } }));
     await page.waitForTimeout(200);
     out.betweenNone = await wide();
@@ -4393,7 +4393,7 @@ const framed = (page) => page.waitForFunction(
     // time), the next read is the card's: the column comes back for it.
     await page.evaluate(() => window.__es.push(
       { ready: false, state: 'empty', track: null, pay: 9.5,
-        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd',
                    card: window.__HELD } }));
     await page.waitForTimeout(150);
     await page.evaluate(() => window.__es.push({ reading: true }));
@@ -4402,7 +4402,7 @@ const framed = (page) => page.waitForFunction(
     // Back to the empty screen, read to its end, for what follows.
     await page.evaluate(() => window.__es.push(
       { ready: false, state: 'empty', track: null,
-        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd',
                    card: window.__HELD } }));
     await page.waitForTimeout(200);
     out.betweenReadDone = await wide();
@@ -4410,7 +4410,7 @@ const framed = (page) => page.waitForFunction(
     // Planner's stops on it give the verdict's column back. Then cleared.
     await page.evaluate(() => window.__es.push({ planner: { stops: [
       { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 978, street: '4821 Kestrel Dr',
-        city: 'Marietta', state: 'GA', zip: null, line: '4821 Kestrel Dr, Marietta' }],
+        city: 'Harrowen', state: 'GA', zip: null, line: '4821 Kestrel Dr, Harrowen' }],
       unfiled: null, asked: true, ms: null, at: 41 } }));
     await page.waitForTimeout(200);
     out.betweenStops = await wide();
@@ -4422,11 +4422,11 @@ const framed = (page) => page.waitForFunction(
       window.__es.push({
         ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
         minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
-        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd',
                    card: window.__HELD },
         offer: { id: 'o-map', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
-                 miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
-                 dropoff: 'Canton Rd, Marietta', ...window.__CARD } });
+                 miles: 4.0, cost: 1.4, pickup: 'Chipotle (Tallett Pkwy)',
+                 dropoff: 'Belvan Rd, Harrowen', ...window.__CARD } });
       return { live: getComputedStyle(document.querySelector('.live')).display !== 'none',
                label: document.getElementById('verdictLabel').textContent.trim() };
     });
@@ -4468,11 +4468,11 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 22.0, grossPerHour: 27.0, pay: 8.0,
       minutes: 16.0, miles: 3.0, cost: 1.0, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd',
                  card: window.__HELD },
       offer: { id: 'o-map-2', pay: 8.0, minutes: 16.0, billedMinutes: 16.0,
-               miles: 3.0, cost: 1.0, pickup: 'Canton Rd, Marietta',
-               dropoff: 'Chipotle (Barrett Pkwy)',
+               miles: 3.0, cost: 1.0, pickup: 'Belvan Rd, Harrowen',
+               dropoff: 'Chipotle (Tallett Pkwy)',
                ...window.__CARD } }));
     await page.waitForTimeout(2500);
     out.mapNext = await page.evaluate(() => ({
@@ -4491,20 +4491,20 @@ const framed = (page) => page.waitForFunction(
     /* Why a pin is missing, in the kinds this project keeps apart everywhere
        else. "The card named nowhere to collect it" is about the CARD; "the
        geocoder found nothing" is about the rig's reading; "the geocoder could
-       not be reached" is about the tunnel on I-75. One sentence for all three
+       not be reached" is about the tunnel on I-98. One sentence for all three
        is how a driver in a dead spot gets told their streets do not exist. */
     stage = 'the map mode: a pickup that cannot be placed';
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 24.0, grossPerHour: 29.0, pay: 9.0,
       minutes: 18.0, miles: 3.0, cost: 1.0, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd',
                  card: window.__HELD },
       offer: { id: 'o-map-3', pay: 9.0, minutes: 18.0, billedMinutes: 18.0,
                miles: 3.0, cost: 1.0, pickup: 'Unfindable Rd, Atlantis',
-               dropoff: 'Canton Rd, Marietta',
+               dropoff: 'Belvan Rd, Harrowen',
                ...window.__CARD } }));
     // The LAST card's pins must not sit under this card's numbers while these
-    // lookups run. o-map-2's pickup was Canton Rd, drawn green; o-map-3 has no
+    // lookups run. o-map-2's pickup was Belvan Rd, drawn green; o-map-3 has no
     // placeable pickup of its own, so any green pin on the glass from here on
     // belongs to the card before it. The only teardown used to be inside the
     // settled draw, so that pin stood for the whole walk — and on a card with
@@ -4531,10 +4531,10 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 24.0, grossPerHour: 29.0, pay: 9.0,
       minutes: 18.0, miles: 3.0, cost: 1.0, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd',
                  card: window.__HELD },
       offer: { id: 'o-map-4', pay: 9.0, minutes: 18.0, billedMinutes: 18.0,
-               miles: 3.0, cost: 1.0, dropoff: 'Canton Rd, Marietta',
+               miles: 3.0, cost: 1.0, dropoff: 'Belvan Rd, Harrowen',
                ...window.__CARD } }));
     await page.waitForTimeout(1800);
     out.mapNoPickup = await page.evaluate(
@@ -4554,11 +4554,11 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 26.0, grossPerHour: 31.0, pay: 11.0,
       minutes: 19.0, miles: 3.5, cost: 1.1, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd',
                  card: window.__HELD },
       offer: { id: 'o-stray', pay: 11.0, minutes: 19.0, billedMinutes: 19.0,
                miles: 3.5, cost: 1.1, pickup: 'W Boise Ave',
-               dropoff: 'Canton Rd, Marietta',
+               dropoff: 'Belvan Rd, Harrowen',
                ...window.__CARD } }));
     await page.waitForTimeout(2600);
     out.mapStray = await page.evaluate(() => ({
@@ -4572,11 +4572,11 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 24.0, grossPerHour: 29.0, pay: 9.0,
       minutes: 18.0, miles: 3.0, cost: 1.0, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd',
                  card: window.__HELD },
       offer: { id: 'o-map-5', pay: 9.0, minutes: 18.0, billedMinutes: 18.0,
                miles: 3.0, cost: 1.0, pickup: '<b>Kroger</b> & Co "Deli"',
-               dropoff: 'Canton Rd, Marietta',
+               dropoff: 'Belvan Rd, Harrowen',
                ...window.__CARD } }));
     await page.waitForTimeout(2600);
     // The RAW popup, tags and all — the checks elsewhere strip markup before
@@ -4612,11 +4612,11 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
       minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd',
                  card: window.__HELD },
       offer: { id: 'o-map-7', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
-               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
-               dropoff: 'Canton Rd, Marietta',
+               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Tallett Pkwy)',
+               dropoff: 'Belvan Rd, Harrowen',
                ...window.__CARD } }));
     await page.waitForTimeout(2600);
     out.mapBeforeRound = await page.evaluate(
@@ -4658,11 +4658,11 @@ const framed = (page) => page.waitForFunction(
       window.__es.push({
         ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
         minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
-        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd',
                    card: window.__HELD },
         offer: { id: 'o-map-8', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
-                 miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
-                 dropoff: 'Canton Rd, Marietta',
+                 miles: 4.0, cost: 1.4, pickup: 'Chipotle (Tallett Pkwy)',
+                 dropoff: 'Belvan Rd, Harrowen',
                  ...window.__CARD } });
       await new Promise((r) => setTimeout(r, 2600));
       MV.discShape = kept;
@@ -4705,11 +4705,11 @@ const framed = (page) => page.waitForFunction(
    * does. Then a DoorDash card that names nowhere, a not-ready reading and a
    * heartbeat: none of them may take the held pin off the glass. */
   {
-    const HELD_AT = '1610 Pverel Blvd, Kestrelton, GA 30144';
+    const HELD_AT = '1610 Pverel Blvd, Kestrelton, GA 90744';
     const LITTER = 'ss be 4 ' + HELD_AT;
-    const ANSWERS = { "Chipotle (Barrett Pkwy)": [34.020, -84.580],
-                      "Powder Springs Rd": [33.900, -84.640] };
-    ANSWERS[HELD_AT] = [33.990, -84.620];
+    const ANSWERS = { "Chipotle (Tallett Pkwy)": [34.020, -44.580],
+                      "Gorrel Springs Rd": [33.900, -44.640] };
+    ANSWERS[HELD_AT] = [33.990, -44.620];
     const run = async (name, cardDrop, script, replyMore) => {
       stage = 'the held end: ' + name;
       const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
@@ -4724,7 +4724,7 @@ const framed = (page) => page.waitForFunction(
         status: 200, contentType: 'application/json', body: '{"offers":[]}' }));
       await page.route('**/api/today*', (route) => route.fulfill({
         status: 200, contentType: 'application/json', body: '{}' }));
-      const heldCard = { lat: 34.010, lon: -84.600, gpsAge: 0.8, gpsErr: 12.0,
+      const heldCard = { lat: 34.010, lon: -44.600, gpsAge: 0.8, gpsErr: 12.0,
                          gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 9.0,
                          hasTotal: true, legs: 2, whole: true };
       await page.route('**/api/offers/mark', (route) => route.fulfill({
@@ -4754,7 +4754,7 @@ const framed = (page) => page.waitForFunction(
                    minutes: 38, miles: 6, cost: 2.1, target: 25, band: 15,
                    holding: null, stack: null });
       await push({ offer: { id: 'took-me', pay: 18.09, minutes: 38, billedMinutes: 38,
-                            miles: 6, cost: 2.1, pickup: 'Chipotle (Barrett Pkwy)',
+                            miles: 6, cost: 2.1, pickup: 'Chipotle (Tallett Pkwy)',
                             dropoff: cardDrop } });
       await page.click('#viewMode');
       await page.waitForTimeout(150);
@@ -4768,7 +4768,7 @@ const framed = (page) => page.waitForFunction(
       return res;
     };
     const HOLD = (drop) => ({ pay: 18.09, minutes: 38, dropoff: drop,
-                              card: { lat: 34.010, lon: -84.600, gpsAge: 0.8, gpsErr: 12.0,
+                              card: { lat: 34.010, lon: -44.600, gpsAge: 0.8, gpsErr: 12.0,
                                       gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 9.0,
                                       hasTotal: true, legs: 2, whole: true } });
     const dd = async (push, drop) => {
@@ -4813,7 +4813,7 @@ const framed = (page) => page.waitForFunction(
     });
     // The card named its end, and the next card's offer line is the first
     // message after ✓ Took — the reply is the only thing that said the hold.
-    out.heldTook = await run('the card\'s own end', 'Powder Springs Rd',
+    out.heldTook = await run('the card\'s own end', 'Gorrel Springs Rd',
                              async (push, pins, res, page) => {
       await push({ offer: { id: 'dd-bare', pay: null, minutes: null, miles: null,
                             pickup: null, dropoff: null } });
@@ -4831,7 +4831,7 @@ const framed = (page) => page.waitForFunction(
     // The order runs out on its own clock (holdEnds in server.js): nobody
     // pressed anything and no reading comes, and the first beat after says
     // `holding: null`, as the server's beat does when what is held changed.
-    out.heldExpiry = await run('the order expiring on its own clock', 'Powder Springs Rd',
+    out.heldExpiry = await run('the order expiring on its own clock', 'Gorrel Springs Rd',
                                async (push, pins, res, page) => {
       const row = () => page.evaluate(() => ({
         dropShown: !document.getElementById('drop').hidden,
@@ -4840,7 +4840,7 @@ const framed = (page) => page.waitForFunction(
       await page.evaluate(() => { if (window.__es && window.__es.onopen) window.__es.onopen(); });
       await push({ ready: true, state: 'go', perHour: 30, grossPerHour: 36, pay: 9.5,
                    minutes: 20, miles: 4, cost: 1.2, target: 25, band: 15,
-                   holding: HOLD('Powder Springs Rd'),
+                   holding: HOLD('Gorrel Springs Rd'),
                    stack: { pay: 27.59, worst: 21.1, best: 28.4, minMinutes: 38,
                             maxMinutes: 58, leftMinutes: 20, state: 'warn', sure: true,
                             ends: 'near' } });
@@ -4865,10 +4865,10 @@ const framed = (page) => page.waitForFunction(
    * own text would. Made-up store and door. */
   {
     stage = 'the map: a door from a tap';
-    const DOOR = '1200 Fable W Lantern Pkwy NW, Kennesaw, GA 30144';
+    const DOOR = '1200 Fable W Lantern Pkwy NW, Tellmoor, GA 90744';
     const CARD_TEXT = 'S &, Lark Owl Pizza ; 1200 Fable Parkway Nort';
-    const ANSWERS = { 'Powder Springs Rd': [33.900, -84.640] };
-    ANSWERS[DOOR] = [34.020, -84.580];
+    const ANSWERS = { 'Gorrel Springs Rd': [33.900, -44.640] };
+    ANSWERS[DOOR] = [34.020, -44.580];
     const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
                               .then((c) => c.newPage());
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
@@ -4876,8 +4876,8 @@ const framed = (page) => page.waitForFunction(
     await page.route('**/api/status*', (route) => route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({ last: null, lastAgeMs: null, heardAgeMs: 900, offer: null,
-        holding: { pay: 18.09, minutes: 38, dropoff: 'Powder Springs Rd', holdId: 'h-tap@1',
-                   card: { lat: 34.010, lon: -84.600, gpsAge: 0.8, gpsErr: 12.0, gpsMode: 3,
+        holding: { pay: 18.09, minutes: 38, dropoff: 'Gorrel Springs Rd', holdId: 'h-tap@1',
+                   card: { lat: 34.010, lon: -44.600, gpsAge: 0.8, gpsErr: 12.0, gpsMode: 3,
                            gpsOk: true, gpsWhy: null, miles: 9.0, hasTotal: true, legs: 2,
                            whole: true } } }) }));
     await page.route('**/api/journal*', (route) => route.fulfill({
@@ -4901,9 +4901,9 @@ const framed = (page) => page.waitForFunction(
     }, m);
     await push({ ready: true, state: 'warn', perHour: 20, grossPerHour: 24, pay: 7.75,
                  minutes: 30, miles: 7.8, cost: 2.3, target: 25, band: 15, stack: null,
-                 holding: { pay: 18.09, minutes: 38, dropoff: 'Powder Springs Rd',
+                 holding: { pay: 18.09, minutes: 38, dropoff: 'Gorrel Springs Rd',
                             holdId: 'h-tap@1',
-                            card: { lat: 34.010, lon: -84.600, gpsAge: 0.8, gpsErr: 12.0,
+                            card: { lat: 34.010, lon: -44.600, gpsAge: 0.8, gpsErr: 12.0,
                                     gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 9.0,
                                     hasTotal: true, legs: 2, whole: true } } });
     await push({ offer: { id: 'dd-tap', pay: 7.75, minutes: 30, billedMinutes: 34, miles: 7.8,
@@ -4933,11 +4933,11 @@ const framed = (page) => page.waitForFunction(
    * end, so a page that asked the name would pin it. Invented store and door. */
   {
     stage = 'the map: a door off the card';
-    const DOOR = '2530 Kestrel Plains Road, Marietta, GA 30066';
+    const DOOR = '2530 Kestrel Plains Road, Harrowen, GA 90666';
     const NAME = 'Lark Owl Grill';
-    const ANSWERS = { 'Powder Springs Rd': [33.900, -84.640] };
-    ANSWERS[DOOR] = [34.020, -84.580];
-    ANSWERS[NAME] = [34.050, -84.610];
+    const ANSWERS = { 'Gorrel Springs Rd': [33.900, -44.640] };
+    ANSWERS[DOOR] = [34.020, -44.580];
+    ANSWERS[NAME] = [34.050, -44.610];
     const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
                               .then((c) => c.newPage());
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
@@ -4945,8 +4945,8 @@ const framed = (page) => page.waitForFunction(
     await page.route('**/api/status*', (route) => route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({ last: null, lastAgeMs: null, heardAgeMs: 900, offer: null,
-        holding: { pay: 18.09, minutes: 38, dropoff: 'Powder Springs Rd', holdId: 'h-door@1',
-                   card: { lat: 34.010, lon: -84.600, gpsAge: 0.8, gpsErr: 12.0, gpsMode: 3,
+        holding: { pay: 18.09, minutes: 38, dropoff: 'Gorrel Springs Rd', holdId: 'h-door@1',
+                   card: { lat: 34.010, lon: -44.600, gpsAge: 0.8, gpsErr: 12.0, gpsMode: 3,
                            gpsOk: true, gpsWhy: null, miles: 9.0, hasTotal: true, legs: 2,
                            whole: true } } }) }));
     await page.route('**/api/journal*', (route) => route.fulfill({
@@ -4970,9 +4970,9 @@ const framed = (page) => page.waitForFunction(
     }, m);
     await push({ ready: true, state: 'warn', perHour: 20, grossPerHour: 24, pay: 7.70,
                  minutes: 18, miles: 2.4, cost: 0.7, target: 25, band: 15, stack: null,
-                 holding: { pay: 18.09, minutes: 38, dropoff: 'Powder Springs Rd',
+                 holding: { pay: 18.09, minutes: 38, dropoff: 'Gorrel Springs Rd',
                             holdId: 'h-door@1',
-                            card: { lat: 34.010, lon: -84.600, gpsAge: 0.8, gpsErr: 12.0,
+                            card: { lat: 34.010, lon: -44.600, gpsAge: 0.8, gpsErr: 12.0,
                                     gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 9.0,
                                     hasTotal: true, legs: 2, whole: true } } });
     await push({ offer: { id: 'dd-door', pay: 7.70, minutes: 18, billedMinutes: 18, miles: 2.4,
@@ -4998,7 +4998,7 @@ const framed = (page) => page.waitForFunction(
    * rough fix is no dot and a reason, a stale one is grey. The view is fitted
    * to include it on the way in, and after that goes after a fresh dot only
    * when it moves out of the middle of the map — at the zoom the map is at —
-   * until a hand on the map stops it and ⛶ Map round again starts it. Marietta Square
+   * until a hand on the map stops it and ⛶ Map round again starts it. Harrowen Square
    * and points by it: public places, invented fixes. */
   {
     stage = 'the map mode: you are here';
@@ -5012,8 +5012,8 @@ const framed = (page) => page.waitForFunction(
     await page.route('**/nominatim.openstreetmap.org/**', (route) => {
       const u = new URL(route.request().url());
       const q = decodeURIComponent(u.searchParams.get('q') || '');
-      const hit = { 'Chipotle (Barrett Pkwy)': [34.020, -84.580],
-                    'Canton Rd, Marietta': [33.980, -84.500] }[q];
+      const hit = { 'Chipotle (Tallett Pkwy)': [34.020, -44.580],
+                    'Belvan Rd, Harrowen': [33.980, -44.500] }[q];
       return route.fulfill({ status: 200, contentType: 'application/json',
         body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
                                       display_name: q }] : []) });
@@ -5022,14 +5022,14 @@ const framed = (page) => page.waitForFunction(
     await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
     const beat = (fix) => window.__es.push({ alive: true,
       gps: { state: 'ok', ageSeconds: 0.6, fix: fix } });
-    const GOOD = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 27.8,
+    const GOOD = { lat: 33.9526, lon: -44.5499, gpsAge: 0.6, gpsErr: 27.8,
                    gpsMode: 3, gpsOk: true, gpsWhy: null, freshFor: 19.4 };
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
       minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
       offer: { id: 'o-here', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
-               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
-               dropoff: 'Canton Rd, Marietta' } }));
+               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Tallett Pkwy)',
+               dropoff: 'Belvan Rd, Harrowen' } }));
     await page.evaluate(beat, GOOD);
     const look = () => {
       const n = document.getElementById('hereNote');
@@ -5059,7 +5059,7 @@ const framed = (page) => page.waitForFunction(
       const k = 256 * Math.pow(2, m.zoom) / 360;
       return m.centre[0] + share * document.getElementById('liveMap').clientHeight / k;
     };
-    const FROM = [33.9526, -84.5499];
+    const FROM = [33.9526, -44.5499];
     // Before Map view: a beat with a fix draws nothing and says nothing.
     await page.waitForTimeout(300);
     out.hereBefore = await page.evaluate(look);
@@ -5082,8 +5082,8 @@ const framed = (page) => page.waitForFunction(
       ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
       minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
       offer: { id: 'o-here', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
-               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
-               dropoff: 'Canton Rd, Marietta' } }));
+               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Tallett Pkwy)',
+               dropoff: 'Belvan Rd, Harrowen' } }));
     await page.waitForTimeout(300);
     out.hereSameCard = await page.evaluate(look);
     // ...and then out of it: the map goes to the dot, at the zoom it was at.
@@ -5131,7 +5131,7 @@ const framed = (page) => page.waitForFunction(
     out.hereLate = await page.evaluate(look);
     // A hand on the map: the driver drags it. Leaflet says dragstart; the
     // next beat out of the middle moves nothing, and the corner says so.
-    await page.evaluate(putView, [33.9706, -84.5499]);
+    await page.evaluate(putView, [33.9706, -44.5499]);
     await page.evaluate(() => window.__lmap.fire('dragstart'));
     await page.evaluate(beat, Object.assign({}, GOOD, {
       lat: await page.evaluate(north, 0.45) }));
@@ -5146,7 +5146,7 @@ const framed = (page) => page.waitForFunction(
     await page.waitForTimeout(600);
     const refit = await page.evaluate(() => window.__fit);
     // Somewhere the dot has not been: the follow judges a dot that MOVED.
-    await page.evaluate(putView, [33.9706, -84.5499]);
+    await page.evaluate(putView, [33.9706, -44.5499]);
     await page.evaluate(beat, Object.assign({}, GOOD, {
       lat: await page.evaluate(north, 0.4) }));
     await page.waitForTimeout(300);
@@ -5155,7 +5155,7 @@ const framed = (page) => page.waitForFunction(
     // of the page's own is under: a second and more after the last one (the
     // pan just above), which is live.html's OWN_MOVE_MS.
     await page.waitForTimeout(1200);
-    await page.evaluate(putView, [33.9706, -84.5499]);
+    await page.evaluate(putView, [33.9706, -44.5499]);
     await page.evaluate(() => window.__lmap.fire('zoomstart'));
     await page.evaluate(beat, Object.assign({}, GOOD, {
       lat: await page.evaluate(north, -0.45) }));
@@ -5170,7 +5170,7 @@ const framed = (page) => page.waitForFunction(
    * each card is held against its own pin: a straight line cannot beat the
    * road, so a pin farther from a card's fix than the card's own distance plus
    * half a mile is one the map got wrong. The design study's wrong-branch case
-   * first, in invented points round Marietta Square: a 9.4 mi card, the map's
+   * first, in invented points round Harrowen Square: a 9.4 mi card, the map's
    * McDonald's 21.8 mi north, the order in the car ending 20.2 mi east — which
    * the old arithmetic printed as "+31.3 mi out of your way". Then one card
    * for every other reason the figure is withheld. */
@@ -5188,17 +5188,17 @@ const framed = (page) => page.waitForFunction(
       if (/\/api\/nbx/.test(r.url())) nbxAsked.push(new URL(r.url()).pathname);
     });
     await page.addInitScript(() => {
-      window.__SQ = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 27.8,
+      window.__SQ = { lat: 33.9526, lon: -44.5499, gpsAge: 0.6, gpsErr: 27.8,
                       gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 9.4,
                       hasTotal: true, legs: 1, whole: true };
     });
     await page.route('**/nominatim.openstreetmap.org/**', (route) => {
       const u = new URL(route.request().url());
       const q = decodeURIComponent(u.searchParams.get('q') || '');
-      const hit = { "McDonald's": [34.2683, -84.5499],
-                    "McDonald's (Marietta Sq)": [33.9830, -84.5499],
-                    'Held End': [33.9526, -84.1974],
-                    'Roswell St, Marietta': [33.9560, -84.5400] }[q];
+      const hit = { "McDonald's": [34.2683, -44.5499],
+                    "McDonald's (Harrowen Sq)": [33.9830, -44.5499],
+                    'Held End': [33.9526, -44.1974],
+                    'Ruswold St, Harrowen': [33.9560, -44.5400] }[q];
       return route.fulfill({ status: 200, contentType: 'application/json',
         body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
                                       display_name: q }] : []) });
@@ -5221,7 +5221,7 @@ const framed = (page) => page.waitForFunction(
         offer: Object.assign({ id: a.id, pay: 14.25, minutes: 20.0,
                                billedMinutes: 20.0, cost: 1.4,
                                pickup: a.pickup || "McDonald's",
-                               dropoff: 'Roswell St, Marietta' }, card) });
+                               dropoff: 'Ruswold St, Harrowen' }, card) });
     }, args);
     const note = () => page.evaluate(
       () => ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim());
@@ -5261,11 +5261,11 @@ const framed = (page) => page.waitForFunction(
     out.mapDisc.alone = await note();
     out.mapDisc.alonePin = await pinOf('pick this one up');
     // The right branch, 2.1 mi from the car: inside the card, so a figure.
-    await push({ id: 'o-right', pickup: "McDonald's (Marietta Sq)" });
+    await push({ id: 'o-right', pickup: "McDonald's (Harrowen Sq)" });
     await page.waitForTimeout(1800);
     out.mapDisc.right = await note();
     // No fix on the card at all: no --gps, or Phone.fix() had none fresh.
-    await push({ id: 'o-nofix', pickup: "McDonald's (Marietta Sq)",
+    await push({ id: 'o-nofix', pickup: "McDonald's (Harrowen Sq)",
                  card: { lat: null, lon: null, gpsAge: null, gpsErr: null,
                          gpsMode: null, gpsOk: null, gpsWhy: null } });
     // No fix is no box to search in, and the box is part of the geocoder's
@@ -5273,23 +5273,23 @@ const framed = (page) => page.waitForFunction(
     await page.waitForTimeout(3800);
     out.mapDisc.noFix = await note();
     // A fix the gate refused for its quality.
-    await push({ id: 'o-rough', pickup: "McDonald's (Marietta Sq)",
+    await push({ id: 'o-rough', pickup: "McDonald's (Harrowen Sq)",
                  card: { gpsErr: 129.2, gpsOk: false, gpsWhy: 'rough' } });
     await page.waitForTimeout(1200);
     out.mapDisc.rough = await note();
     // DoorDash's one-leg shape: no yardstick yet, whatever the pin.
-    await push({ id: 'o-oneleg', pickup: "McDonald's (Marietta Sq)",
+    await push({ id: 'o-oneleg', pickup: "McDonald's (Harrowen Sq)",
                  card: { hasTotal: false, legs: 1 } });
     await page.waitForTimeout(800);
     out.mapDisc.oneLeg = await note();
     // An Early look card, which may be measured from the end of a job.
-    await push({ id: 'o-early', pickup: "McDonald's (Marietta Sq)",
+    await push({ id: 'o-early', pickup: "McDonald's (Harrowen Sq)",
                  card: { earlyLook: true } });
     await page.waitForTimeout(800);
     out.mapDisc.early = await note();
     // The held order's end, 20.2 mi from where ITS card came up, on a card
     // that printed 9.4 mi.
-    await push({ id: 'o-heldfar', pickup: "McDonald's (Marietta Sq)",
+    await push({ id: 'o-heldfar', pickup: "McDonald's (Harrowen Sq)",
                  held: { miles: 9.4 } });
     await page.waitForTimeout(800);
     out.mapDisc.heldFar = await note();
@@ -5297,14 +5297,14 @@ const framed = (page) => page.waitForFunction(
     out.mapDisc.heldFarPick = await pinOf('pick this one up');
     // ...and a hold that carries no card: kept from before the server
     // stored one, or marked with nothing to copy.
-    await push({ id: 'o-heldbare', pickup: "McDonald's (Marietta Sq)", held: null });
+    await push({ id: 'o-heldbare', pickup: "McDonald's (Harrowen Sq)", held: null });
     await page.waitForTimeout(800);
     out.mapDisc.heldBare = await note();
     // No fix and nothing in the car: no disc to draw, no NucBox list, so
     // nothing of how it was found — and no key over a map with nothing it
     // explains. Its place was asked with no box under o-nofix, so this one
     // is answered from the cache.
-    await push({ id: 'o-bare', pickup: "McDonald's (Marietta Sq)", nohold: true,
+    await push({ id: 'o-bare', pickup: "McDonald's (Harrowen Sq)", nohold: true,
                  card: { lat: null, lon: null, gpsAge: null, gpsErr: null,
                          gpsMode: null, gpsOk: null, gpsWhy: null } });
     await page.waitForTimeout(1200);
@@ -5319,9 +5319,9 @@ const framed = (page) => page.waitForFunction(
    * NucBox the suites share (tests/fake-nucbox.js, the real install's
    * answer shapes) or at nothing: `both` has its search and router, `noRoad`
    * its search and a router that is not there, `noSearch` a search that is
-   * not there and its router. Cards at Marietta Square; the fake's
-   * McDonald's are 2.10, 5.49, 10.64 and 21.81 mi from it, and Shadowood
-   * Parkway's two pieces 7.27 mi, in Cumberland. Every point invented round
+   * not there and its router. Cards at Harrowen Square; the fake's
+   * McDonald's are 2.10, 5.49, 10.64 and 21.81 mi from it, and Gloamwood
+   * Parkway's two pieces 7.27 mi, in Hollowmere. Every point invented round
    * public places. */
   if (NBX) {
     stage = 'the map mode on the NucBox';
@@ -5339,13 +5339,13 @@ const framed = (page) => page.waitForFunction(
         const u = new URL(route.request().url());
         const q = decodeURIComponent(u.searchParams.get('q') || '');
         publicAsked.push(q);
-        const hit = { "McDonald's (Marietta Sq)": [33.9830, -84.5499],
-                      'Shadowood Pkwy SE, Atlanta': [33.8779, -84.4600],
-                      'Church St, Marietta': [33.9580, -84.5520],
+        const hit = { "McDonald's (Harrowen Sq)": [33.9830, -44.5499],
+                      'Gloamwood Pkwy SE, Solvane': [33.8779, -44.4600],
+                      'Church St, Harrowen': [33.9580, -44.5520],
                       // The held order's restaurants (heldRoute below): one
                       // 21.8 mi north of its card's fix, past its 9.9 mi, and
                       // one in Idaho. Invented.
-                      '12 Far Rd,': [34.2683, -84.5499],
+                      '12 Far Rd,': [34.2683, -44.5499],
                       '9 Idaho Rd,': [43.6150, -116.2023] }[q];
         return route.fulfill({ status: 200, contentType: 'application/json',
           body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
@@ -5353,7 +5353,7 @@ const framed = (page) => page.waitForFunction(
       });
       await page.goto(srv + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
       await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
-      const SQ = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 12.0,
+      const SQ = { lat: 33.9526, lon: -44.5499, gpsAge: 0.6, gpsErr: 12.0,
                    gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 3.0,
                    hasTotal: true, legs: 2, whole: true };
       const push = (a) => page.evaluate((x) => {
@@ -5362,14 +5362,14 @@ const framed = (page) => page.waitForFunction(
           ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
           minutes: 20.0, miles: card.miles, cost: 1.4, target: 25, band: 15,
           holding: { pay: 9.0, minutes: 18.0,
-                     dropoff: x.held || 'Shadowood Pkwy SE, Atlanta', place: x.place || null,
+                     dropoff: x.held || 'Gloamwood Pkwy SE, Solvane', place: x.place || null,
                      endPinned: x.endPinned !== undefined ? x.endPinned : !!x.endAt,
                      endBy: x.endBy || null, endAt: x.endAt || null, holdId: x.holdId || null,
                      card: Object.assign({}, x.SQ, { miles: 9.4 }, x.heldCard || {}) },
           offer: Object.assign({ id: x.id, pay: 14.25, minutes: 20.0,
                                  billedMinutes: 20.0, cost: 1.4,
-                                 pickup: x.pickup || "McDonald's (Marietta Sq)",
-                                 dropoff: x.dropoff || 'Church St, Marietta' }, card) };
+                                 pickup: x.pickup || "McDonald's (Harrowen Sq)",
+                                 dropoff: x.dropoff || 'Church St, Harrowen' }, card) };
         if (x.stack) m.stack = x.stack;
         window.__es.push(m);
       }, Object.assign({ SQ: SQ }, a));
@@ -5446,8 +5446,8 @@ const framed = (page) => page.waitForFunction(
       // What the figure should be off the fake's own road (a quarter longer
       // than the straight line, leg by leg), worked out with the page's MV.
       r.oneWant = await page.evaluate(() => {
-        const MV = window.MapView, C = { lat: 33.9526, lon: -84.5499 };
-        const A = { lat: 33.9830, lon: -84.5499 }, S = { lat: 33.8779, lon: -84.4600 };
+        const MV = window.MapView, C = { lat: 33.9526, lon: -44.5499 };
+        const A = { lat: 33.9830, lon: -44.5499 }, S = { lat: 33.8779, lon: -44.4600 };
         return 1.25 * MV.detour(C, A, S);
       });
       if (which === 'both') {
@@ -5474,7 +5474,7 @@ const framed = (page) => page.waitForFunction(
         });
         // A card 1.25 mi from the nearest branch, printing 0.6 mi.
         await push({ id: 'n-none', pickup: "McDonald's",
-                     card: { lat: 33.9700, lon: -84.5650, miles: 0.6 } });
+                     card: { lat: 33.9700, lon: -44.5650, miles: 0.6 } });
         await page.waitForTimeout(1500);
         r.none = await note();
         r.noneHow = await how();
@@ -5483,7 +5483,7 @@ const framed = (page) => page.waitForFunction(
         // refusal stands exactly as it does for the straight line.
         r.routesBefore = (await (await fetch(FAKE + '/__asked')).json())
           .filter((u) => /^\/route/.test(u)).length;
-        await push({ id: 'n-early', pickup: "Jimmy John's (1985 Cobb Parkway NW)",
+        await push({ id: 'n-early', pickup: "Jimmy John's (1985 Vosk Parkway NW)",
                      card: { earlyLook: true } });
         await page.waitForTimeout(1500);
         r.early = await note();
@@ -5492,13 +5492,13 @@ const framed = (page) => page.waitForFunction(
           .filter((u) => /^\/route/.test(u)).length;
         // The same door on a card that IS a yardstick: pinned, and the
         // router says there is no road from it (the fake's NoRoute).
-        await push({ id: 'n-noroad', pickup: "Jimmy John's (1985 Cobb Parkway NW)",
+        await push({ id: 'n-noroad', pickup: "Jimmy John's (1985 Vosk Parkway NW)",
                      card: { miles: 9.4 } });
         await page.waitForTimeout(1500);
         r.noRoad = await note();
         r.noRoadWant = await page.evaluate(() => window.MapView.detour(
-          { lat: 33.9526, lon: -84.5499 }, { lat: 34.0010, lon: -84.5560 },
-          { lat: 33.8779, lon: -84.4600 }));
+          { lat: 33.9526, lon: -44.5499 }, { lat: 34.0010, lon: -44.5560 },
+          { lat: 33.8779, lon: -44.4600 }));
         // A pickup the fake's road by is 400 m SHORTER than its road direct
         // (OSRM's fastest road direct, a shorter one by the pickup).
         await push({ id: 'n-waffle', pickup: 'Waffle House' });
@@ -5509,8 +5509,8 @@ const framed = (page) => page.waitForFunction(
         await page.waitForTimeout(1500);
         r.snap = await note();
         r.snapWant = await page.evaluate(() => window.MapView.detour(
-          { lat: 33.9526, lon: -84.5499 }, { lat: 33.9650, lon: -84.5350 },
-          { lat: 33.8779, lon: -84.4600 }));
+          { lat: 33.9526, lon: -44.5499 }, { lat: 33.9650, lon: -44.5350 },
+          { lat: 33.8779, lon: -44.4600 }));
         // Twelve branches, the list cut at ten, one inside the 3.0 mi card.
         await push({ id: 'n-cut', pickup: 'Starbucks' });
         await page.waitForTimeout(1500);
@@ -5531,7 +5531,7 @@ const framed = (page) => page.waitForFunction(
         // pickPlace): Map view walks again and pins the place, as the server
         // does. The fake's deck by Kestrel Drive, 1.76 mi from the held
         // card's fix. Invented.
-        await push({ id: 'n-place', held: '4821 Kestrel Dr, Marietta' });
+        await push({ id: 'n-place', held: '4821 Kestrel Dr, Harrowen' });
         await page.waitForTimeout(1500);
         r.noPlaceHeld = await heldPin();
         // ...and its street's general area (MV's withArea; the owner, 24
@@ -5541,7 +5541,7 @@ const framed = (page) => page.waitForFunction(
           .map((k) => k.ll));
         r.noPlaceNote = await note();
         const placeAskedBefore = relayAsked.length;
-        await push({ id: 'n-place', held: '4821 Kestrel Dr, Marietta',
+        await push({ id: 'n-place', held: '4821 Kestrel Dr, Harrowen',
                      place: 'Wrenfield Parking Deck' });
         await page.waitForTimeout(1500);
         r.placeHeld = await heldPin();
@@ -5555,17 +5555,17 @@ const framed = (page) => page.waitForFunction(
         const areaRing = () => page.evaluate(() => (window.__marks || []).filter(
           (k) => String(k.popup || '').indexOf('the area the order in your car is going to') >= 0)
           .map((k) => k.ll));
-        await push({ id: 'n-srvarea', held: '77 Nowhere Rd, Marietta' });
+        await push({ id: 'n-srvarea', held: '77 Nowhere Rd, Harrowen' });
         await page.waitForTimeout(1500);
         await page.evaluate(() => window.__es.push({ alive: true, at: Date.now(),
           heldEnd: { endPinned: false, arrived: false, endWhy: 'no such street',
-                     endArea: { lat: 33.9811, lon: -84.5122, approx: true, n: 3,
+                     endArea: { lat: 33.9811, lon: -44.5122, approx: true, n: 3,
                                 miles: 0.3 } } }));
         await page.waitForTimeout(1500);
         r.srvArea = await areaRing();
         await page.evaluate(() => window.__es.push({ alive: true, at: Date.now(),
           heldEnd: { endPinned: false, arrived: false, endWhy: 'no such street',
-                     endArea: { lat: 33.9922, lon: -84.5233, approx: true, n: 2,
+                     endArea: { lat: 33.9922, lon: -44.5233, approx: true, n: 2,
                                 miles: 0.4, band: true, cardMi: 2.1 } } }));
         await page.waitForTimeout(1500);
         r.srvBand = await areaRing();
@@ -5579,8 +5579,8 @@ const framed = (page) => page.waitForFunction(
           if (q.method() === 'POST' && /\/api\/held-/.test(q.url())) areaPosts.push(q.url());
         };
         page.on('request', onPost);
-        await push({ id: 'n-cutarea', pickup: '10800 Vessington Hwy, Marietta',
-                     dropoff: '4821 Kestrel Dr, Marietta', holdId: 'h-cutarea' });
+        await push({ id: 'n-cutarea', pickup: '10800 Vessington Hwy, Harrowen',
+                     dropoff: '4821 Kestrel Dr, Harrowen', holdId: 'h-cutarea' });
         await page.waitForTimeout(2500);
         r.cutArea = {
           note: await note(),
@@ -5599,8 +5599,8 @@ const framed = (page) => page.waitForFunction(
         // road from the car to each, held to 0.7 mi, keeps the near one: the
         // trip routed from the band's area, a faded "≈" ring and never P,
         // its refusal saying "by card's 0.7 mi", and nothing posted.
-        await push({ id: 'n-band', pickup: '3152 Thornbury Mill Rd SE, Marietta',
-                     dropoff: '4821 Kestrel Dr, Marietta', holdId: 'h-band',
+        await push({ id: 'n-band', pickup: '3152 Gorsebury Mill Rd SE, Harrowen',
+                     dropoff: '4821 Kestrel Dr, Harrowen', holdId: 'h-band',
                      card: { miles: 5.0, toPickupMiles: 0.7 } });
         await page.waitForTimeout(2500);
         r.bandArea = {
@@ -5624,7 +5624,7 @@ const framed = (page) => page.waitForFunction(
         await page.waitForTimeout(2500);
         const guessBefore = await note();
         await push({ id: 'n-guess', pickup: '250 Example Road', holdId: 'h-guess',
-                     card: Object.assign({ dropoffGuess: { line: '1981 Cobb Parkway',
+                     card: Object.assign({ dropoffGuess: { line: '1981 Vosk Parkway',
                                                            from: 'dd map label' } }, dash) });
         await page.waitForTimeout(2500);
         r.guess = {
@@ -5643,7 +5643,7 @@ const framed = (page) => page.waitForFunction(
         // class, points and dash, and the ring the label is drawn at.
         await push({ id: 'n-guess2', pickup: '250 Example Road', holdId: 'h-guess',
                      card: Object.assign({ dropoffs: 2,
-                                           dropoffGuess: { line: '1981 Cobb Parkway',
+                                           dropoffGuess: { line: '1981 Vosk Parkway',
                                                            from: 'dd map label' } }, dash) });
         await page.waitForTimeout(2500);
         r.guessTwo = {
@@ -5661,13 +5661,13 @@ const framed = (page) => page.waitForFunction(
         // the short street (endBy 'street', its point): Map view draws that
         // as D, not "NO PIN" (the owner, 19 Oct). A pin of Map view's own
         // post (endBy null) is not taken. Invented point.
-        await push({ id: 'n-srv', held: '4821 Kestrel Dr, Marietta',
-                     endBy: 'street', endAt: { lat: 33.9701, lon: -84.5302 } });
+        await push({ id: 'n-srv', held: '4821 Kestrel Dr, Harrowen',
+                     endBy: 'street', endAt: { lat: 33.9701, lon: -44.5302 } });
         await page.waitForTimeout(1500);
         r.serverHeld = await heldPin();
         r.serverNote = await note();
-        await push({ id: 'n-srv2', held: '4821 Kestrel Dr, Marietta',
-                     endBy: null, endAt: { lat: 33.9701, lon: -84.5302 } });
+        await push({ id: 'n-srv2', held: '4821 Kestrel Dr, Harrowen',
+                     endBy: null, endAt: { lat: 33.9701, lon: -44.5302 } });
         await page.waitForTimeout(1500);
         r.ownPostHeld = await heldPin();
         // ...nor a point the server does not say is pinned; and a pin the
@@ -5681,13 +5681,13 @@ const framed = (page) => page.waitForFunction(
           if (/\/api\/held-end$/.test(new URL(q.url()).pathname)) srvPosts.push(q.postData());
         };
         page.on('request', srvSeen);
-        await push({ id: 'n-srv4', held: '4821, Kestrel Dr, Marietta', holdId: 'n-srv4@1',
-                     endPinned: false, endBy: 'street', endAt: { lat: 33.9701, lon: -84.5302 } });
+        await push({ id: 'n-srv4', held: '4821, Kestrel Dr, Harrowen', holdId: 'n-srv4@1',
+                     endPinned: false, endBy: 'street', endAt: { lat: 33.9701, lon: -44.5302 } });
         await page.waitForTimeout(1500);
         r.serverBefore4 = await heldPin();
         await page.evaluate(() => window.__es.push({ alive: true, at: Date.now(),
           heldEnd: { endPinned: true, arrived: false, endWhy: null, endBy: 'street',
-                     endAt: { lat: 33.9701, lon: -84.5302 } } }));
+                     endAt: { lat: 33.9701, lon: -44.5302 } } }));
         await page.waitForTimeout(1500);
         page.off('request', srvSeen);
         r.serverHeld4 = await heldPin();
@@ -5699,7 +5699,7 @@ const framed = (page) => page.waitForFunction(
         r.bug = await note();
         /* The held order's restaurant, off its Trip Planner: the shape the
            driver's ⌖ read on shift — a pickup whose town did not read, its
-           name behind the icon's "oe " — on the fake's door at 1985 Cobb
+           name behind the icon's "oe " — on the fake's door at 1985 Vosk
            Parkway (invented), 3.4 mi from the held card's fix, inside its
            9.9 mi disc. With a holdId, so a pickup sent as the held end would
            be a POST to /api/held-end this records. */
@@ -5720,16 +5720,16 @@ const framed = (page) => page.waitForFunction(
             ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
             minutes: 20.0, miles: 3.0, cost: 1.4, target: 25, band: 15,
             holding: { pay: 9.0, minutes: 18.0, holdId: 'h-planner',
-                       dropoff: 'Shadowood Pkwy SE, Atlanta',
+                       dropoff: 'Gloamwood Pkwy SE, Solvane',
                        card: Object.assign({}, SQ, { miles: 9.4 }) },
             offer: Object.assign({ id: 'n-heldpick', pay: 14.25, minutes: 20.0,
                                    billedMinutes: 20.0, cost: 1.4,
-                                   pickup: "McDonald's (Marietta Sq)",
-                                   dropoff: 'Church St, Marietta' }, SQ) });
+                                   pickup: "McDonald's (Harrowen Sq)",
+                                   dropoff: 'Church St, Harrowen' }, SQ) });
           window.__es.push({ planner: { stops: [
             { kind: 'pickup', orders: 1, name: 'oe Fable Crust Pizza', expectedBy: 1189,
-              street: '1985 Cobb Parkway', city: null, state: null, zip: null,
-              line: '1985 Cobb Parkway' }], unfiled: 'dropoffs', asked: true, ms: null,
+              street: '1985 Vosk Parkway', city: null, state: null, zip: null,
+              line: '1985 Vosk Parkway' }], unfiled: 'dropoffs', asked: true, ms: null,
             at: 41 } });
         }, SQ);
         await page.waitForTimeout(2500);
@@ -5756,33 +5756,33 @@ const framed = (page) => page.waitForFunction(
             ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
             minutes: 20.0, miles: 3.0, cost: 1.4, target: 25, band: 15,
             holding: { pay: 9.0, minutes: 18.0, holdId: 'h-planner',
-                       dropoff: 'Shadowood Pkwy SE, Atlanta',
+                       dropoff: 'Gloamwood Pkwy SE, Solvane',
                        card: Object.assign({}, SQ, { miles: 9.4 }) },
             offer: Object.assign({ id: 'n-heldpick-2', pay: 14.25, minutes: 20.0,
                                    billedMinutes: 20.0, cost: 1.4,
-                                   pickup: "McDonald's (Marietta Sq)",
-                                   dropoff: 'Church St, Marietta' }, SQ) });
+                                   pickup: "McDonald's (Harrowen Sq)",
+                                   dropoff: 'Church St, Harrowen' }, SQ) });
         }, SQ);
         await page.waitForTimeout(2000);
         r.heldPickNext = await page.evaluate(() => (window.__marks || []).filter(
           (k) => String(k.popup || '').indexOf('pick up the order in your car') >= 0).length);
         /* ...and a held order whose end is a DOOR: the fake's own at 1985
-           Cobb Parkway, inside the held card's 9.9 mi disc, the NucBox's
+           Vosk Parkway, inside the held card's 9.9 mi disc, the NucBox's
            answer carrying the number. The page posts it to /api/held-end for
            the GPS drop (pinHeldEnd). This server holds no order and refuses
            it; what the page SENT is the point. The street-level end above
-           (Shadowood Pkwy SE) was never sent: heldPickPosts. */
+           (Gloamwood Pkwy SE) was never sent: heldPickPosts. */
         await page.evaluate((SQ) => {
           window.__es.push({
             ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
             minutes: 20.0, miles: 3.0, cost: 1.4, target: 25, band: 15,
             holding: { pay: 9.0, minutes: 18.0, holdId: 'h-door',
-                       dropoff: '1985 Cobb Parkway, Kennesaw',
+                       dropoff: '1985 Vosk Parkway, Tellmoor',
                        card: Object.assign({}, SQ, { miles: 9.4 }) },
             offer: Object.assign({ id: 'n-helddoor', pay: 14.25, minutes: 20.0,
                                    billedMinutes: 20.0, cost: 1.4,
-                                   pickup: "McDonald's (Marietta Sq)",
-                                   dropoff: 'Church St, Marietta' }, SQ) });
+                                   pickup: "McDonald's (Harrowen Sq)",
+                                   dropoff: 'Church St, Harrowen' }, SQ) });
         }, SQ);
         await page.waitForTimeout(2500);
         r.heldDoorPosts = heldEndPosts.map((p) => JSON.parse(p || 'null'));
@@ -5809,12 +5809,12 @@ const framed = (page) => page.waitForFunction(
             ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
             minutes: 20.0, miles: 3.0, cost: 1.4, target: 25, band: 15,
             holding: { pay: 9.0, minutes: 18.0, holdId: 'h-' + x.id,
-                       dropoff: (x.heldAt || {}).end || 'Shadowood Pkwy SE, Atlanta',
+                       dropoff: (x.heldAt || {}).end || 'Gloamwood Pkwy SE, Solvane',
                        card: Object.assign({}, x.SQ, { miles: (x.heldAt || {}).miles || 9.4 }) },
             offer: Object.assign({ id: x.id, pay: 14.25, minutes: 20.0,
                                    billedMinutes: 20.0, cost: 1.4,
-                                   pickup: "McDonald's (Marietta Sq)",
-                                   dropoff: 'Church St, Marietta' }, x.SQ) });
+                                   pickup: "McDonald's (Harrowen Sq)",
+                                   dropoff: 'Church St, Harrowen' }, x.SQ) });
           window.__es.push({ planner: { stops: x.stops.map((s) => ({
             kind: 'pickup', orders: 1, name: 'oe ' + s[0], expectedBy: 1189, street: s[1],
             city: null, state: null, zip: null, line: s[1] })), unfiled: 'dropoffs',
@@ -5830,9 +5830,9 @@ const framed = (page) => page.waitForFunction(
       // the straight line, leg by leg) and in straight lines, worked out from
       // the two runs' own lengths rather than by the page's MV.detourThrough.
       const runWant = () => page.evaluate(() => {
-        const MV = window.MapView, C = { lat: 33.9526, lon: -84.5499 };
-        const A = { lat: 33.9830, lon: -84.5499 }, S = { lat: 33.8779, lon: -84.4600 };
-        const G = { lat: 33.9700, lon: -84.5300 };
+        const MV = window.MapView, C = { lat: 33.9526, lon: -44.5499 };
+        const A = { lat: 33.9830, lon: -44.5499 }, S = { lat: 33.8779, lon: -44.4600 };
+        const G = { lat: 33.9700, lon: -44.5300 };
         const run = (pts) => pts.slice(1).reduce((m, p, i) => m + MV.crowMiles(pts[i], p), 0);
         const before = run([C, A, G, S]), after = run([C, G, A, S]), base = run([C, G, S]);
         return { crow: Math.min(before, after) - base, before: before <= after,
@@ -5918,7 +5918,7 @@ const framed = (page) => page.waitForFunction(
         // A 3.0 mi held card, so only the stretch near the Square is inside,
         // going to the corner the cards above pinned.
         r.routeStreet = (await heldRoute('n-route-street', [['Example Deli', 'Larkspur Pkwy SE']],
-          { miles: 3.0, end: 'Foxglove Trl & Northgate Dr, Marietta' })).note;
+          { miles: 3.0, end: 'Foxglove Trl & Northgate Dr, Harrowen' })).note;
       }
       r.routeAsked = publicAsked.splice(askedBeforeRoute);
       if (which === 'streets') {
@@ -5926,7 +5926,7 @@ const framed = (page) => page.waitForFunction(
            order going to a CORNER of the synthetic streets (tests/fixtures/
            streets.osm), 0.5 mi north of the Square: pinned where its two
            streets meet, and the road measured to it. */
-        await push({ id: 's-corner', held: 'Foxglove Trl & Northgate Dr, Marietta',
+        await push({ id: 's-corner', held: 'Foxglove Trl & Northgate Dr, Harrowen',
                      heldCard: { miles: 3.0 } });
         await page.waitForTimeout(1500);
         r.corner = await note();
@@ -5934,10 +5934,10 @@ const framed = (page) => page.waitForFunction(
         r.cornerHow = await how();
         r.cornerKeyNow = await keyNow();
         r.cornerWant = await page.evaluate(() => 1.25 * window.MapView.detour(
-          { lat: 33.9526, lon: -84.5499 }, { lat: 33.9830, lon: -84.5499 },
-          { lat: 33.96, lon: -84.55 }));
+          { lat: 33.9526, lon: -44.5499 }, { lat: 33.9830, lon: -44.5499 },
+          { lat: 33.96, lon: -44.55 }));
         // A loop meeting the other street twice inside the held card's disc.
-        await push({ id: 's-twice', held: 'Juniper Cir & Northgate Dr, Marietta',
+        await push({ id: 's-twice', held: 'Juniper Cir & Northgate Dr, Harrowen',
                      heldCard: { miles: 3.0 } });
         await page.waitForTimeout(1500);
         r.twice = await note();
@@ -5948,11 +5948,11 @@ const framed = (page) => page.waitForFunction(
         // card's disc, pinned at the point nearest the car, and the figure
         // the straight line's at every point of the stretch — worked out
         // here at a thousand points along the fixture's Larkspur Parkway
-        // (33.948, -84.565 to -84.552), not by the page's MV.stretchSpan.
+        // (33.948, -44.565 to -44.552), not by the page's MV.stretchSpan.
         const routesAt = async () => (await (await fetch(FAKE + '/__asked')).json())
           .filter((u) => /^\/route/.test(u)).length;
         r.stretchRoutesBefore = await routesAt();
-        await push({ id: 's-stretch', held: 'Larkspur Pkwy SE, Atlanta',
+        await push({ id: 's-stretch', held: 'Larkspur Pkwy SE, Solvane',
                      heldCard: { miles: 3.0 } });
         await page.waitForTimeout(1500);
         r.stretch = await note();
@@ -5964,11 +5964,11 @@ const framed = (page) => page.waitForFunction(
           (l) => String((l.opts || {}).className || ''))
           .filter((c) => c.indexOf('mv-held-run') >= 0));
         r.stretchWant = await page.evaluate(() => {
-          const MV = window.MapView, C = { lat: 33.9526, lon: -84.5499 };
-          const A = { lat: 33.9830, lon: -84.5499 };
+          const MV = window.MapView, C = { lat: 33.9526, lon: -44.5499 };
+          const A = { lat: 33.9830, lon: -44.5499 };
           let lo = Infinity, hi = -Infinity;
           for (let i = 0; i <= 1000; i++) {
-            const d = MV.detour(C, A, { lat: 33.948, lon: -84.565 + 0.013 * i / 1000 });
+            const d = MV.detour(C, A, { lat: 33.948, lon: -44.565 + 0.013 * i / 1000 });
             lo = Math.min(lo, d); hi = Math.max(hi, d);
           }
           return [lo, hi];
@@ -5976,7 +5976,7 @@ const framed = (page) => page.waitForFunction(
         // ...and one whose figure is not one answer along it: Northgate
         // Drive runs 1.4 mi north from the Square, and the figure goes from
         // +1.8 at its north end to +4.2 at its south.
-        await push({ id: 's-long', held: 'Northgate Dr, Marietta',
+        await push({ id: 's-long', held: 'Northgate Dr, Harrowen',
                      heldCard: { miles: 3.0 } });
         await page.waitForTimeout(1500);
         r.longStreet = await note();
@@ -5984,7 +5984,7 @@ const framed = (page) => page.waitForFunction(
       }
       if (which === 'noSearch') {
         /* The router set and the held end a pin its own card refuses: the
-           public map's Shadowood Parkway, 7.3 mi from a held card that
+           public map's Gloamwood Parkway, 7.3 mi from a held card that
            printed 0.5. A road drawn to it would be a road to a red pin, so
            the held run stays the straight line it always was. */
         await push({ id: 'ns-off', heldCard: { miles: 0.5 } });
@@ -6007,10 +6007,10 @@ const framed = (page) => page.waitForFunction(
      * the offer is along the way the car is already going: Map view's caption
      * figure, the same one, in one line (live.html showWay, MV.wayLine), with
      * no press — the card's own walk asks the NucBox, never the public map.
-     * On the `both` server, the cards at Marietta Square: the 3.0 mi card's
+     * On the `both` server, the cards at Harrowen Square: the 3.0 mi card's
      * McDonald's is the fake's one 2.1 mi north, and the order in the car
-     * goes to 1985 Cobb Parkway (the fake's door, 3.4 mi on, past it to the
-     * north: on the way) or to Shadowood Parkway (7.3 mi south-east: not). */
+     * goes to 1985 Vosk Parkway (the fake's door, 3.4 mi on, past it to the
+     * north: on the way) or to Gloamwood Parkway (7.3 mi south-east: not). */
     {
       stage = 'the answer on the card';
       const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
@@ -6029,7 +6029,7 @@ const framed = (page) => page.waitForFunction(
       });
       await page.goto(NBX.both + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
       await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
-      const SQ = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 12.0, gpsMode: 3,
+      const SQ = { lat: 33.9526, lon: -44.5499, gpsAge: 0.6, gpsErr: 12.0, gpsMode: 3,
                    gpsOk: true, gpsWhy: null, miles: 3.0, hasTotal: true, legs: 2, whole: true };
       // A reading and its offer line in one message, as a card that has
       // landed is: the same pay and miles on both (live.html onRecordIs).
@@ -6046,8 +6046,8 @@ const framed = (page) => page.waitForFunction(
           offer: x.noOffer ? undefined
             : Object.assign({ id: x.id, pay: x.pay || 14.25, minutes: 20.0,
                               billedMinutes: 20.0, cost: 1.4,
-                              pickup: x.pickup || "McDonald's (Marietta Sq)",
-                              dropoff: 'Church St, Marietta' }, c) });
+                              pickup: x.pickup || "McDonald's (Harrowen Sq)",
+                              dropoff: 'Church St, Harrowen' }, c) });
       }, Object.assign({ SQ: SQ }, a));
       // The line as drawn: its words, its sentence, its form, and every
       // colour on it (the element and each part, text, outline and fill).
@@ -6068,15 +6068,15 @@ const framed = (page) => page.waitForFunction(
       }, null, { timeout: 4000 }).catch(() => {});
       const r = {};
       // The order in the car going on past the pickup: on the way.
-      await card({ id: 'w-on', held: '1985 Cobb Parkway, Kennesaw', ends: 'same-side' });
+      await card({ id: 'w-on', held: '1985 Vosk Parkway, Tellmoor', ends: 'same-side' });
       r.first = await way();
       await settled();
       r.on = await way();
       r.onMapMade = await page.evaluate(() => !!window.__lmap);
       r.onRelay = relayAsked.slice();
       r.onWant = await page.evaluate(() => window.MapView.detour(
-        { lat: 33.9526, lon: -84.5499 }, { lat: 33.9830, lon: -84.5499 },
-        { lat: 34.0010, lon: -84.5560 }));
+        { lat: 33.9526, lon: -44.5499 }, { lat: 33.9830, lon: -44.5499 },
+        { lat: 34.0010, lon: -44.5560 }));
       // ...and Map view opened on it now: its caption and what it asked.
       await page.click('#viewMode');            // → scene
       await page.waitForTimeout(150);
@@ -6088,7 +6088,7 @@ const framed = (page) => page.waitForFunction(
       r.onAfterMap = await way();
       r.onRelayMap = relayAsked.slice();
       // The order in the car going the other way: out of the way, in Map view.
-      await card({ id: 'w-out', held: 'Shadowood Pkwy SE, Atlanta', ends: 'elsewhere' });
+      await card({ id: 'w-out', held: 'Gloamwood Pkwy SE, Solvane', ends: 'elsewhere' });
       await page.waitForFunction(() => /out of your way/.test(((n) => (n.classList
         .contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote'))),
         null, { timeout: 4000 }).catch(() => {});
@@ -6096,8 +6096,8 @@ const framed = (page) => page.waitForFunction(
       r.out = await way();
       r.outCaption = await caption();
       // A 0.6 mi card whose nearest McDonald's is 1.2 mi off: no pin, no figure.
-      await card({ id: 'w-cant', held: 'Shadowood Pkwy SE, Atlanta', pickup: "McDonald's",
-                   card: { lat: 33.9700, lon: -84.5650, miles: 0.6 } });
+      await card({ id: 'w-cant', held: 'Gloamwood Pkwy SE, Solvane', pickup: "McDonald's",
+                   card: { lat: 33.9700, lon: -44.5650, miles: 0.6 } });
       await page.waitForFunction(() => /no pin/.test(((n) => (n.classList
         .contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote'))),
         null, { timeout: 4000 }).catch(() => {});
@@ -6111,11 +6111,11 @@ const framed = (page) => page.waitForFunction(
       r.cantClosed = await way();
       // A new card read before its offer line has come: the record is still
       // the card before, and its answer is not this card's.
-      await card({ id: 'w-next', held: 'Shadowood Pkwy SE, Atlanta', pay: 9.99, noOffer: true });
+      await card({ id: 'w-next', held: 'Gloamwood Pkwy SE, Solvane', pay: 9.99, noOffer: true });
       await page.waitForTimeout(400);
       r.notYet = await way();
       // The night palette: the same line, no verdict colour in it either.
-      await card({ id: 'w-out', held: 'Shadowood Pkwy SE, Atlanta', ends: 'elsewhere' });
+      await card({ id: 'w-out', held: 'Gloamwood Pkwy SE, Solvane', ends: 'elsewhere' });
       await settled();
       await page.evaluate(() => document.documentElement.classList.add('night'));
       r.outNight = await way();
@@ -6149,9 +6149,9 @@ const framed = (page) => page.waitForFunction(
       await bare.addInitScript(MAPSTUB);
       await bare.route('**/nominatim.openstreetmap.org/**', (route) => {
         const q = decodeURIComponent(new URL(route.request().url()).searchParams.get('q') || '');
-        const hit = { "McDonald's (Marietta Sq)": [33.9830, -84.5499],
-                      'Shadowood Pkwy SE, Atlanta': [33.8779, -84.4600],
-                      'Church St, Marietta': [33.9580, -84.5520] }[q];
+        const hit = { "McDonald's (Harrowen Sq)": [33.9830, -44.5499],
+                      'Gloamwood Pkwy SE, Solvane': [33.8779, -44.4600],
+                      'Church St, Harrowen': [33.9580, -44.5520] }[q];
         return route.fulfill({ status: 200, contentType: 'application/json',
           body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
                                         display_name: q }] : []) });
@@ -6163,11 +6163,11 @@ const framed = (page) => page.waitForFunction(
         pay: 14.25, minutes: 20.0, miles: 3.0, cost: 1.4, target: 25, band: 15,
         stack: { pay: 23.25, minMinutes: 20, maxMinutes: 38, worst: 18.2, best: 26.4,
                  state: 'warn', sure: true, uncosted: false, ends: null },
-        holding: { pay: 9.0, minutes: 18.0, holdId: 'w-bare', dropoff: 'Shadowood Pkwy SE, Atlanta',
+        holding: { pay: 9.0, minutes: 18.0, holdId: 'w-bare', dropoff: 'Gloamwood Pkwy SE, Solvane',
                    card: Object.assign({}, SQ, { miles: 9.4 }) },
         offer: Object.assign({ id: 'w-bare-card', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
-                               cost: 1.4, pickup: "McDonald's (Marietta Sq)",
-                               dropoff: 'Church St, Marietta' }, SQ) }), SQ);
+                               cost: 1.4, pickup: "McDonald's (Harrowen Sq)",
+                               dropoff: 'Church St, Harrowen' }, SQ) }), SQ);
       await bare.waitForTimeout(800);
       r.bareShut = await bare.evaluate(() => {
         const w = document.getElementById('way');
@@ -6192,7 +6192,7 @@ const framed = (page) => page.waitForFunction(
      * An offer screened while an order is held, in Map view, on the `both`
      * server: the held run — the car, the order's restaurant (the fake's
      * Example Grill, 250 Example Road, 1.7 mi north-east of the Square), its
-     * end on Shadowood Parkway — solid in its amber; the miles this card adds,
+     * end on Gloamwood Parkway — solid in its amber; the miles this card adds,
      * dashed in violet along the gap the figure chose; the stops numbered in
      * the order the car would call at them, the new pickup in its slot; and
      * the view framed on the car and those stops once per card, and not again
@@ -6207,21 +6207,21 @@ const framed = (page) => page.waitForFunction(
         status: 200, contentType: 'application/json', body: '[]' }));
       await page.goto(NBX.both + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
       await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
-      const SQ = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 12.0, gpsMode: 3,
+      const SQ = { lat: 33.9526, lon: -44.5499, gpsAge: 0.6, gpsErr: 12.0, gpsMode: 3,
                    gpsOk: true, gpsWhy: null, miles: 3.0, hasTotal: true, legs: 2, whole: true };
       // The car's dot, where the card came up, moved north by `dLat` degrees.
       const beat = (dLat) => page.evaluate((f) => window.__es.push({
         alive: true, gps: { state: 'ok', ageSeconds: 0.5, fix: f } }),
-        { lat: 33.9526 + (dLat || 0), lon: -84.5499, gpsAge: 0.5, gpsErr: 12.0, gpsMode: 3,
+        { lat: 33.9526 + (dLat || 0), lon: -44.5499, gpsAge: 0.5, gpsErr: 12.0, gpsMode: 3,
           gpsOk: true, gpsWhy: null, freshFor: 19.6 });
       const card = (id, pay) => page.evaluate((x) => window.__es.push({
         ready: true, locked: true, whole: true, state: 'no', perHour: 18.0, grossPerHour: 22.0,
         pay: x.pay, minutes: 20.0, miles: 3.0, cost: 1.4, target: 25, band: 15,
-        holding: { pay: 9.0, minutes: 18.0, holdId: 'h-diff', dropoff: 'Shadowood Pkwy SE, Atlanta',
+        holding: { pay: 9.0, minutes: 18.0, holdId: 'h-diff', dropoff: 'Gloamwood Pkwy SE, Solvane',
                    card: Object.assign({}, x.SQ, { miles: 9.4 }) },
         offer: Object.assign({ id: x.id, pay: x.pay, minutes: 20.0, billedMinutes: 20.0, cost: 1.4,
-                               pickup: "McDonald's (Marietta Sq)",
-                               dropoff: 'Church St, Marietta' }, x.SQ) }),
+                               pickup: "McDonald's (Harrowen Sq)",
+                               dropoff: 'Church St, Harrowen' }, x.SQ) }),
         { SQ: SQ, id: id, pay: pay });
       const look = () => page.evaluate(() => {
         const by = (s) => ((window.__marks || []).filter(
@@ -6361,10 +6361,10 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
       minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd' },
       offer: { id: 'o-stored', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
-               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
-               dropoff: 'Canton Rd, Marietta' } }));
+               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Tallett Pkwy)',
+               dropoff: 'Belvan Rd, Harrowen' } }));
     await page.waitForTimeout(2500);
     out.mapStored = await page.evaluate(() => ({
       label: document.getElementById('viewMode').textContent.trim(),
@@ -6399,9 +6399,9 @@ const framed = (page) => page.waitForFunction(
       const u = new URL(route.request().url());
       const q = decodeURIComponent(u.searchParams.get('q') || '');
       await new Promise((r) => setTimeout(r, 1200));
-      const hit = { 'Chipotle (Barrett Pkwy)': [34.020, -84.580],
-                    'Canton Rd, Marietta': [33.980, -84.500],
-                    'Powder Springs Rd': [33.900, -84.640] }[q];
+      const hit = { 'Chipotle (Tallett Pkwy)': [34.020, -44.580],
+                    'Belvan Rd, Harrowen': [33.980, -44.500],
+                    'Gorrel Springs Rd': [33.900, -44.640] }[q];
       return route.fulfill({ status: 200, contentType: 'application/json',
         body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
                                       display_name: q }] : []) });
@@ -6411,10 +6411,10 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({
       ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
       minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd' },
       offer: { id: 'o-first', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
-               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
-               dropoff: 'Canton Rd, Marietta', ...window.__CARD } }));
+               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Tallett Pkwy)',
+               dropoff: 'Belvan Rd, Harrowen', ...window.__CARD } }));
     await page.waitForTimeout(300);
     await page.click('#viewMode');            // → scene
     await page.waitForTimeout(150);
@@ -6461,13 +6461,13 @@ const framed = (page) => page.waitForFunction(
   {
     stage = 'the map mode: a walk left half way, and a draw that throws';
     const SEEN = {
-      'Chipotle (Barrett Pkwy)':   [34.020, -84.580],
-      'Canton Rd, Marietta':       [33.980, -84.500],
-      'Powder Springs Rd':         [33.900, -84.640],
-      'Barrett Pkwy & Cobb Pkwy':  [34.100, -84.500],
-      'Dallas Hwy, Marietta':      [33.950, -84.700],
-      'Mars Hill Rd, Acworth':     [34.070, -84.700],
-      'Villa Rica Way':            [33.870, -84.560],
+      'Chipotle (Tallett Pkwy)':   [34.020, -44.580],
+      'Belvan Rd, Harrowen':       [33.980, -44.500],
+      'Gorrel Springs Rd':         [33.900, -44.640],
+      'Tallett Pkwy & Vosk Pkwy':  [34.100, -44.500],
+      'Dorvan Hwy, Harrowen':      [33.950, -44.700],
+      'Rook Hill Rd, Ivyhame':     [34.070, -44.700],
+      'Villa Mora Way':            [33.870, -44.560],
     };
     const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
                               .then((c) => c.newPage());
@@ -6497,7 +6497,7 @@ const framed = (page) => page.waitForFunction(
     const card = (id, pickup, dropoff) => ({
       ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
       minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
-      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd' },
+      holding: { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd' },
       offer: { id: id, pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
                miles: 4.0, cost: 1.4, pickup: pickup, dropoff: dropoff } });
     const pins = () => page.evaluate(
@@ -6506,7 +6506,7 @@ const framed = (page) => page.waitForFunction(
     // A card that finishes, so `lastLine` and `lastBounds` hold something that
     // belongs to it and to no later card.
     await page.evaluate((c) => window.__es.push(c),
-                        card('o-fin-1', 'Chipotle (Barrett Pkwy)', 'Canton Rd, Marietta'));
+                        card('o-fin-1', 'Chipotle (Tallett Pkwy)', 'Belvan Rd, Harrowen'));
     await page.waitForTimeout(300);
     await page.click('#viewMode');            // → scene
     await page.waitForTimeout(150);
@@ -6519,7 +6519,7 @@ const framed = (page) => page.waitForFunction(
        are. */
     stage = 'the map mode: left while the places were being looked up';
     await page.evaluate((c) => window.__es.push(c),
-                        card('o-fin-3', 'Mars Hill Rd, Acworth', 'Villa Rica Way'));
+                        card('o-fin-3', 'Rook Hill Rd, Ivyhame', 'Villa Mora Way'));
     // Waited FOR rather than timed: the moment wanted is the one where some of
     // this card is up and some of it is still out, and polling for it is what
     // makes the press below land inside the walk on a loaded box. Empty if it
@@ -6555,7 +6555,7 @@ const framed = (page) => page.waitForFunction(
       };
     });
     await page.evaluate((c) => window.__es.push(c),
-                        card('o-fin-4', 'Flaky Rd, Nowhere', 'Canton Rd, Marietta'));
+                        card('o-fin-4', 'Flaky Rd, Nowhere', 'Belvan Rd, Harrowen'));
     await page.waitForTimeout(6000);
     out.mapFinally.threw = await page.evaluate(() => window.__drawThrew || 0);
     out.mapFinally.stillOnMap = await page.evaluate(
@@ -7112,15 +7112,15 @@ const framed = (page) => page.waitForFunction(
     const stop = (kind, orders, name, by, line) => ({ kind: kind, orders: orders,
       name: name, expectedBy: by, street: null, city: null, state: null, zip: null,
       line: line });
-    const FOUR = [stop('pickup', 1, 'oe Burger Barn', 712, '310 Mill St, Roswell'),
+    const FOUR = [stop('pickup', 1, 'oe Burger Barn', 712, '310 Mill St, Ruswold'),
                   stop('pickup', 2, 'Taco Hut', 725, null),
-                  stop('dropoff', 1, 'Lee M.', 751, '77 Birch Ln NW, Roswell, GA 30075'),
+                  stop('dropoff', 1, 'Lee M.', 751, '77 Birch Ln NW, Ruswold, GA 90675'),
                   stop('dropoff', 1, 'Sam R.', 768, null)];
     const SIX = [1, 2, 3, 4, 5, 6].map((n) => stop('pickup', 1, 'Shop ' + n, 700 + n, null));
-    const ONE = [stop('dropoff', 1, 'Pat Q.', 978, '4821 Kestrel Dr, Marietta')];
-    const TOWN_ONLY = [stop('dropoff', 1, 'Pat Q.', 978, 'Marietta')];
-    const KESTREL = { line: '4821 Kestrel Dr, Marietta', street: '4821 Kestrel Dr',
-                      city: 'Marietta', state: 'GA', zip: null, found: true, asked: true };
+    const ONE = [stop('dropoff', 1, 'Pat Q.', 978, '4821 Kestrel Dr, Harrowen')];
+    const TOWN_ONLY = [stop('dropoff', 1, 'Pat Q.', 978, 'Harrowen')];
+    const KESTREL = { line: '4821 Kestrel Dr, Harrowen', street: '4821 Kestrel Dr',
+                      city: 'Harrowen', state: 'GA', zip: null, found: true, asked: true };
     let statusHolding = null;
     const page = await browser.newContext({
       viewport: { width: 1024, height: 600 }, deviceScaleFactor: 1,
@@ -7183,8 +7183,8 @@ const framed = (page) => page.waitForFunction(
     slot.four = await stops();
     // ...and then the order's end, read after all: the navigation screen seen
     // unprompted, which the server files on an order that has none.
-    await push({ dropoff: { line: '12 Oak St, Marietta, GA 30060', street: '12 Oak St',
-                            city: 'Marietta', state: 'GA', zip: '30060', found: true,
+    await push({ dropoff: { line: '12 Oak St, Harrowen, GA 90660', street: '12 Oak St',
+                            city: 'Harrowen', state: 'GA', zip: '90660', found: true,
                             asked: false, at: 2 } });
     slot.fourThenEnd = await stops();
     await push({ planner: { stops: SIX, unfiled: null, asked: true, ms: null, at: 3 } });
@@ -7258,7 +7258,7 @@ const framed = (page) => page.waitForFunction(
     await open();
     slot.reloaded = await stops();
     // ...with a two-dropoff planner and an end read since, unprompted...
-    statusHolding = { pay: 12, minutes: 30, dropoff: '12 Oak St, Marietta, GA 30060',
+    statusHolding = { pay: 12, minutes: 30, dropoff: '12 Oak St, Harrowen, GA 90660',
                       dropoffScanned: true, planner: { stops: FOUR, unfiled: 'dropoffs' },
                       heldMs: 60000 };
     await open();
@@ -7500,7 +7500,7 @@ const framed = (page) => page.waitForFunction(
       if (tapped) st0.click();
       return out;
     });
-    const A = { n: 1, pay: 9.48, minutes: 40, holdId: 'c-a@1', dropoff: '4821 Kestrel Dr, Marietta',
+    const A = { n: 1, pay: 9.48, minutes: 40, holdId: 'c-a@1', dropoff: '4821 Kestrel Dr, Harrowen',
                 card: null, endPinned: true, arrived: false, endWhy: null, app: 'uber',
                 addOn: false, of: null };
     const B = { n: 2, pay: 28.08, minutes: 55, holdId: 'c-b@2', dropoff: null, card: null,
@@ -7657,7 +7657,7 @@ const framed = (page) => page.waitForFunction(
       onTimes[k] = await look();
     }
     // ⌖ with no cue: the chooser, over the verdict pane.
-    await push({ chooser: { id: 'choose-1', kind: 'scan', line: '77 Birch Ln, Roswell, GA',
+    await push({ chooser: { id: 'choose-1', kind: 'scan', line: '77 Birch Ln, Ruswold, GA',
                             rows: [{ pick: 'c-a@1', n: 1, pay: 9.48, end: A.dropoff },
                                    { pick: 'c-b@2', n: 2, pay: 28.08, end: null }],
                             card: { pick: 'card', pay: 12.5 }, closesInMs: 10000 } });
@@ -7667,7 +7667,7 @@ const framed = (page) => page.waitForFunction(
     await tick(10000);
     const closed = { look: await look(), posted: posted.slice() };
     // ...answered: the row posts its pick.
-    await push({ chooser: { id: 'choose-2', kind: 'scan', line: '77 Birch Ln, Roswell, GA',
+    await push({ chooser: { id: 'choose-2', kind: 'scan', line: '77 Birch Ln, Ruswold, GA',
                             rows: [{ pick: 'c-a@1', n: 1, pay: 9.48, end: A.dropoff },
                                    { pick: 'c-b@2', n: 2, pay: 28.08, end: null }],
                             card: null, closesInMs: 10000 } });
@@ -7710,9 +7710,9 @@ const framed = (page) => page.waitForFunction(
     await push({ holding: A, orders: [A, B], unowned: 0 });
     await push({ planner: { stops: [
       { kind: 'pickup', orders: 1, name: 'Larkspur Tacos', expectedBy: 700,
-        street: '310 Mill St', city: 'Roswell', line: '310 Mill St, Roswell, GA 30075' },
+        street: '310 Mill St', city: 'Ruswold', line: '310 Mill St, Ruswold, GA 90675' },
       { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720,
-        street: '4821 Kestrel Dr', city: 'Marietta', line: '4821 Kestrel Dr, Marietta' }],
+        street: '4821 Kestrel Dr', city: 'Harrowen', line: '4821 Kestrel Dr, Harrowen' }],
       unfiled: null, asked: true, ms: null, at: 3 } });
     // The socket open, so the status row says what the rig says rather than
     // "reconnecting to the server…".
@@ -7733,7 +7733,7 @@ const framed = (page) => page.waitForFunction(
       await new Promise((r) => setTimeout(r, 25));
     }
     await tick(300);
-    const C = { pay: 11.5, minutes: 30, holdId: 'c-d@4', dropoff: '12 Wren Way, Smyrna',
+    const C = { pay: 11.5, minutes: 30, holdId: 'c-d@4', dropoff: '12 Wren Way, Pyrnel',
                 card: null, endPinned: false, arrived: false, endWhy: null };
     await push({ offer: { id: 'c-d', pay: 11.5, minutes: 30, perHour: 23 }, at: 4 });
     markReply = { ok: true, holding: true, held: C };
@@ -7755,10 +7755,10 @@ const framed = (page) => page.waitForFunction(
     // share the second line once there are three. Then the original put down
     // and the server stops sending a list (the trip came apart): a list about
     // another hold is drawn no more. Invented streets.
-    const T1 = { n: 1, pay: 25.03, minutes: 31, holdId: 'u-a@7', dropoff: '4821 Kestrel Dr, Marietta',
+    const T1 = { n: 1, pay: 25.03, minutes: 31, holdId: 'u-a@7', dropoff: '4821 Kestrel Dr, Harrowen',
                  card: null, endPinned: true, arrived: false, endWhy: null, app: 'uber',
                  addOn: false, of: null };
-    const T2 = { n: 2, pay: 9.5, minutes: 8, holdId: 'u-b@8', dropoff: '77 Birch Ln, Roswell',
+    const T2 = { n: 2, pay: 9.5, minutes: 8, holdId: 'u-b@8', dropoff: '77 Birch Ln, Ruswold',
                  card: null, endPinned: false, arrived: false, endWhy: null, app: 'uber',
                  addOn: true, of: 'u-a@7' };
     const T3 = Object.assign({}, T2, { n: 3, pay: 6.89, minutes: 9, holdId: 'u-c@9', dropoff: null });
@@ -7840,7 +7840,7 @@ const framed = (page) => page.waitForFunction(
           .classList.contains(k)),
       };
     });
-    const A = { pay: 9.48, minutes: 40, holdId: 'h-1@1', dropoff: '4821 Kestrel Dr, Marietta',
+    const A = { pay: 9.48, minutes: 40, holdId: 'h-1@1', dropoff: '4821 Kestrel Dr, Harrowen',
                 dropoffScanned: false, card: null, endPinned: false, arrived: false,
                 endWhy: null, app: 'uber' };
     const CARD = { id: 's-1', pay: 12.5, minutes: 25, perHour: 30, state: 'go' };
@@ -7851,7 +7851,7 @@ const framed = (page) => page.waitForFunction(
     await push(Object.assign({}, READINGS.deducted, { holding: A }));
     await tick(1100);
     const before = await look();
-    await push({ chooser: { id: 'choose-1', kind: 'scan', line: '9 Heron Ct, Smyrna, GA 30080',
+    await push({ chooser: { id: 'choose-1', kind: 'scan', line: '9 Heron Ct, Pyrnel, GA 90680',
                             rows: [{ pick: 'h-1@1', n: 1, pay: 9.48, end: A.dropoff }],
                             card: { pick: 'card', pay: 12.5 }, closesInMs: 10000 } });
     await tick(300);
@@ -7865,8 +7865,8 @@ const framed = (page) => page.waitForFunction(
     // The server's answer: the chooser shut, and the address on the stream
     // with the card that now holds it.
     await push({ chooser: null });
-    await push({ dropoff: { line: '9 Heron Ct, Smyrna, GA 30080', asked: true },
-                 offer: Object.assign({}, CARD, { dropoff: '9 Heron Ct, Smyrna, GA 30080',
+    await push({ dropoff: { line: '9 Heron Ct, Pyrnel, GA 90680', asked: true },
+                 offer: Object.assign({}, CARD, { dropoff: '9 Heron Ct, Pyrnel, GA 90680',
                                                   dropoffScanned: true,
                                                   dropoffFrom: 'chooser' }) });
     await push(Object.assign({}, READINGS.deducted, { holding: A }));
@@ -7874,7 +7874,7 @@ const framed = (page) => page.waitForFunction(
     const filed = await look();
     // ...and a card whose end its own popup gave it under the press.
     await push({ offer: Object.assign({}, CARD, { dropoffFrom: 'press',
-                                                  dropoff: '9 Heron Ct, Smyrna, GA 30080',
+                                                  dropoff: '9 Heron Ct, Pyrnel, GA 90680',
                                                   dropoffScanned: true }) });
     await tick(1100);
     const pressed = await look();
@@ -7882,7 +7882,7 @@ const framed = (page) => page.waitForFunction(
     // up: "This card" goes with it — the server stops offering that row the
     // moment its card leaves, and refuses it after — and the order and
     // Neither stay.
-    await push({ chooser: { id: 'choose-2', kind: 'scan', line: '9 Heron Ct, Smyrna, GA 30080',
+    await push({ chooser: { id: 'choose-2', kind: 'scan', line: '9 Heron Ct, Pyrnel, GA 90680',
                             rows: [{ pick: 'h-1@1', n: 1, pay: 9.48, end: A.dropoff }],
                             card: { pick: 'card', pay: 12.5 }, closesInMs: 10000 } });
     await tick(200);
@@ -8029,9 +8029,9 @@ const framed = (page) => page.waitForFunction(
       : n.textContent))(document.getElementById('viewNote')).trim());
     const noSignal = () => page.waitForFunction(() => /^no signal/.test(((n) => (n.title
       || n.textContent))(document.getElementById('viewNote'))), null, { timeout: 5000 }).catch(() => {});
-    await push(Object.assign({}, READINGS.deducted, { places: ['Chipotle (Barrett Pkwy)', 'Canton Rd, Marietta'] }));
-    await push({ offer: { id: 'l-1', pay: 8.0, minutes: 22, pickup: 'Chipotle (Barrett Pkwy)',
-                          dropoff: 'Canton Rd, Marietta' } });
+    await push(Object.assign({}, READINGS.deducted, { places: ['Chipotle (Tallett Pkwy)', 'Belvan Rd, Harrowen'] }));
+    await push({ offer: { id: 'l-1', pay: 8.0, minutes: 22, pickup: 'Chipotle (Tallett Pkwy)',
+                          dropoff: 'Belvan Rd, Harrowen' } });
     await page.click('#viewMode');
     await page.waitForTimeout(150);
     await page.click('#viewMode');
@@ -8075,9 +8075,9 @@ const framed = (page) => page.waitForFunction(
     const push = (m) => page.evaluate((x) => window.__es.push(x), m);
     const said = () => page.evaluate(() => ((n) => (n.classList.contains('chipped') ? n.title
       : n.textContent))(document.getElementById('viewNote')).trim());
-    await push(Object.assign({}, READINGS.deducted, { places: ['Chipotle (Barrett Pkwy)', 'Canton Rd, Marietta'] }));
-    await push({ offer: { id: 'h-1', pay: 8.0, minutes: 22, pickup: 'Chipotle (Barrett Pkwy)',
-                          dropoff: 'Canton Rd, Marietta' } });
+    await push(Object.assign({}, READINGS.deducted, { places: ['Chipotle (Tallett Pkwy)', 'Belvan Rd, Harrowen'] }));
+    await push({ offer: { id: 'h-1', pay: 8.0, minutes: 22, pickup: 'Chipotle (Tallett Pkwy)',
+                          dropoff: 'Belvan Rd, Harrowen' } });
     await page.click('#viewMode');
     await page.clock.runFor(150);
     await page.click('#viewMode');
@@ -8085,7 +8085,7 @@ const framed = (page) => page.waitForFunction(
     const waiting = await said();
     // The reading again half way, as the rig sends one, so the card is still
     // fresh (READ_STALE_MS is 16 s) when the wait is up.
-    const reading = Object.assign({}, READINGS.deducted, { places: ['Chipotle (Barrett Pkwy)', 'Canton Rd, Marietta'] });
+    const reading = Object.assign({}, READINGS.deducted, { places: ['Chipotle (Tallett Pkwy)', 'Belvan Rd, Harrowen'] });
     await page.clock.runFor(8000);
     await push(reading);
     await page.clock.runFor(8000);
@@ -8123,11 +8123,11 @@ const framed = (page) => page.waitForFunction(
   // is the order in the car. Leaflet is stubbed; the places are answered at
   // the network. Invented places.
   {
-    const PLACES = { 'Chipotle (Barrett Pkwy)': [34.020, -84.580],
-                     'Canton Rd, Marietta': [33.980, -84.500],
-                     'Powder Springs Rd': [33.900, -84.600],
-                     '310 Mill St, Roswell, GA 30075': [34.010, -84.610],
-                     'Zaxbys (Cobb Pkwy)': [34.040, -84.560] };
+    const PLACES = { 'Chipotle (Tallett Pkwy)': [34.020, -44.580],
+                     'Belvan Rd, Harrowen': [33.980, -44.500],
+                     'Gorrel Springs Rd': [33.900, -44.600],
+                     '310 Mill St, Ruswold, GA 90675': [34.010, -44.610],
+                     'Zaxbys (Vosk Pkwy)': [34.040, -44.560] };
     const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
                               .then((c) => c.newPage());
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
@@ -8146,9 +8146,9 @@ const framed = (page) => page.waitForFunction(
     const push = (m) => page.evaluate((x) => window.__es.push(x), m);
     const card = await page.evaluate(() => window.__CARD);
     const heldCard = await page.evaluate(() => window.__HELD);
-    const A = { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd', holdId: 'v-a@1',
+    const A = { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd', holdId: 'v-a@1',
                 card: heldCard, endPinned: false, arrived: false, endWhy: null, visited: [] };
-    const GOOD = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 27.8, gpsMode: 3,
+    const GOOD = { lat: 33.9526, lon: -44.5499, gpsAge: 0.6, gpsErr: 27.8, gpsMode: 3,
                    gpsOk: true, gpsWhy: null, freshFor: 19.4 };
     const beat = (visited) => ({ alive: true, at: Date.now(),
       gps: { state: 'ok', ageSeconds: 0.6, fix: GOOD },
@@ -8156,7 +8156,7 @@ const framed = (page) => page.waitForFunction(
     const offer = (id, pickup) => ({ ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0,
       pay: 14.25, minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15, holding: A,
       offer: Object.assign({ id: id, pay: 14.25, minutes: 20.0, billedMinutes: 20.0, miles: 4.0,
-                             cost: 1.4, pickup: pickup, dropoff: 'Canton Rd, Marietta' }, card) });
+                             cost: 1.4, pickup: pickup, dropoff: 'Belvan Rd, Harrowen' }, card) });
     const settled = () => page.waitForFunction(() => {
       const n = document.getElementById('viewNote');
       const t = n.title || n.textContent;
@@ -8174,10 +8174,10 @@ const framed = (page) => page.waitForFunction(
     await push({ holding: A });
     await push({ planner: { stops: [
       { kind: 'pickup', orders: 1, name: 'Larkspur Tacos', expectedBy: 700, street: '310 Mill St',
-        city: 'Roswell', line: '310 Mill St, Roswell, GA 30075' },
-      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720, street: 'Powder Springs Rd',
-        city: 'Marietta', line: 'Powder Springs Rd' }], unfiled: null, asked: true, ms: null, at: 1 } });
-    await push(offer('v-1', 'Chipotle (Barrett Pkwy)'));
+        city: 'Ruswold', line: '310 Mill St, Ruswold, GA 90675' },
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720, street: 'Gorrel Springs Rd',
+        city: 'Harrowen', line: 'Gorrel Springs Rd' }], unfiled: null, asked: true, ms: null, at: 1 } });
+    await push(offer('v-1', 'Chipotle (Tallett Pkwy)'));
     await page.click('#viewMode');
     await page.waitForTimeout(150);
     await page.click('#viewMode');
@@ -8188,13 +8188,13 @@ const framed = (page) => page.waitForFunction(
     // The restaurant behind the car, on a beat; the view and what moved it
     // forgotten first.
     await page.evaluate(() => { window.__fit = null; window.__view = null; window.__pans = []; });
-    await push(beat(['310 Mill St, Roswell, GA 30075']));
+    await push(beat(['310 Mill St, Ruswold, GA 90675']));
     await page.waitForTimeout(800);
     await settled();
     const visited = await look();
     // A new card: fitted to its pins.
     await page.evaluate(() => { window.__fit = null; window.__view = null; });
-    await push(offer('v-2', 'Zaxbys (Cobb Pkwy)'));
+    await push(offer('v-2', 'Zaxbys (Vosk Pkwy)'));
     await page.waitForTimeout(1500);
     await settled();
     await page.waitForTimeout(300);
@@ -8225,10 +8225,10 @@ const framed = (page) => page.waitForFunction(
    * north-south leg by leg. Invented places. */
   for (const which of ['road', 'noRoad']) {
     stage = 'the map mode: the held run along the roads (' + which + ')';
-    const PLACES = { '310 Mill St, Roswell, GA 30075': [34.010, -84.610],
-                     'Powder Springs Rd': [33.900, -84.600],
-                     'Chipotle (Barrett Pkwy)': [34.020, -84.580],
-                     'Canton Rd, Marietta': [33.980, -84.500] };
+    const PLACES = { '310 Mill St, Ruswold, GA 90675': [34.010, -44.610],
+                     'Gorrel Springs Rd': [33.900, -44.600],
+                     'Chipotle (Tallett Pkwy)': [34.020, -44.580],
+                     'Belvan Rd, Harrowen': [33.980, -44.500] };
     const page = await browser.newContext({ viewport: { width: 1024, height: 600 } })
                               .then((c) => c.newPage());
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
@@ -8266,9 +8266,9 @@ const framed = (page) => page.waitForFunction(
     const push = (m) => page.evaluate((x) => window.__es.push(x), m);
     const card = await page.evaluate(() => window.__CARD);
     const heldCard = await page.evaluate(() => window.__HELD);
-    const A = { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd', holdId: 'rr-a@1',
+    const A = { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd', holdId: 'rr-a@1',
                 card: heldCard, endPinned: false, arrived: false, endWhy: null, visited: [] };
-    const fix = (lat) => ({ lat: lat, lon: -84.5499, gpsAge: 0.6, gpsErr: 27.8, gpsMode: 3,
+    const fix = (lat) => ({ lat: lat, lon: -44.5499, gpsAge: 0.6, gpsErr: 27.8, gpsMode: 3,
                             gpsOk: true, gpsWhy: null, freshFor: 19.4 });
     const beat = (lat, visited) => ({ alive: true, at: Date.now(),
       gps: { state: 'ok', ageSeconds: 0.6, fix: fix(lat) },
@@ -8291,9 +8291,9 @@ const framed = (page) => page.waitForFunction(
     await push({ holding: A });
     await push({ planner: { stops: [
       { kind: 'pickup', orders: 1, name: 'Larkspur Tacos', expectedBy: 700, street: '310 Mill St',
-        city: 'Roswell', line: '310 Mill St, Roswell, GA 30075' },
-      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720, street: 'Powder Springs Rd',
-        city: 'Marietta', line: 'Powder Springs Rd' }], unfiled: null, asked: true, ms: null, at: 1 } });
+        city: 'Ruswold', line: '310 Mill St, Ruswold, GA 90675' },
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720, street: 'Gorrel Springs Rd',
+        city: 'Harrowen', line: 'Gorrel Springs Rd' }], unfiled: null, asked: true, ms: null, at: 1 } });
     await page.click('#viewMode');
     await page.waitForTimeout(150);
     await page.click('#viewMode');
@@ -8313,7 +8313,7 @@ const framed = (page) => page.waitForFunction(
       r.grey = await runs();
       // ...and two orders in the car, a good fix again: each order's own
       // straight run starts at the live fix too.
-      const B = { n: 2, pay: 7.0, minutes: 20.0, dropoff: 'Canton Rd, Marietta',
+      const B = { n: 2, pay: 7.0, minutes: 20.0, dropoff: 'Belvan Rd, Harrowen',
                   holdId: 'rr-b@2', card: heldCard, endPinned: false, arrived: false,
                   endWhy: null, visited: [] };
       await push(beat(33.9526, []));
@@ -8334,15 +8334,15 @@ const framed = (page) => page.waitForFunction(
     r.farRoutes = routes.length;
     // ...the restaurant behind the car, 100 m on: a new leg, so car -> end
     // from where the car is now, not the start kept for the last leg.
-    await push(beat(33.9565, ['310 Mill St, Roswell, GA 30075']));
+    await push(beat(33.9565, ['310 Mill St, Ruswold, GA 90675']));
     await until(33.9565, R ? 3 : 2);
     r.visited = await runs();
     // ...and a card screened: its own trip, in its own colour, beside the run.
     await push({ ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0,
       pay: 14.25, minutes: 20.0, miles: 9.4, cost: 1.4, target: 25, band: 15, holding: A,
       offer: Object.assign({ id: 'rr-1', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
-                             miles: 9.4, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
-                             dropoff: 'Canton Rd, Marietta' }, card, { miles: 9.4 }) });
+                             miles: 9.4, cost: 1.4, pickup: 'Chipotle (Tallett Pkwy)',
+                             dropoff: 'Belvan Rd, Harrowen' }, card, { miles: 9.4 }) });
     await until(33.9526, R ? 3 : 2, R ? 'road' : 'any');
     r.offer = await runs();
     r.offerKey = await page.evaluate(() => {
@@ -8363,9 +8363,9 @@ const framed = (page) => page.waitForFunction(
    * nothing about those doors leaves the page. Invented places. */
   {
     stage = 'the map mode: a batched trip run through its dropoffs';
-    const DOORS = { '250 Example Road': [34.020, -84.620, '250, Example Road, Kennesaw'],
-                    '4821 Kestrel Dr': [34.030, -84.580, '4821, Kestrel Drive, Kennesaw'],
-                    '1985 Cobb Parkway': [34.000, -84.560, '1985, Cobb Parkway, Kennesaw'] };
+    const DOORS = { '250 Example Road': [34.020, -44.620, '250, Example Road, Tellmoor'],
+                    '4821 Kestrel Dr': [34.030, -44.580, '4821, Kestrel Drive, Tellmoor'],
+                    '1985 Vosk Parkway': [34.000, -44.560, '1985, Vosk Parkway, Tellmoor'] };
     const page = await browser.newContext({ viewport: { width: 1024, height: 600 } })
                               .then((c) => c.newPage());
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
@@ -8399,23 +8399,23 @@ const framed = (page) => page.waitForFunction(
     await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
     const push = (m) => page.evaluate((x) => window.__es.push(x), m);
     const heldCard = await page.evaluate(() => window.__HELD);
-    const A = { pay: 23.0, minutes: 40.0, dropoff: '1985 Cobb Parkway, Kennesaw',
+    const A = { pay: 23.0, minutes: 40.0, dropoff: '1985 Vosk Parkway, Tellmoor',
                 holdId: 'br-a@1', card: heldCard, endPinned: false, arrived: false,
                 endWhy: null, visited: [] };
     await push({ alive: true, at: Date.now(),
-      gps: { state: 'ok', ageSeconds: 0.6, fix: { lat: 33.9526, lon: -84.5499, gpsAge: 0.6,
+      gps: { state: 'ok', ageSeconds: 0.6, fix: { lat: 33.9526, lon: -44.5499, gpsAge: 0.6,
              gpsErr: 27.8, gpsMode: 3, gpsOk: true, gpsWhy: null, freshFor: 19.4 } },
       heldEnd: { endPinned: false, arrived: false, endWhy: null, visited: [] } });
     await push({ holding: A });
     await push({ planner: { stops: [
       { kind: 'pickup', orders: 2, name: 'Example Grill', expectedBy: null,
-        street: '250 Example Road', city: 'Kennesaw', line: '250 Example Road, Kennesaw' },
+        street: '250 Example Road', city: 'Tellmoor', line: '250 Example Road, Tellmoor' },
       { kind: 'dropoff', orders: 1, name: 'Kim T.', expectedBy: 200, street: '77 Birch Ln',
-        city: 'Kennesaw', line: '77 Birch Ln, Kennesaw' },
+        city: 'Tellmoor', line: '77 Birch Ln, Tellmoor' },
       { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 203, street: '4821 Kestrel Dr',
-        city: 'Kennesaw', line: '4821 Kestrel Dr, Kennesaw' },
-      { kind: 'dropoff', orders: 1, name: 'Lee R.', expectedBy: 216, street: '1985 Cobb Parkway',
-        city: 'Kennesaw', line: '1985 Cobb Parkway, Kennesaw' }],
+        city: 'Tellmoor', line: '4821 Kestrel Dr, Tellmoor' },
+      { kind: 'dropoff', orders: 1, name: 'Lee R.', expectedBy: 216, street: '1985 Vosk Parkway',
+        city: 'Tellmoor', line: '1985 Vosk Parkway, Tellmoor' }],
       unfiled: 'dropoffs', asked: false, ms: null, at: 1 } });
     await page.click('#viewMode');
     await page.waitForTimeout(150);
@@ -8441,10 +8441,10 @@ const framed = (page) => page.waitForFunction(
       gps: { state: 'ok', ageSeconds: 0.6, fix: { lat: lat, lon: lon, gpsAge: 0.6,
              gpsErr: 27.8, gpsMode: 3, gpsOk: true, gpsWhy: null, freshFor: 19.4 } },
       heldEnd: { endPinned: false, arrived: false, endWhy: null,
-                 visited: ['250 Example Road, Kennesaw'] } });
-    await push(at(34.0302, -84.5800));
+                 visited: ['250 Example Road, Tellmoor'] } });
+    await push(at(34.0302, -44.5800));
     await page.waitForTimeout(1200);
-    await push(at(34.0360, -84.5800));
+    await push(at(34.0360, -44.5800));
     await page.waitForFunction(() => (window.__letters || []).some(
       (m) => /D2 ✓/.test(String((m.opts && m.opts.icon && m.opts.icon.html) || ''))),
       null, { timeout: 10000 }).catch(() => {});
@@ -8469,10 +8469,10 @@ const framed = (page) => page.waitForFunction(
    * places, the router faked at the relay as in [road run]. */
   for (const [vw, vh] of [[390, 844], [360, 640]]) {
     stage = 'the route view at ' + vw + 'x' + vh;
-    const PLACES = { '310 Mill St, Roswell, GA 30075': [34.010, -84.610],
-                     'Powder Springs Rd': [33.900, -84.600],
-                     'Chipotle (Barrett Pkwy)': [34.020, -84.580],
-                     'Canton Rd, Marietta': [33.980, -84.500] };
+    const PLACES = { '310 Mill St, Ruswold, GA 90675': [34.010, -44.610],
+                     'Gorrel Springs Rd': [33.900, -44.600],
+                     'Chipotle (Tallett Pkwy)': [34.020, -44.580],
+                     'Belvan Rd, Harrowen': [33.980, -44.500] };
     const page = await browser.newContext({ viewport: { width: vw, height: vh } })
                               .then((c) => c.newPage());
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
@@ -8506,18 +8506,18 @@ const framed = (page) => page.waitForFunction(
     const push = (m) => page.evaluate((x) => window.__es.push(x), m);
     const card = await page.evaluate(() => window.__CARD);
     const heldCard = await page.evaluate(() => window.__HELD);
-    const A = { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd', holdId: 'rv-a@1',
+    const A = { pay: 9.0, minutes: 18.0, dropoff: 'Gorrel Springs Rd', holdId: 'rv-a@1',
                 card: heldCard, endPinned: false, arrived: false, endWhy: null, visited: [] };
     await push({ alive: true, at: Date.now(),
-      gps: { state: 'ok', ageSeconds: 0.6, fix: { lat: 33.9526, lon: -84.5499, gpsAge: 0.6,
+      gps: { state: 'ok', ageSeconds: 0.6, fix: { lat: 33.9526, lon: -44.5499, gpsAge: 0.6,
              gpsErr: 27.8, gpsMode: 3, gpsOk: true, gpsWhy: null, freshFor: 19.4 } },
       heldEnd: { endPinned: false, arrived: false, endWhy: null, visited: [] } });
     await push({ holding: A });
     await push({ planner: { stops: [
       { kind: 'pickup', orders: 1, name: 'Larkspur Tacos', expectedBy: 700, street: '310 Mill St',
-        city: 'Roswell', line: '310 Mill St, Roswell, GA 30075' },
-      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720, street: 'Powder Springs Rd',
-        city: 'Marietta', line: 'Powder Springs Rd' }], unfiled: null, asked: true, ms: null, at: 1 } });
+        city: 'Ruswold', line: '310 Mill St, Ruswold, GA 90675' },
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720, street: 'Gorrel Springs Rd',
+        city: 'Harrowen', line: 'Gorrel Springs Rd' }], unfiled: null, asked: true, ms: null, at: 1 } });
     const lines = () => page.evaluate(() => (window.__lines || []).filter(
       (l) => !/mv-casing/.test(String((l.opts || {}).className || ''))).map((l) => ({
         cls: String((l.opts || {}).className || ''), n: l.pts.length, color: (l.opts || {}).color })));
@@ -8541,8 +8541,8 @@ const framed = (page) => page.waitForFunction(
     await push({ ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0,
       pay: 14.25, minutes: 20.0, miles: 9.4, cost: 1.4, target: 25, band: 15, holding: A,
       offer: Object.assign({ id: 'rv-1', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
-                             miles: 9.4, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
-                             dropoff: 'Canton Rd, Marietta' }, card, { miles: 9.4 }) });
+                             miles: 9.4, cost: 1.4, pickup: 'Chipotle (Tallett Pkwy)',
+                             dropoff: 'Belvan Rd, Harrowen' }, card, { miles: 9.4 }) });
     await page.waitForFunction(() => (window.__lines || []).some(
       (l) => /mv-job/.test(String((l.opts || {}).className || ''))
              && /mv-road/.test(String((l.opts || {}).className || ''))),
@@ -8569,7 +8569,7 @@ const framed = (page) => page.waitForFunction(
     const posted = [];
     let forMs = 10000;
     let undoAnswer = { status: 200, body: { ok: true, restored: ['u-a@1'], holding: true,
-      held: { pay: 12.5, minutes: 30, dropoff: 'Oak Ln, Marietta', holdId: 'u-a@1' } } };
+      held: { pay: 12.5, minutes: 30, dropoff: 'Oak Ln, Harrowen', holdId: 'u-a@1' } } };
     await page.route('**/api/delivered', (route) => {
       posted.push(['/api/delivered', route.request().postData() || null]);
       return route.fulfill({ status: 200, contentType: 'application/json',
@@ -8585,7 +8585,7 @@ const framed = (page) => page.waitForFunction(
     await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
     const push = (m) => page.evaluate((x) => window.__es.push(x), m);
     const HELD = Object.assign({}, READINGS.deducted, {
-      holding: { pay: 12.5, minutes: 30, dropoff: 'Oak Ln, Marietta', holdId: 'u-a@1' },
+      holding: { pay: 12.5, minutes: 30, dropoff: 'Oak Ln, Harrowen', holdId: 'u-a@1' },
       stack: null });
     const face = () => page.evaluate(() => {
       const d = document.getElementById('drop');
@@ -8708,12 +8708,12 @@ const framed = (page) => page.waitForFunction(
    * P1 or P2 by that order. Invented places. */
   {
     stage = 'the map mode: two orders in the car';
-    const ANSWERS = { 'Chipotle (Barrett Pkwy)': [34.020, -84.580],
+    const ANSWERS = { 'Chipotle (Tallett Pkwy)': [34.020, -44.580],
                       // Halfway from the car's fix to Mill St, on the line.
-                      'Larkspur Bagels (Mill St)': [34.010, -84.605],
-                      'Powder Springs Rd': [33.900, -84.640],
-                      'Canton Rd, Marietta': [33.980, -84.500],
-                      '310 Mill St, Roswell, GA 30075': [34.010, -84.610] };
+                      'Larkspur Bagels (Mill St)': [34.010, -44.605],
+                      'Gorrel Springs Rd': [33.900, -44.640],
+                      'Belvan Rd, Harrowen': [33.980, -44.500],
+                      '310 Mill St, Ruswold, GA 90675': [34.010, -44.610] };
     const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
                               .then((c) => c.newPage());
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
@@ -8737,17 +8737,17 @@ const framed = (page) => page.waitForFunction(
     await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
     await page.waitForTimeout(300);
     const card = await page.evaluate(() => window.__HELD);
-    const A = { n: 1, pay: 9.48, minutes: 40, holdId: 'm-a@1', dropoff: 'Powder Springs Rd',
+    const A = { n: 1, pay: 9.48, minutes: 40, holdId: 'm-a@1', dropoff: 'Gorrel Springs Rd',
                 card: card, endPinned: false, arrived: false, endWhy: null };
-    const B = { n: 2, pay: 28.08, minutes: 55, holdId: 'm-b@2', dropoff: 'Canton Rd, Marietta',
+    const B = { n: 2, pay: 28.08, minutes: 55, holdId: 'm-b@2', dropoff: 'Belvan Rd, Harrowen',
                 card: card, endPinned: false, arrived: false, endWhy: null };
     await page.evaluate((x) => window.__es.push(x), { holding: A, orders: [A, B] });
     await page.evaluate((x) => window.__es.push(x), { planner: { stops: [
       { kind: 'pickup', orders: 1, name: 'Larkspur Tacos', expectedBy: 700,
-        street: '310 Mill St', city: 'Roswell', line: '310 Mill St, Roswell, GA 30075',
+        street: '310 Mill St', city: 'Ruswold', line: '310 Mill St, Ruswold, GA 90675',
         of: 'm-b@2' },
-      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720, street: 'Powder Springs Rd',
-        city: 'Marietta', line: 'Powder Springs Rd' }],
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720, street: 'Gorrel Springs Rd',
+        city: 'Harrowen', line: 'Gorrel Springs Rd' }],
       unfiled: null, asked: true, ms: null, at: 1 } });
     await page.evaluate((x) => {
       Object.assign(x.offer, window.__CARD);
@@ -8755,7 +8755,7 @@ const framed = (page) => page.waitForFunction(
     }, { ready: true, state: 'go', perHour: 30, grossPerHour: 36, pay: 14.25, minutes: 20,
          miles: 4, cost: 1.4, target: 25, band: 15, holding: A, orders: [A, B], stack: null,
          offer: { id: 'o-two', pay: 14.25, minutes: 20, billedMinutes: 20, miles: 4, cost: 1.4,
-                  pickup: 'Chipotle (Barrett Pkwy)', dropoff: null } });
+                  pickup: 'Chipotle (Tallett Pkwy)', dropoff: null } });
     await page.click('#viewMode');
     await page.waitForTimeout(150);
     await page.click('#viewMode');
@@ -8764,8 +8764,8 @@ const framed = (page) => page.waitForFunction(
       String((m.opts && m.opts.icon && m.opts.icon.html) || '')).sort());
     // ...and the run through both and its figure (Stage 6). No planner
     // places both ends here — it lists ②'s pickup and ①'s end — so the ends
-    // go both ways round: Mill St, Powder Springs, Canton Rd puts Chipotle
-    // 2.62 mi out of the way, Mill St, Canton Rd, Powder Springs 0.57 mi
+    // go both ways round: Mill St, Gorrel Springs, Belvan Rd puts Chipotle
+    // 2.62 mi out of the way, Mill St, Belvan Rd, Gorrel Springs 0.57 mi
     // (MV.detourOrders on these pins). Two answers: no figure, each order's
     // own run drawn, and no detour line.
     const runsNow = () => page.evaluate(() => ({
@@ -8774,7 +8774,7 @@ const framed = (page) => page.waitForFunction(
         .map((l) => [String(l.opts.className), l.pts.length]),
       detour: (window.__lines || []).filter((l) => /mv-detour/.test(String((l.opts || {}).className || ''))).length,
       // ...what each pin says on it, and where it is; and the gap the run
-      // through both, in the planner's order (Mill St, Canton Rd, Powder
+      // through both, in the planner's order (Mill St, Belvan Rd, Gorrel
       // Springs Rd), puts Chipotle in, worked out here off the pins.
       letters: (window.__letters || []).map((l) => [String(((l.opts || {}).icon || {}).html || ''), l.ll]),
       want: (() => {
@@ -8807,21 +8807,21 @@ const framed = (page) => page.waitForFunction(
     await offerTwo('o-two-agree', 'Larkspur Bagels (Mill St)');
     await page.waitForTimeout(3500);
     out.mapTwoAgree = await runsNow();
-    await offerTwo('o-two', 'Chipotle (Barrett Pkwy)');
+    await offerTwo('o-two', 'Chipotle (Tallett Pkwy)');
     await page.waitForTimeout(1500);
-    // ...then a planner that lists both orders, Canton Rd (②) before Powder
+    // ...then a planner that lists both orders, Belvan Rd (②) before Gorrel
     // Springs Rd (①), and the server saying so (`planAt`, ordersForPanel):
     // one run in that order, and its figure, 0.57 mi.
     const A2 = Object.assign({}, A, { planAt: 2 }), B2 = Object.assign({}, B, { planAt: 1 });
     await page.evaluate((x) => window.__es.push(x), { holding: A2, orders: [A2, B2] });
     await page.evaluate((x) => window.__es.push(x), { planner: { stops: [
       { kind: 'pickup', orders: 1, name: 'Larkspur Tacos', expectedBy: 700,
-        street: '310 Mill St', city: 'Roswell', line: '310 Mill St, Roswell, GA 30075',
+        street: '310 Mill St', city: 'Ruswold', line: '310 Mill St, Ruswold, GA 90675',
         of: 'm-b@2' },
-      { kind: 'dropoff', orders: 1, name: 'Lee M.', expectedBy: 710, street: 'Canton Rd',
-        city: 'Marietta', line: 'Canton Rd, Marietta' },
-      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720, street: 'Powder Springs Rd',
-        city: 'Marietta', line: 'Powder Springs Rd' }],
+      { kind: 'dropoff', orders: 1, name: 'Lee M.', expectedBy: 710, street: 'Belvan Rd',
+        city: 'Harrowen', line: 'Belvan Rd, Harrowen' },
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720, street: 'Gorrel Springs Rd',
+        city: 'Harrowen', line: 'Gorrel Springs Rd' }],
       unfiled: null, asked: true, ms: null, at: 2 } });
     await page.waitForTimeout(3500);
     out.mapTwoKnown = await runsNow();
@@ -8829,7 +8829,7 @@ const framed = (page) => page.waitForFunction(
     // the car, one trip (server.js placeTook). The run through ① and ② would
     // leave ③ out, so no figure, as when the order of stops is unknown.
     const C3 = Object.assign({}, B2, { n: 3, holdId: 'm-c@3', addOn: true, of: 'm-b@2',
-                                       dropoff: 'Canton Rd, Marietta', planAt: null });
+                                       dropoff: 'Belvan Rd, Harrowen', planAt: null });
     // The premise first: the same card against ① and ② alone, in the
     // planner's order, has its figure.
     const offerOn = (id, orders) => page.evaluate((x) => {
@@ -8838,7 +8838,7 @@ const framed = (page) => page.waitForFunction(
     }, Object.assign({}, OFFER_TWO, { holding: A2, orders: orders,
                                       offer: { id: id, pay: 14.25, minutes: 20,
                                                billedMinutes: 20, miles: 4, cost: 1.4,
-                                               pickup: 'Chipotle (Barrett Pkwy)',
+                                               pickup: 'Chipotle (Tallett Pkwy)',
                                                dropoff: null } }));
     await offerOn('o-two-known', [A2, B2]);
     await page.waitForTimeout(3500);
@@ -8892,12 +8892,13 @@ _fake_url = 'http://127.0.0.1:%d' % json.loads(nbx_fake.stdout.readline())['port
 _nowhere = 'http://127.0.0.1:%d' % free_port()
 nbx_procs, NBX = [], {'fake': _fake_url}
 # ...and the NucBox's own server.js holding the street index of the synthetic
-# streets round Marietta Square (tests/fixtures/streets.osm, through the real
+# streets round Harrowen Square (tests/fixtures/streets.osm, through the real
 # exporter from osmium's committed OPL), for `streets`, which relays to it.
 _idx = os.path.join(work, 'streets.json')
 subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'street_index.py'),
                 os.path.join(ROOT, 'tests', 'fixtures', 'streets.osm'), _idx,
-                '--opl', os.path.join(ROOT, 'tests', 'fixtures', 'streets.opl')],
+                '--opl', os.path.join(ROOT, 'tests', 'fixtures', 'streets.opl'),
+                '--bbox=-45.00,33.50,-43.95,34.40'],
                check=True, capture_output=True)
 _nuc_port = free_port()
 _nuc_j = os.path.join(work, 'journal-nucbox.jsonl')
@@ -9412,24 +9413,24 @@ try:
     _bw = got.get('between') or {}
     _bf = _bw.get('first') or {}
     ok_('[between offers] set up: the card, its pickup and the order in the car drawn (%r)'
-        % _bf.get('pins'), [34.02, -84.58] in (_bf.get('pins') or [])
-        and [33.9, -84.6] in (_bf.get('pins') or []) and bool(_bf.get('fit')))
+        % _bf.get('pins'), [34.02, -44.58] in (_bf.get('pins') or [])
+        and [33.9, -44.6] in (_bf.get('pins') or []) and bool(_bf.get('fit')))
     _bv = _bw.get('visited') or {}
     eq('a visit beat while following does not move the view: no fit, no view set',
        (_bv.get('fit'), _bv.get('view')), (None, None))
     ok_('...though the visit is drawn (%r)' % _bv.get('letters'),
         '✓' in (_bv.get('letters') or []))
     ok_('a new card is still fitted to its pins', bool((_bw.get('newCard') or {}).get('fit')))
-    # The second card's pickup (Zaxbys) and its dropoff (Canton Rd), and the
-    # order in the car's end (Powder Springs Rd), by where they are pinned.
-    _zax, _canton, _held = [34.04, -84.56], [33.98, -84.5], [33.9, -84.6]
+    # The second card's pickup (Zaxbys) and its dropoff (Belvan Rd), and the
+    # order in the car's end (Gorrel Springs Rd), by where they are pinned.
+    _zax, _belvan, _held = [34.04, -44.56], [33.98, -44.5], [33.9, -44.6]
     _bl = _bw.get('left') or {}
     ok_('[between offers] the card just gone is still drawn while its reading is fresh (%r)'
-        % _bl.get('pins'), _zax in (_bl.get('pins') or []) and _canton in (_bl.get('pins') or []))
+        % _bl.get('pins'), _zax in (_bl.get('pins') or []) and _belvan in (_bl.get('pins') or []))
     _bs = _bw.get('stale') or {}
     eq('once the card\'s reading is stale its pins and its figure go: the order in the car, '
        'and the caption says the card has gone',
-       (_zax in (_bs.get('pins') or []), _canton in (_bs.get('pins') or []),
+       (_zax in (_bs.get('pins') or []), _belvan in (_bs.get('pins') or []),
         _held in (_bs.get('pins') or []), _bs.get('said')),
        (False, False, True, 'no card up — only the order in your car'))
 
@@ -9507,49 +9508,49 @@ try:
         eq('[shift page] %d: ...and it writes nothing' % _vw, _sp.get('writes'), [])
     _rr = got.get('roadRun_road') or {}
     _rn = got.get('roadRun_noRoad') or {}
-    _mill, _psr = (34.010, -84.610), (33.900, -84.600)
+    _mill, _psr = (34.010, -44.610), (33.900, -44.600)
     def _held(ls):
         return [l for l in ls or [] if 'mv-held-run' in l.get('cls', '')]
     eq('[road run] between offers the held order is drawn car -> pickup -> dropoff along '
        'the road from the live fix, not a straight pickup -> dropoff',
        [(l['cls'], l['pts']) for l in _held(_rr.get('idle'))],
-       [('mv-held-run mv-road', _rr_road((33.9526, -84.5499), _mill, _psr))])
+       [('mv-held-run mv-road', _rr_road((33.9526, -44.5499), _mill, _psr))])
     eq('[road run] ...a fix 100 m on asks the router nothing new',
        _rr.get('nearRoutes'), _rr.get('idleRoutes'))
     ok_('[road run] ...a fix 330 m on asks again and starts the road there (%r)'
         % ([l['pts'][:1] for l in _held(_rr.get('far'))],),
         (_rr.get('farRoutes') or 0) > (_rr.get('idleRoutes') or 0)
         and [l['pts'] for l in _held(_rr.get('far'))]
-        == [_rr_road((33.9556, -84.5499), _mill, _psr)])
+        == [_rr_road((33.9556, -44.5499), _mill, _psr)])
     eq('[road run] ...and with the restaurant behind the car, a new leg: car -> dropoff along '
        'the road from where the car is now, 100 m on',
        [l['pts'] for l in _held(_rr.get('visited'))],
-       [_rr_road((33.9565, -84.5499), _psr)])
+       [_rr_road((33.9565, -44.5499), _psr)])
     eq('[road run] with the router down the run is the straight car -> pickup -> dropoff',
        [(l['cls'], l['pts']) for l in _held(_rn.get('idle'))],
-       [('mv-held-run', [[33.9526, -84.5499], list(_mill), list(_psr)])])
+       [('mv-held-run', [[33.9526, -44.5499], list(_mill), list(_psr)])])
     eq('[road run] ...and a fix gone grey starts no run: pickup -> dropoff with no car',
        [(l['cls'], l['pts']) for l in _held(_rn.get('grey'))],
        [('mv-held-run', [list(_mill), list(_psr)])])
     eq('[road run] ...and with two orders in the car each one\'s straight run starts at the '
        'live fix',
        [(l['cls'], l['pts']) for l in _held(_rn.get('two'))],
-       [('mv-held-run mv-order-1', [[33.9526, -84.5499], list(_psr)]),
-        ('mv-held-run mv-order-2', [[33.9526, -84.5499], [33.980, -84.500]])])
+       [('mv-held-run mv-order-1', [[33.9526, -44.5499], list(_psr)]),
+        ('mv-held-run mv-order-2', [[33.9526, -44.5499], [33.980, -44.500]])])
     _job = [l for l in _rr.get('offer') or [] if 'mv-job' in l.get('cls', '')]
     _hr = _held(_rr.get('offer'))
     ok_('[road run] a screened card\'s own trip is drawn pickup -> dropoff along the road in '
         'teal, beside the held run in amber (%r, %r)'
         % ([(l['cls'], l['color']) for l in _job], [l['color'] for l in _hr]),
         len(_job) == 1 and _job[0]['cls'] == 'mv-job mv-road' and _job[0]['color'] == '#2dd4bf'
-        and _job[0]['pts'] == _rr_road((34.020, -84.580), (33.980, -84.500))
+        and _job[0]['pts'] == _rr_road((34.020, -44.580), (33.980, -44.500))
         and _hr and all(l['color'] == '#f5a524' for l in _hr))
     ok_('[road run] ...and the key names both trips (%r)' % _rr.get('offerKey'),
         '━ run' in (_rr.get('offerKey') or '') and '━ offer' in (_rr.get('offerKey') or ''))
 
     # The owner's snap of 24 Oct: a batched trip run through its dropoffs.
     _br = got.get('batchRun') or {}
-    _brp = [[33.9526, -84.5499], [34.020, -84.620], [34.030, -84.580], [34.000, -84.560]]
+    _brp = [[33.9526, -44.5499], [34.020, -44.620], [34.030, -44.580], [34.000, -44.560]]
     eq('[batch run] Map view runs the car -> the pickup -> the dropoff before the end the '
        'NucBox placed -> the end, along the road',
        [(l['cls'], l['pts']) for l in _br.get('runs') or []],
@@ -9572,7 +9573,7 @@ try:
     eq('[drop passed] the car at D2\'s door, the pickup made, then 0.41 mi on: D2 is off the '
        'run, car -> the end along the road',
        [(l['cls'], l['pts']) for l in _bp.get('runs') or []],
-       [('mv-held-run mv-road', _rr_road((34.0360, -84.5800), (34.000, -84.560)))])
+       [('mv-held-run mv-road', _rr_road((34.0360, -44.5800), (34.000, -44.560)))])
     ok_('[drop passed] ...and marked done, "D2 ✓", beside the end\'s D (%r)'
         % _bp.get('letters'),
         any('D2 ✓' in x for x in _bp.get('letters') or [])
@@ -9771,8 +9772,8 @@ try:
            % (_m.get('placesText'),),
            (_p.get('placesText'), _m.get('placesText'), _um.get('moving'), _um.get('placesRows'),
             _um.get('placesText')),
-           ('Cobb Pkwy NW, Acworth → Canton Rd, Marietta',) * 2
-           + (True, 1, 'Cobb Pkwy NW, Acworth → Barrett Pkwy NW, Kennesaw → Canton Rd, Marietta'))
+           ('Vosk Pkwy NW, Ivyhame → Belvan Rd, Harrowen',) * 2
+           + (True, 1, 'Vosk Pkwy NW, Ivyhame → Tallett Pkwy NW, Tellmoor → Belvan Rd, Harrowen'))
         eq('between offers a tap shows the stops for 10 s while moving',
            [(dv.get(k) or {}).get('driving') for k in ('peek', 'peek9', 'peek10')]
            + [(dv.get(k) or {}).get('moving') for k in ('peek', 'peek10')]
@@ -10089,13 +10090,13 @@ try:
            ('⌖ a pickup', False, False))
         ok_('%s: ...and its title and spoken label name the end the order kept (%r)'
             % (panel, _dr.get('title', '')[:60]),
-            all('kept 283 Quillon St NW, Smyrna' in (_dr.get(k) or '')
+            all('kept 283 Quillon St NW, Pyrnel' in (_dr.get(k) or '')
                 and 'Restaurant screen' in (_dr.get(k) or '')
-                and 'GA 30066' not in (_dr.get(k) or '') for k in ('title', 'aria')))
+                and 'GA 90666' not in (_dr.get(k) or '') for k in ('title', 'aria')))
         _da = _ds.get('after') or {}
         eq('%s: ...and the customer\'s door arriving after it takes its place, green as ever'
            % panel, (_da.get('label'), _da.get('done'),
-                     'Read as: 61 Saddlebrook Ln, Smyrna' in (_da.get('title') or '')),
+                     'Read as: 61 Haddlecombe Ln, Pyrnel' in (_da.get('title') or '')),
            ('⌖ Scan', True, True))
 
         held = got.get('held ' + panel) or {}
@@ -10427,13 +10428,13 @@ try:
     ok_('...and the map\'s tiles darker under their filter (%r)' % _ad.get('filter'),
         'brightness(0.45)' in (_ad.get('filter') or ''))
     eq('...and the fix kept for after a reload, to two decimals',
-       _ad.get('kept'), {'lat': 33.75, 'lon': -84.39})
+       _ad.get('kept'), {'lat': 33.75, 'lon': -44.39})
     _af = _n.get('afternoon') or {}
     eq('in the afternoon at the same fix, the day palette and the day\'s tiles',
        (_af.get('night'), _af.get('bg'), 'brightness(0.78)' in (_af.get('filter') or '')),
        (False, 'rgb(11, 15, 20)', True))
     _cr = _n.get('crossing') or {}
-    eq('dusk arriving with no message arriving still dims the panel (21:15, then 21:25)',
+    eq('dusk arriving with no message arriving still dims the panel (22:35, then 22:45 UTC)',
        (_cr.get('night'), (_cr.get('later') or {}).get('night')), (False, True))
     eq('with no fix on the beat, the last fix kept decides', (_n.get('lastFix') or {}).get('night'),
        True)
@@ -11283,7 +11284,7 @@ try:
                     % (where, label, name, el.get('text')),
                     el.get('onGlass') and el.get('inPane'))
                 ok_('%s, %s: %s whole in its own box' % (where, label, name), el.get('whole'))
-                # Five points across it, so nothing — the card above all —
+                # Nine rivers across it, so nothing — the card above all —
                 # is drawn over any of it.
                 ok_('%s, %s: %s is what a press on it reaches, nothing over it'
                     % (where, label, name), el.get('hit'))
@@ -11822,7 +11823,7 @@ try:
     eq('the press asks about this card and the order in the car (%r)' % (asked,),
        len(asked), 3)
     ok_('...including where the held order ends',
-        any('Powder Springs' in q for q in asked))
+        any('Gorrel Springs' in q for q in asked))
 
     marks = on.get('marks') or []
     fills = [m.get('fill') for m in marks]
@@ -11835,12 +11836,12 @@ try:
     _car = [m for m in marks if m.get('fill') == '#7aa2f7']
     # The card's own fix, taken when it landed and carried on the offer line —
     # not the newest journal row carrying one, which the stub puts at
-    # (34.5, -84.9) and stamps newer than this card. askCar read that.
+    # (34.5, -44.9) and stamps newer than this card. askCar read that.
     ok_('the detour comes from the card\'s own fix, not the newest journal row '
         'that carries one (%r)' % (_car and _car[0].get('ll'),),
         _car and len(_car) == 1
         and abs(float(_car[0]['ll'][0]) - 34.010) < 0.001
-        and abs(float(_car[0]['ll'][1]) + 84.600) < 0.001)
+        and abs(float(_car[0]['ll'][1]) + 44.600) < 0.001)
     ok_('...and the car pin says it is where the card came up, with its error '
         '(%r)' % (_car and _car[0].get('popup'),),
         _car and 'when this card came up' in (_car[0].get('popup') or '')
@@ -11887,8 +11888,8 @@ try:
     # up" over an unnamed dot is a map that cannot be checked against the card
     # the driver is looking at on the phone.
     ok_('...and names the place the card gave',
-        any('Chipotle (Barrett Pkwy)' in (m.get('popup') or '') for m in marks)
-        and any('Powder Springs Rd' in (m.get('popup') or '') for m in marks))
+        any('Chipotle (Tallett Pkwy)' in (m.get('popup') or '') for m in marks)
+        and any('Gorrel Springs Rd' in (m.get('popup') or '') for m in marks))
 
     lines = on.get('lines') or []
     eq('four runs are drawn between them', len(lines), 4)
@@ -11901,7 +11902,7 @@ try:
     # going — and nothing else: not the new job's own end, which is past where
     # the figure stops (drawMap's `frame`), and neither card's disc, which is
     # drawn (below) and has no say in the view. The card printed 12 mi round
-    # 34.010, -84.600, and fitted to its disc too the hat's map went from zoom
+    # 34.010, -44.600, and fitted to its disc too the hat's map went from zoom
     # 10 to 8 on a 9.4 mi card (Leaflet 1.9.4's getBoundsZoom, the fit's
     # padding).
     _fit = on.get('fit') or []
@@ -11962,7 +11963,7 @@ try:
     ok_('between offers with an order in the car, the card keeps its column and the '
         'next stop, the map the picture\'s half (%r)' % _bn,
         _bn.get('live') and (_bn.get('next') or '').startswith('Dropoff')
-        and 'Powder Springs Rd' in (_bn.get('next') or '')
+        and 'Gorrel Springs Rd' in (_bn.get('next') or '')
         and _bn.get('mapW', 0) < _bn.get('appW', 0) * 0.6)
     _brn, _brp, _brd = (got.get('betweenReadNav') or {}, got.get('betweenReadPart') or {},
                         got.get('betweenReadDone') or {})
@@ -11991,7 +11992,7 @@ try:
         ('mv-how mv-disc mv-new', round(12.5 * 1609.344))])
     ok_('...each at its card\'s own fix, this card\'s blue as the car and the '
         'held card\'s amber as its ring (%r)' % (_how,),
-        all(h.get('ll') == [34.010, -84.600] for h in _how)
+        all(h.get('ll') == [34.010, -44.600] for h in _how)
         and {(h.get('cls'), h.get('colour')) for h in _how}
         == {('mv-how mv-disc mv-new', '#7aa2f7'), ('mv-how mv-disc mv-held', '#f5a524')})
     # The circle only while a disc is shown: one bigger than the view is not
@@ -12083,7 +12084,7 @@ try:
     _new = [h for h in _wh if h.get('cls') == 'mv-how mv-disc mv-new']
     ok_('a pin the card refuses lies outside the card\'s disc drawn round its fix, '
         'its distance plus half a mile (%r)' % (_wh,),
-        len(_new) == 1 and _new[0].get('ll') == [33.9526, -84.5499]
+        len(_new) == 1 and _new[0].get('ll') == [33.9526, -44.5499]
         and abs((_new[0].get('radius') or 0) - 9.9 * 1609.344) < 1e-6)
     eq('no fix and nothing in the car: nothing of how it was found is drawn, '
        'and no key over a map with nothing it explains',
@@ -12105,7 +12106,7 @@ try:
         '"road mi" (%r, %.2f wanted)' % (both.get('one'), _want),
         _m and abs(float(_m.group(1)) - _want) < 0.051)
     eq('...off the branch the disc kept: the 3.0 mi card\'s McDonald\'s is the '
-       'one 2.1 mi north', both.get('onePick'), [33.983, -84.5499])
+       'one 2.1 mi north', both.get('onePick'), [33.983, -44.5499])
     _routes = [u for u in (got.get('nbxAsked') or []) if u.startswith('/route')]
     # The new job's end is in one kind of question only: the job's own leg,
     # its pickup -> its dropoff, two points, asked to DRAW it along the road
@@ -12117,7 +12118,7 @@ try:
         'new job\'s end but for the job\'s own two-point leg (%d routes, %r)'
         % (len(_routes), _jobs[:2]),
         _routes and all(len(u.split('?')[0].split(';')) <= 3 for u in _routes)
-        and _jobs and all(re.match(r'^/route/v1/driving/-?[\d.]+,[\d.]+;-84\.55200,33\.95800\?',
+        and _jobs and all(re.match(r'^/route/v1/driving/-?[\d.]+,[\d.]+;-44\.55200,33\.95800\?',
                                    u) for u in _jobs))
     # The routes along the roads: the fake's road turns east-west, then
     # north-south, so a line along it has the corner [car lat, pickup lon].
@@ -12127,10 +12128,10 @@ try:
        'end, one dashed line with the road\'s corners, not two straight legs',
        (_det.get('pts'), _det.get('dashed'),
         len([l for l in both.get('oneLines') or [] if 'mv-detour' in l.get('cls')])),
-       ([[33.9526, -84.5499], [33.9526, -84.5499], [33.983, -84.5499],
-         [33.983, -84.46], [33.8779, -84.46]], True, 1))
+       ([[33.9526, -44.5499], [33.9526, -44.5499], [33.983, -44.5499],
+         [33.983, -44.46], [33.8779, -44.46]], True, 1))
     eq('...and the held order\'s run car -> its end along the road too',
-       _run.get('pts'), [[33.9526, -84.5499], [33.9526, -84.46], [33.8779, -84.46]])
+       _run.get('pts'), [[33.9526, -44.5499], [33.9526, -44.46], [33.8779, -44.46]])
     _nr = {l.get('cls') for l in noroad.get('oneLines') or []}
     ok_('...and with no router the same runs are the straight lines (%r)' % sorted(_nr),
         'mv-held-run' in _nr and 'mv-detour' in _nr
@@ -12143,10 +12144,10 @@ try:
         and 'mv-held-run' in (nosearch.get('offHeldLines') or [])
         and not any('mv-held-run' in c and 'mv-road' in c
                     for c in nosearch.get('offHeldLines') or []))
-    _streets = [u for u in (got.get('nbxAsked') or []) if 'street=Shadowood' in u]
-    ok_('the held end "Shadowood Pkwy SE, Atlanta" is asked as the street alone, '
+    _streets = [u for u in (got.get('nbxAsked') or []) if 'street=Gloamwood' in u]
+    ok_('the held end "Gloamwood Pkwy SE, Solvane" is asked as the street alone, '
         'the town left out (%r)' % _streets[:1],
-        _streets and not any('Atlanta' in u or 'city=' in u for u in _streets))
+        _streets and not any('Solvane' in u or 'city=' in u for u in _streets))
     eq('a 9.4 mi card\'s McDonald\'s is refused as two that disagree, not pinned',
        (both.get('several'), both.get('severalPick')),
        ("no pin for McDonald's — 2 fit the card and disagree · within 9.4 mi of you",
@@ -12157,7 +12158,7 @@ try:
     eq('an Early look card is still no yardstick with its door found on the '
        'NucBox', both.get('early'),
        'an Early look card may not measure from your car — no yardstick yet')
-    ok_('...its door pinned all the same, at 1985 Cobb Parkway (%r)' % both.get('earlyPick'),
+    ok_('...its door pinned all the same, at 1985 Vosk Parkway (%r)' % both.get('earlyPick'),
         both.get('earlyPick') and abs(both['earlyPick'][0] - 34.001) < 0.001)
     eq('...and the router not asked for a figure the card refuses',
        both.get('routesAfter'), both.get('routesBefore'))
@@ -12187,10 +12188,10 @@ try:
         'only the rest (%r)' % both.get('downLater'),
         _m and abs(float(_m.group(1)) - _want) < 0.051
         and 'Slow Place' in (both.get('downLaterAsked') or [])
-        and "McDonald's (Marietta Sq)" not in (both.get('downLaterAsked') or []))
+        and "McDonald's (Harrowen Sq)" not in (both.get('downLaterAsked') or []))
     eq('...which was asked the places, as it always was',
        sorted(set(nosearch.get('publicAsked') or [])),
-       ['Church St, Marietta', "McDonald's (Marietta Sq)", 'Shadowood Pkwy SE, Atlanta'])
+       ['Church St, Harrowen', 'Gloamwood Pkwy SE, Solvane', "McDonald's (Harrowen Sq)"])
     eq('...and with the NucBox set and answering, the public map is asked nothing',
        (both.get('publicAsked'), noroad.get('publicAsked')), ([], []))
     # A road figure the router gave and the panel will not state: the road by
@@ -12219,15 +12220,15 @@ try:
        'not its door, asking the place once when it is learnt for the same card, and '
        'with no place pins nothing',
        (both.get('placeHeld'), both.get('placeAsked'), both.get('noPlaceHeld')),
-       ([33.9712, -84.5288], 1, None))
+       ([33.9712, -44.5288], 1, None))
     eq('[area] ...and with no place, the street\'s general area is drawn where the run goes, '
        'a "≈" ring and never the end\'s pin, the caption saying so (%r)' % both.get('noPlaceNote'),
        (both.get('noPlaceArea'), '\u2248 rout' in (both.get('noPlaceNote') or '')),
-       ([[33.97, -84.53]], True))
+       ([[33.97, -44.53]], True))
     eq('[area key] the server\'s area for a refused held end is drawn, and its distance band '
        'arriving on a later beat for the same card walks again: the ring moves to the band\'s',
        (both.get('srvArea'), both.get('srvBand')),
-       ([[33.9811, -84.5122]], [[33.9922, -84.5233]]))
+       ([[33.9811, -44.5122]], [[33.9922, -44.5233]]))
     _ca = both.get('cutArea') or {}
     eq('[area more] a new offer\'s pickup the NucBox\'s list was cut on, its answers one area: '
        'no P, a faded "≈" ring where the trip starts, its own refusal saying "≈ routed, 10+", '
@@ -12242,7 +12243,7 @@ try:
        'saying "by card\'s 0.7 mi", nothing posted (%r)' % (_ba.get('note'),),
        (_ba.get('pick'), [(m.get('ll'), m.get('faded'), m.get('band')) for m in _ba.get('ring') or []],
         '\u2248 routed, by card\'s 0.7 mi' in (_ba.get('note') or ''), _ba.get('posts')),
-       (None, [([33.96, -84.545], True, True)], True, []))
+       (None, [([33.96, -44.545], True, True)], True, []))
     _gg = both.get('guess') or {}
     eq('[dd map label] a DoorDash card naming no dropoff, its map\'s label carried as the '
        'offer\'s guess: a faded "≈" ring at the guessed door, never D, the store still P, the '
@@ -12282,14 +12283,14 @@ try:
     ok_('[server pin] Map view draws the held end the server armed by street as D, at its '
         'point, and does not say NO PIN; a pin by no server rule is not drawn (%r)'
         % both.get('serverNote'),
-        both.get('serverHeld') == [33.9701, -84.5302]
+        both.get('serverHeld') == [33.9701, -44.5302]
         and 'not that door' not in (both.get('serverNote') or '')
         and both.get('ownPostHeld') is None)
     eq('[server pin] ...nor a point the server does not say is pinned; and a pin the server '
        'makes later, said on a beat for the same card, is drawn then, and never posted back '
        'as Map view\'s door',
        (both.get('serverBefore4'), both.get('serverHeld4'), both.get('serverPosts')),
-       (None, [33.9701, -84.5302], []))
+       (None, [33.9701, -44.5302], []))
     eq('[on time] with the NucBox search set the pair line leaves the road miles to the '
        'card\'s way line',
        both.get('offWay'), {'ontime': None, 'more': 'with the one you have, over 40–65 min'})
@@ -12305,16 +12306,16 @@ try:
         'as a door with no town, a green ring named without the icon\'s "oe " (%r, %r)'
         % (_pins, both.get('heldPickSeen')),
         len(_pins) == 1
-        and abs(_pins[0]['ll'][0] - 34.0010) < 0.001 and abs(_pins[0]['ll'][1] + 84.5560) < 0.001
+        and abs(_pins[0]['ll'][0] - 34.0010) < 0.001 and abs(_pins[0]['ll'][1] + 44.5560) < 0.001
         and _pins[0]['ring'] and _pins[0]['fill'] == '#17c964'
-        and 'Fable Crust Pizza · 1985 Cobb Parkway<' in (_pins[0]['popup'] + '<')
+        and 'Fable Crust Pizza · 1985 Vosk Parkway<' in (_pins[0]['popup'] + '<')
         and 'oe Fable' not in _pins[0]['popup']
-        and any(re.match(r'^/api/nbx/search\?street=1985(%20|\+)Cobb(%20|\+)Parkway&', u)
+        and any(re.match(r'^/api/nbx/search\?street=1985(%20|\+)Vosk(%20|\+)Parkway&', u)
                 for u in both.get('heldPickSeen') or []))
     _run = (_hp.get('run') or [[]])[0]
     ok_('...and the held order\'s run is drawn car -> its pickup -> its end (%r)' % _run,
         len(_hp.get('run') or []) == 1 and len(_run) == 3
-        and _run[0] == [33.9526, -84.5499] and _run[1] == _pins[0]['ll'] if _pins else False)
+        and _run[0] == [33.9526, -44.5499] and _run[1] == _pins[0]['ll'] if _pins else False)
     eq('...and the key names it', 'held pickup' in (_hp.get('key') or ''), True)
     eq('...and the pickup is never sent as the held order\'s end', both.get('heldPickPosts'), [])
     eq('...and it stays on the map under the next card while the order is held',
@@ -12339,7 +12340,7 @@ try:
         'restaurant guard (%r)' % (_pp,),
         _pp and all(p.get('holdId') == 'h-planner'
                     and abs(p.get('lat', 0) - 34.0010) < 0.001
-                    and abs(p.get('lon', 0) + 84.5560) < 0.001 for p in _pp))
+                    and abs(p.get('lon', 0) + 44.5560) < 0.001 for p in _pp))
     # The GPS drop's end as the page finds it: a held end pinned at its DOOR
     # (the dropoff names the number and the NucBox's answer carries it) is
     # posted to /api/held-end, named by its hold and the text it was pinned
@@ -12348,10 +12349,10 @@ try:
     ok_('a held order\'s end pinned at its door is sent to /api/held-end for the GPS '
         'drop, named by its hold and the dropoff it was pinned for (%r)' % (_dp,),
         _dp and all(p.get('holdId') == 'h-door'
-                    and p.get('dropoff') == '1985 Cobb Parkway, Kennesaw'
+                    and p.get('dropoff') == '1985 Vosk Parkway, Tellmoor'
                     and p.get('doorLevel') is True
                     and abs(p.get('lat', 0) - 34.0010) < 0.001
-                    and abs(p.get('lon', 0) + 84.5560) < 0.001 for p in _dp))
+                    and abs(p.get('lon', 0) + 44.5560) < 0.001 for p in _dp))
     # The held order's restaurant IN the figure: the run car -> restaurant ->
     # its end, this card's pickup before the restaurant or after it, whichever
     # is less, less that run — by road, and said to include the stop.
@@ -12372,14 +12373,14 @@ try:
         for a, b in zip(pts, pts[1:]):
             out += [[a[0], b[1]], list(b)]
         return out
-    _C, _A, _G, _S = (33.9526, -84.5499), (33.983, -84.5499), (33.97, -84.53), (33.8779, -84.46)
+    _C, _A, _G, _S = (33.9526, -44.5499), (33.983, -44.5499), (33.97, -44.53), (33.8779, -44.46)
     _ln = {l.get('cls'): l.get('pts') for l in _rt.get('lines') or []}
     eq('[held route] ...the detour drawn along the road where the figure put the pickup, '
        'into it and back to the run, and the held run along the road through its restaurant',
        (_ln.get('mv-detour mv-road'), _ln.get('mv-held-run mv-road')),
        (_road(_C, _A, _G) if _rw.get('before') else _road(_G, _A, _S), _road(_C, _G, _S)))
     eq('[held route] ...and this card\'s own job, pickup -> dropoff, along the road too',
-       _ln.get('mv-job mv-road'), _road(_A, (33.958, -84.552)))
+       _ln.get('mv-job mv-road'), _road(_A, (33.958, -44.552)))
     _rv = both.get('routeVisited') or {}
     _m = re.match(r'^\+(\d+\.\d) road mi out of your way$', _rv.get('note') or '')
     _vln = {l.get('cls'): l.get('pts') for l in _rv.get('lines') or []}
@@ -12425,7 +12426,7 @@ try:
         re.match(r'^9 Idaho Rd is \d+ mi away — almost certainly a misread name, so no distance$',
                  nosearch.get('routeWrong') or ''))
     # The street index, relayed to the NucBox's own server.js. A held end
-    # the index does not hold (Shadowood Parkway) is asked of the search as
+    # the index does not hold (Gloamwood Parkway) is asked of the search as
     # before, so the first card's line is the one `both` drew.
     st = nb.get('streets') or {}
     # The rungs the runs stood on, after the caption (MV.routeSaid; the
@@ -12451,7 +12452,7 @@ try:
         'and measured to by road (%r, %r, %.2f wanted)'
         % (st.get('corner'), st.get('cornerHeld'), st.get('cornerWant') or 0),
         _m and abs(float(_m.group(1)) - (st.get('cornerWant') or 0)) < 0.051
-        and st.get('cornerHeld') == [33.96, -84.55])
+        and st.get('cornerHeld') == [33.96, -44.55])
     ok_('a corner whose streets meet twice inside its card is refused, not pinned '
         '(%r)' % st.get('twice'),
         re.match(r'^no pin for Juniper.* — 2 corners fit its card · within 3 mi$',
@@ -12469,7 +12470,7 @@ try:
         and abs(float(_m.group(2)) - _sw[1]) < 0.051)
     ok_('...its pin at the point of the stretch nearest the car (%r)' % (st.get('stretchHeld'),),
         st.get('stretchHeld')
-        and abs(st['stretchHeld'][0] - 33.948) < 1e-6 and abs(st['stretchHeld'][1] + 84.552) < 1e-6)
+        and abs(st['stretchHeld'][0] - 33.948) < 1e-6 and abs(st['stretchHeld'][1] + 44.552) < 1e-6)
     # The owner, 20 Oct 21:08: the held run to Map view's own pin on a
     # numberless street was drawn straight with the relay answering routes.
     # The run is a drawing, no figure: it goes along the roads to the pin, one
@@ -12498,31 +12499,31 @@ try:
     _oh = both.get('oneHow')
     ok_('this card\'s disc is drawn at its fix, 3.0 mi and the half mile, and the '
         'held card\'s at its own, 9.4 and the half mile (%r)' % (_oh,),
-        [round(h.get('radius'), 3) for h in _of(_oh, 'mv-how mv-disc mv-new', [33.9526, -84.5499])]
+        [round(h.get('radius'), 3) for h in _of(_oh, 'mv-how mv-disc mv-new', [33.9526, -44.5499])]
         == [round(3.5 * _MI, 3)]
-        and [round(h.get('radius'), 3) for h in _of(_oh, 'mv-how mv-disc mv-held', [33.9526, -84.5499])]
+        and [round(h.get('radius'), 3) for h in _of(_oh, 'mv-how mv-disc mv-held', [33.9526, -44.5499])]
         == [round(9.9 * _MI, 3)])
-    _c = _of(_oh, 'mv-how mv-cand mv-new', [33.983, -84.5499])
+    _c = _of(_oh, 'mv-how mv-cand mv-new', [33.983, -44.5499])
     ok_('...the branch the disc kept is drawn grey under its pin, saying it was '
         'the one inside (%r)' % (_c,),
         len(_c) == 1 and _c[0].get('tip') == "McDonald's… — the one inside the 3.5 mi "
         "searched, pinned" and _c[0].get('fill') == 0.9
-        and both.get('onePick') == [33.983, -84.5499])
+        and both.get('onePick') == [33.983, -44.5499])
     _c = _of(_oh, 'mv-how mv-cand mv-held')
     ok_('...and the held end\'s two pieces of street, drawn in the held card\'s '
         'colour, each saying they agreed into its pin (%r)' % (_c,),
-        len(_c) == 2 and all(c.get('tip') == 'Shadowood… — one of 2 that agree, '
+        len(_c) == 2 and all(c.get('tip') == 'Gloamwood… — one of 2 that agree, '
                              'pinned at their middle' for c in _c))
     ok_('...with the key to them on the map', both.get('oneKey'))
     _fit = both.get('oneFit') or []
-    # ...the pins but the new job's own end, Church St at 33.958, -84.552,
+    # ...the pins but the new job's own end, Church St at 33.958, -44.552,
     # which the view leaves out with an order in the car (drawMap's frame).
-    _pins = [p for p in both.get('oneMarks') or [] if p != [33.958, -84.552]]
+    _pins = [p for p in both.get('oneMarks') or [] if p != [33.958, -44.552]]
     ok_('...and the one fit is the car and the stops, each once, none of the '
         'candidates, neither disc and not the new job\'s end (%r against %r)' % (_fit, _pins),
         sorted(map(tuple, _fit)) == sorted(map(tuple, _pins)) and len(_fit) >= 3
         and len(_pins) == len(both.get('oneMarks') or []) - 1
-        and [33.983, -84.5499] in _fit and [33.9526, -84.5499] in _fit
+        and [33.983, -44.5499] in _fit and [33.9526, -44.5499] in _fit
         and not any(abs(p[0] - (33.9526 + 9.9 / 69.0)) < 1e-6
                     or abs(p[0] - (33.9526 + 3.5 / 69.0)) < 1e-6 for p in _fit))
     # Zero requests to draw it. The walk asks the NucBox once per place and
@@ -12540,13 +12541,13 @@ try:
         == ['/api/nbx/route', '/api/nbx/route', '/api/nbx/route', '/api/nbx/search',
             '/api/nbx/search', '/api/nbx/search'])
     _sh = both.get('severalHow')
-    _c = _of(_sh, 'mv-how mv-cand mv-new', [33.983, -84.5499]) \
-        + _of(_sh, 'mv-how mv-cand mv-new', [33.901, -84.477])
+    _c = _of(_sh, 'mv-how mv-cand mv-new', [33.983, -44.5499]) \
+        + _of(_sh, 'mv-how mv-cand mv-new', [33.901, -44.477])
     ok_('a refused place has no pin, and its candidates are drawn grey with the '
         'caption\'s own refusal as their tooltip (%r)' % (_c,),
         len(_c) == 2 and both.get('severalPick') is None
         and all(c.get('tip') == both.get('several') for c in _c))
-    _o = _of(_sh, 'mv-how mv-out mv-new', [34.07, -84.67])
+    _o = _of(_sh, 'mv-how mv-out mv-new', [34.07, -44.67])
     ok_('...and the branch past the card\'s disc drawn hollow, saying how far out '
         'it is (%r)' % (_o,),
         len(_o) == 1 and _o[0].get('fill') == 0
@@ -12566,13 +12567,13 @@ try:
        [h.get('cls') for r in (both, st) for k, v in r.items() if k.endswith('How')
         for h in (v or []) if h.get('leafletTip')], [])
     _nh = both.get('noneHow')
-    _o = _of(_nh, 'mv-how mv-out mv-new', [33.983, -84.5499])
+    _o = _of(_nh, 'mv-how mv-out mv-new', [33.983, -44.5499])
     ok_('none inside a 0.6 mi card: the disc drawn at 1.1 mi round its own fix and '
         'the nearest branch hollow outside it, with the refusal (%r)' % (_nh,),
-        [round(h.get('radius'), 3) for h in _of(_nh, 'mv-how mv-disc mv-new', [33.97, -84.565])]
+        [round(h.get('radius'), 3) for h in _of(_nh, 'mv-how mv-disc mv-new', [33.97, -44.565])]
         == [round(1.1 * _MI, 3)]
         and len(_o) == 1 and (_o[0].get('tip') or '').startswith(both.get('none') or '?')
-        and not _of(_nh, 'mv-how mv-cand mv-new', [33.983, -84.5499]))
+        and not _of(_nh, 'mv-how mv-cand mv-new', [33.983, -44.5499]))
     _ch = [h for h in (both.get('cutHow') or []) if 'Starbucks' in (h.get('tip') or '')]
     ok_('a list cut at the limit is drawn as it was sent, ten of them, the one '
         'inside grey and the rest hollow, every one too many to be sure (%r)'
@@ -12581,7 +12582,7 @@ try:
         and len([h for h in _ch if h.get('cls') == 'mv-how mv-cand mv-new']) == 1
         and len([h for h in _ch if h.get('cls') == 'mv-how mv-out mv-new']) == 9
         and all((h.get('tip') or '').startswith(both.get('cut') or '?') for h in _ch))
-    _d = _of(both.get('doorHow'), 'mv-how mv-cand mv-new', [33.97, -84.53])
+    _d = _of(both.get('doorHow'), 'mv-how mv-cand mv-new', [33.97, -44.53])
     ok_('a door the NucBox holds only the street of: the street drawn grey, no pin, '
         'saying it is not that door (%r)' % (_d,),
         len(_d) == 1 and both.get('doorPick') is None
@@ -12594,7 +12595,7 @@ try:
     _k = _of(st.get('cornerHow'), 'mv-how mv-cand mv-held')
     ok_('a corner pinned where its streets meet: the meeting drawn under the held '
         'pin, in the held card\'s colour, inside its 3.0 mi card\'s disc (%r)' % (_k,),
-        len(_k) == 1 and _k[0].get('ll') == st.get('cornerHeld') == [33.96, -84.55]
+        len(_k) == 1 and _k[0].get('ll') == st.get('cornerHeld') == [33.96, -44.55]
         and [round(h.get('radius'), 3) for h in _of(st.get('cornerHow'), 'mv-how mv-disc mv-held')]
         == [round(3.5 * _MI, 3)])
     _k = _of(st.get('twiceHow'), 'mv-how mv-cand mv-held')
@@ -12618,7 +12619,7 @@ try:
         'colour, every point of it inside the held card\'s 3.5 mi, the pin on it (%r)'
         % ([len(x.get('pts') or []) for x in _s],),
         len(_s) == 1 and len(_s[0].get('pts') or []) > 1
-        and all(_crow([33.9526, -84.5499], p) <= 3.5 + 1e-9 for p in _s[0]['pts'])
+        and all(_crow([33.9526, -44.5499], p) <= 3.5 + 1e-9 for p in _s[0]['pts'])
         and bool(st.get('stretchHeld'))
         and min(_crow(st['stretchHeld'], p) for p in _s[0]['pts']) < 0.01)
     # The key names what is on the map and nothing else: the circle when a
@@ -12674,7 +12675,7 @@ try:
     # four behind and the new one draws four, so the count is 4 either way and
     # the check passed with the rule deleted. What distinguishes them is WHICH
     # pin is the pickup — the second card swaps the two ends, so the green one
-    # moves from the Chipotle to the Canton Rd end.
+    # moves from the Chipotle to the Belvan Rd end.
     # The held end, from the press: see the stage of that name. A pin is
     # named by what it says, so the card's own "and drop it here" can never
     # stand in for the order in the car.
@@ -12693,7 +12694,7 @@ try:
     td = got.get('tapDoor') or {}
     ok_('a tapped door: Map view searches the popup\'s address, not the card\'s name for '
         'the store (%r)' % (td.get('asked'),),
-        '1200 Fable W Lantern Pkwy NW, Kennesaw, GA 30144' in (td.get('asked') or [])
+        '1200 Fable W Lantern Pkwy NW, Tellmoor, GA 90744' in (td.get('asked') or [])
         and 'S &, Lark Owl Pizza ; 1200 Fable Parkway Nort' not in (td.get('asked') or []))
     ok_('a tapped door: the pickup pin is the popup address, and says it came from a tap '
         '(%r)' % (td.get('pins'),),
@@ -12707,7 +12708,7 @@ try:
     cd = got.get('cardDoor') or {}
     eq('a door off the card: Map view searches the address DoorDash printed under the '
        'store\'s name, not the name (%r)' % (cd.get('asked'),),
-       ('2530 Kestrel Plains Road, Marietta, GA 30066' in (cd.get('asked') or []),
+       ('2530 Kestrel Plains Road, Harrowen, GA 90666' in (cd.get('asked') or []),
         'Lark Owl Grill' in (cd.get('asked') or [])), (True, False))
     ok_('a door off the card: the pickup pin is that address, and claims no tap (%r)'
         % (cd.get('pins'),),
@@ -12718,7 +12719,7 @@ try:
                  r'lines, not roads$', cd.get('note') or ''))
     ht = got.get('heldTook') or {}
     ok_('held end: the ✓ Took reply\'s end is pinned as the held order\'s at once (%r)'
-        % (ht.get('took'),), any(_HELD in m and 'Powder Springs' in m
+        % (ht.get('took'),), any(_HELD in m and 'Gorrel Springs' in m
                                  for m in ht.get('took') or []))
     ok_('held end: ...and the next card\'s offer line does not take it down (%r)'
         % (ht.get('bare'),), any(_HELD in m for m in ht.get('bare') or []))
@@ -12820,7 +12821,7 @@ try:
     _back = set(fin.get('leftMidWalk') or [])
     ok_('...and a card left half way through its walk is drawn from the start '
         'on the way back (%r)' % (sorted(_back),),
-        {'34.07,-84.7', '33.87,-84.56', '33.9,-84.64'} <= _back)
+        {'34.07,-44.7', '33.87,-44.56', '33.9,-44.64'} <= _back)
 
     # The other direction. A drawMap that throws must not null the key under a
     # live map: the line below the guard re-enters showMap at once, and the
@@ -12958,7 +12959,7 @@ try:
     ok_('the answer-on-the-card stage ran', bool(wc))
     if wc:
         _on, _out, _cant = wc.get('on') or {}, wc.get('out') or {}, wc.get('cant') or {}
-        # The fake's router has no road to 1985 Cobb Parkway (its NoRoute),
+        # The fake's router has no road to 1985 Vosk Parkway (its NoRoute),
         # so this figure is the straight line's, and both say so.
         _m = re.match(r'^ON THE WAY · \+(\d+\.\d) mi · same side of town$',
                       _on.get('text') or '')
@@ -13087,7 +13088,7 @@ try:
        (None, 0, 0))
     _ho = got.get('hereOn') or {}
     eq('in Map view the beat\'s fix is a dot where it is',
-       _ho.get('dots'), [[33.9526, -84.5499]])
+       _ho.get('dots'), [[33.9526, -44.5499]])
     eq('...inside a circle the size of the GPS\'s own error',
        [c.get('radius') for c in (_ho.get('circles') or [])], [27.8])
     ok_('...labelled with that error and its age (%r)' % _ho.get('note'),
@@ -13095,13 +13096,13 @@ try:
     eq('...not greyed while fresh', _ho.get('grey'), False)
     _fit = _ho.get('fit') or []
     ok_('entering Map view fits the view to include the dot (%r)' % (_fit,),
-        [33.9526, -84.5499] in _fit and len(_fit) > 1)
+        [33.9526, -44.5499] in _fit and len(_fit) > 1)
     # --- ...and the map following it -------------------------------------
     #
     # The driver asked for it. At the edges only, at the zoom it is at, and
     # not once a hand is on the map: every pan is tiles down the hotspot.
     _hi = got.get('hereInside') or {}
-    eq('the dot moves with the next beat', _hi.get('dots'), [[_hi.get('lat'), -84.5499]])
+    eq('the dot moves with the next beat', _hi.get('dots'), [[_hi.get('lat'), -44.5499]])
     eq('a dot that stays in the middle of the map does not move the map',
        (_hi.get('pans'), _hi.get('fit'), _hi.get('view')), ([], None, None))
     # Every message the scanner sends goes through showMap, and its
@@ -13113,7 +13114,7 @@ try:
     _hm = got.get('hereMoved') or {}
     eq('a dot that leaves the middle takes the map to it, at the zoom it was at',
        (_hm.get('pans'), _hm.get('zoom'), _hm.get('fit'), _hm.get('view')),
-       ([[_hm.get('lat'), -84.5499, 14]], 14, None, None))
+       ([[_hm.get('lat'), -44.5499, 14]], 14, None, None))
     # Leaflet says zoomstart for the page's own fit on the way in as it does
     # for a hand on the + button. Read as the driver's, it paused the follow
     # before the follow had moved once.
@@ -13130,7 +13131,7 @@ try:
     eq('a fix the gate called stale is drawn where it was, in grey',
        (_hs.get('dots'), _hs.get('grey'),
         [c.get('colour') for c in (_hs.get('circles') or [])]),
-       ([[33.9526, -84.5499]], True, ['#8a8f98']))
+       ([[33.9526, -44.5499]], True, ['#8a8f98']))
     eq('...saying how old', _hs.get('note'), '±28 m · 45 s old')
     # Where the car WAS, half a map's height from the centre: out of the
     # middle, and not a place to take the map.
@@ -13149,11 +13150,11 @@ try:
        (got.get('hereOff') or {}).get('note', 'absent'), None)
     _hl = got.get('hereLate') or {}
     eq('a fix first seen after Map view was entered is drawn',
-       _hl.get('dots'), [[33.9706, -84.5499]])
+       _hl.get('dots'), [[33.9706, -44.5499]])
     _lfit = _hl.get('fit') or []
     ok_('...and the view is not fitted to it: the one fit was the entry\'s '
         '(%r, %r)' % (_lfit, _hl.get('view')),
-        [33.9706, -84.5499] not in _lfit and _hl.get('view') != [33.9706, -84.5499])
+        [33.9706, -44.5499] not in _lfit and _hl.get('view') != [33.9706, -44.5499])
     # A hand on the map. Every message the scanner sends goes through
     # showMap, and it used to re-fit the view to the pins on each one, so a
     # drag lasted until the next beat; the fit, the pan and the view are all
@@ -13449,13 +13450,13 @@ try:
     eq('the Trip Planner a press read is shown stop by stop, in the order the '
        'phone listed them',
        (pl.get('four') or {}).get('lines', [])[:4],
-       ['▸ Pickup by 11:52 · Burger Barn · 310 Mill St, Roswell',
+       ['▸ Pickup by 11:52 · Burger Barn · 310 Mill St, Ruswold',
         '▸ Pickup ×2 by 12:05 · Taco Hut',
-        '▸ Dropoff by 12:31 · Lee M. · 77 Birch Ln NW, Roswell, GA 30075',
+        '▸ Dropoff by 12:31 · Lee M. · 77 Birch Ln NW, Ruswold, GA 90675',
         '▸ Dropoff by 12:48 · Sam R.'])
     eq('a stop read as "oe Burger Barn" — the stop\'s icon as letters — is shown '
        'without the "oe "', ((pl.get('four') or {}).get('lines') or [''])[0],
-       '▸ Pickup by 11:52 · Burger Barn · 310 Mill St, Roswell')
+       '▸ Pickup by 11:52 · Burger Barn · 310 Mill St, Ruswold')
     # The scanner refuses to guess which of two dropoffs is the order in the
     # car's, and the panel says so rather than leaving the driver to work out
     # why the button is still amber — under the stops, and in full on the
@@ -13475,7 +13476,7 @@ try:
     eq('an end read after the planner takes the "not guessed" line away, and leaves '
        'the stops', (_fe.get('lines'), _fe.get('done'), _fe.get('title')),
        ((pl.get('four') or {}).get('lines', [])[:4], True,
-        'Read as: 12 Oak St, Marietta, GA 30060. Press again to read it afresh.'))
+        'Read as: 12 Oak St, Harrowen, GA 90660. Press again to read it afresh.'))
     eq('a list the rig could not see both ends of is said to be why the end was not '
        'guessed', ((pl.get('list') or {}).get('lines', [])[1:],
                    'both ends' in ((pl.get('list') or {}).get('title') or '')),
@@ -13500,7 +13501,7 @@ try:
     eq('a planner with one dropoff shows its stop, and the button goes green off '
        'the dropoff line after it',
        ((pl.get('one') or {}).get('lines'), (pl.get('one') or {}).get('done')),
-       (['▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr, Marietta'], True))
+       (['▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr, Harrowen'], True))
     # Taken in the same turn as the click, so it is the press that did it and
     # not the one-second tick, and with the stops and a green button on the
     # glass first — a press over nothing has nothing to forget.
@@ -13516,7 +13517,7 @@ try:
     eq('a press forgets what the last one read before it asks again, and keeps the '
        'stops the order in the car keeps',
        (_rp.get('shown'), _rp.get('done'), _rp.get('label'), _rp.get('lines')),
-       (True, False, '⌖ reading…', ['▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr, Marietta']))
+       (True, False, '⌖ reading…', ['▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr, Harrowen']))
     eq('...and they stay through the next tick, as a reload would show them',
        (pl.get('repressedLater') or {}).get('shown'), True)
     ok_('the premise: the stops are on the glass when Drop is pressed',
@@ -13525,7 +13526,7 @@ try:
        'at the next tick', (pl.get('atDrop') or {}).get('shown', '<not seen>'), False)
     eq('a panel reloaded mid-delivery shows the stops the server kept on the order',
        (pl.get('reloaded') or {}).get('lines'),
-       ['▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr, Marietta'])
+       ['▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr, Harrowen'])
     _re = pl.get('reloadedEnd') or {}
     eq('...and, with an end on the order, no "not guessed" beside it',
        (len(_re.get('lines') or []), _re.get('done'),

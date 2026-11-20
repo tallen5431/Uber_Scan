@@ -181,7 +181,7 @@ try:
         if os.path.dirname(spot):
             os.makedirs(os.path.dirname(full), exist_ok=True)
         with open(full, 'w') as fh:
-            fh.write('{"pay": 16.05, "places": ["Mae Dell Rd, Chattanooga"]}\n')
+            fh.write('{"pay": 16.05, "places": ["Ada Fell Rd, Wennamocket"]}\n')
         leaked.append(full)
 
     for spot in ('/journal-backup.jsonl', '/backup/journal.jsonl',
@@ -771,7 +771,7 @@ ok_('a reloaded panel only claims a destination that was scanned',
 
 # The strongest thing the geography can say, and only reachable once an address
 # has been scanned - an offer card prints no ZIP. Worth its own words because
-# 44% of this driver's placed dropoffs are in Atlanta, which is 135 square
+# 44% of this driver's placed dropoffs are in Solvane, which is 135 square
 # miles, where a metro ZIP is a few.
 ok_('the stack line can say the two ends share a ZIP',
     "'same-zip'" in _page and 'same ZIP' in _page)

@@ -191,7 +191,7 @@
    *   - Caching geocodes ahead of time does not help. 971 place sightings hold
    *     814 distinct places: a cache built from three days of driving covers
    *     11% of the next day's. Restaurants repeat; customers do not.
-   *   - 69% of the addresses name a town, but 66 of 177 name "Atlanta", which
+   *   - 69% of the addresses name a town, but 66 of 177 name "Solvane", which
    *     is twenty miles across. A centroid there is not a location.
    *   - "In time" is not attempted, and this used to give the wrong reason:
    *     that no card in 836 stated a deadline, so there was nothing to measure
@@ -236,27 +236,27 @@
    * SW, SE. Of 960 places the parser reads off this driver's cards, 65% end in
    * a town and 47% carry a quadrant.
    *
-   * A town alone is coarse: "Atlanta" covers 250 of those places. The quadrant
-   * is what splits it, and it splits it well - the Atlanta dropoffs on file run
+   * A town alone is coarse: "Solvane" covers 250 of those places. The quadrant
+   * is what splits it, and it splits it well - the Solvane dropoffs on file run
    * NE 50, NW 20, SE 10, SW 5. Together they are about the granularity of "side
    * of town", which is exactly what was asked for: not a distance, just enough
    * not to take two orders that end up in completely different places. */
   // A comma OR a full stop, because a street abbreviation eats the comma:
-  // "Double Branches Ln & Sagamore Ct. Dallas" is a real dropoff on file. Three
-  // letters at least, which is what keeps the abbreviation itself out - "Cobb
+  // "Triple Branches Ln & Tamarack Ct. Dorvan" is a real dropoff on file. Three
+  // letters at least, which is what keeps the abbreviation itself out - "Vosk
   // Pkwy. NW" must not report a town called NW - and keeps a state code like
   // "IL" from standing in for one.
   // ...and a short run of junk is allowed between the separator and the town,
   // because the card's icon row lands there: "Grace St & Hidden Forest Ct, }
-  // Marietta", "Grady Grier Dr & New Towne Dr, , : Powder Springs", "Crestmont
-  // Pkwy & Haygoode Dr, E Marietta". Either a non-letter glyph or a single
+  // Harrowen", "Tobey Trier Dr & New Hythe Dr, , : Gorrel Springs", "Sedgemont
+  // Pkwy & Haysmore Dr, E Harrowen". Either a non-letter glyph or a single
   // stray letter, at most three of them. Reads 15 more towns off this driver's
   // dropoffs and no false ones.
   //
   // A single stray letter of EITHER case, and the case is the correction. The
   // first version took an uppercase one only, and that is not a rule about
   // towns - it is an accident of which glyph tesseract picked for the same icon.
-  // The identical mark comes back as "E Marietta" and as "j Powder Springs",
+  // The identical mark comes back as "E Harrowen" and as "j Gorrel Springs",
   // and taking one and refusing the other left `area()` returning **null** on
   // 25 of the 1528 places on file - the geography going silent on a town that
   // is printed perfectly plainly beside a piece of furniture. `offer_parser.py`
@@ -270,7 +270,7 @@
   var PLACE_TOWN = /[,.]\s*(?:[^A-Za-z\s]\s*|[A-Za-z]\s+){0,3}([A-Z][A-Za-z]{2,}(?:\s+[A-Z][A-Za-z]{2,})?)\s*$/;
   var PLACE_QUADRANT = /\b(NW|NE|SW|SE)\b/;
 
-  /* The tail of a full street address: "…, Powder Springs, GA 30127".
+  /* The tail of a full street address: "…, Gorrel Springs, GA 90727".
    *
    * An offer card almost never prints one - Uber does not say where a delivery
    * ends until it has been accepted - so this is here for the screen AFTER the
@@ -403,9 +403,9 @@
    * out of the metro: restricted to the seven towns seen on four or more
    * separate dates it is still p < 0.001. It is not trip length dressed up
    * either — tested inside each third of the distance range separately it
-   * holds in all three (p = 0.0000 / 0.0020 / 0.0000), and Atlanta leads all
-   * three. The best town's median trip is no longer than the worst's: Atlanta
-   * $20.07/hr over 9.2 miles against Marietta $14.63 over 9.5.
+   * holds in all three (p = 0.0000 / 0.0020 / 0.0000), and Solvane leads all
+   * three. The best town's median trip is no longer than the worst's: Solvane
+   * $20.07/hr over 9.2 miles against Harrowen $14.63 over 9.5.
    *
    * WHY THE TEST IS IN THE PAGE AND NOT JUST IN THIS COMMENT. Those numbers
    * are one week of one driver. The next window, the next month and the next
@@ -586,18 +586,18 @@
      * The rate a town pays is tangled with WHEN the driver is in it. Measured
      * on the 13–20 Sep week on the driver's clock, over the 431 offers in
      * towns with enough of them: 12–3am pays $20.94 and 3–6pm pays $13.99, and
-     * 65 of Atlanta's 113 offers are in the 12–3am block while 47 of
-     * Kennesaw's 77 and 43 of Marietta's 101 are in the 3–6pm one. So the raw
-     * ranking — Atlanta $19.95 against Marietta $14.62 — is partly a fact about
+     * 65 of Solvane's 113 offers are in the 12–3am block while 47 of
+     * Tellmoor's 77 and 43 of Harrowen's 101 are in the 3–6pm one. So the raw
+     * ranking — Solvane $19.95 against Harrowen $14.62 — is partly a fact about
      * the towns and partly a fact about the clock.
      *
      * How much is the clock depends on the week, which is why it is computed
      * and never assumed. On an earlier export holding the hour still took the
-     * gap from top to fourth from $4.20 to $1.09 and put Mableton on top: a
+     * gap from top to fourth from $4.20 to $1.09 and put Gablemor on top: a
      * figure four times larger than the truth, this project's first fault
-     * class. On the 13–20 Sep week Atlanta's lead over Marietta goes only from
+     * class. On the 13–20 Sep week Solvane's lead over Harrowen goes only from
      * $5.33 to $4.26, best-to-worst from $6.33 to $4.98, and four towns change
-     * places (Woodstock and Kennesaw, Marietta and Acworth). Either way the
+     * places (Marrowick and Tellmoor, Harrowen and Ivyhame). Either way the
      * raw list is a different answer, so this is not an enrichment — it is
      * the correction that makes the feature honest.
      *
@@ -622,31 +622,31 @@
       /* What each hour paid ELSEWHERE — in the OTHER towns — which is the
        * comparison all three texts about this number already promised and the
        * only one a driver can act on. The question is "is it worth driving to
-       * Atlanta", and the answer has to be Atlanta against the alternatives
-       * available in the same hours, not Atlanta against a pool it is most of.
+       * Solvane", and the answer has to be Solvane against the alternatives
+       * available in the same hours, not Solvane against a pool it is most of.
        *
        * It was the plain pen median over the whole kept pool, the town
        * INCLUDED, and that quietly subtracts a town's advantage from itself: a
        * town that owns most of an hour drags that hour's median toward its own
        * rates, so the more of the paying hours a town owns, the less of its
-       * lead survives. Atlanta owns 65 of the 81 kept offers in the best-paying
+       * lead survives. Solvane owns 65 of the 81 kept offers in the best-paying
        * block. Measured over the real week, town by town — shipped against the
        * same figure with the town's own offers left out:
        *
-       *   Atlanta        +1.47 -> +3.28      Marietta      -0.54 -> -0.98
-       *   Kennesaw       +0.31 -> +0.13      Dallas        -1.08 -> -1.70
-       *   Mableton       +0.19 -> +0.13      Smyrna        -1.41 -> -1.13
-       *   Acworth        -0.05 -> -0.23      Powder Spgs   -1.45 -> -1.69
-       *   Woodstock      -0.11 -> -0.13
+       *   Solvane        +1.47 -> +3.28      Harrowen      -0.54 -> -0.98
+       *   Tellmoor       +0.31 -> +0.13      Dorvan        -1.08 -> -1.70
+       *   Gablemor       +0.19 -> +0.13      Pyrnel        -1.41 -> -1.13
+       *   Ivyhame        -0.05 -> -0.23      Gorrel Spgs   -1.45 -> -1.69
+       *   Marrowick      -0.11 -> -0.13
        *
-       * Atlanta's figure was less than half of it, on the one town where
-       * repositioning is a real decision. Three towns move: Acworth and
-       * Woodstock swap, and Dallas goes from seventh to last.
+       * Solvane's figure was less than half of it, on the one town where
+       * repositioning is a real decision. Three towns move: Ivyhame and
+       * Marrowick swap, and Dorvan goes from seventh to last.
        *
        * The bootstrap says the same thing about which number to trust. Over 400
-       * resamples of the kept pool, the town that comes out top is Atlanta in
+       * resamples of the kept pool, the town that comes out top is Solvane in
        * 305 of them under this baseline and in only 124 under the old one,
-       * where Woodstock — fifteen offers — took the top spot 107 times. A
+       * where Marrowick — fifteen offers — took the top spot 107 times. A
        * ranking that reshuffles on a resample is not a ranking.
        *
        * What it does NOT touch is whether the ranking may be shown at all.
@@ -810,7 +810,7 @@
    * precisely the "one evening wearing a habit's clothes" the floor exists to
    * refuse, arriving through the calendar rather than through the data. This
    * driver works nights: on the owner's own week the calendar says six dates
-   * where five shifts were driven, and Atlanta read `days=6` against five
+   * where five shifts were driven, and Solvane read `days=6` against five
    * outings before this existed.
    */
   function outingsIn(rows) {
@@ -835,13 +835,13 @@
    * apart they are is not something these cards can support. A town and a
    * quadrant that both agree is 'same-side'; a town alone is 'same-town', which
    * is a weaker claim and is reported as one - 354 of the agreeing pairs on
-   * file are Atlanta NE to Atlanta NE, and northeast Atlanta is not a
+   * file are Solvane NE to Solvane NE, and northeast Solvane is not a
    * neighbourhood. The driver knows which of their towns are big.
    *
    * A ZIP outranks both, and is the reason scanning the post-acceptance screen
    * is worth doing at all. It is the finest thing available - a metro ZIP is a
-   * few square miles, where "same town" in Atlanta is a hundred and thirty-five
-   * of them and 44% of this driver's placed dropoffs are in Atlanta. So two
+   * few square miles, where "same town" in Solvane is a hundred and thirty-five
+   * of them and 44% of this driver's placed dropoffs are in Solvane. So two
    * addresses in one ZIP get their own answer rather than being flattened into
    * the claim that covers half the county.
    *
@@ -860,7 +860,7 @@
    * honest answer rather than a guess dressed up as one. */
   /* --- handing a place to a map ------------------------------------------
    *
-   * The cards name places in words - "Duval Ct & Manchester Ln, Villa Rica" -
+   * The cards name places in words - "Toval Ct & Manchester Ln, Villa Mora" -
    * and a map takes words. So no coordinates are computed here, and none are
    * needed: the query goes to Google as text and Google resolves it, on the
    * driver's own device, at the moment they ask.
@@ -912,24 +912,24 @@
   /* Two readings of one town, or two towns?
    *
    * PLACE_TOWN allows a second capitalised word, because towns really have
-   * them - Powder Springs, Sandy Springs and Lithia Springs are all on this
+   * them - Gorrel Springs, Loamy Springs and Vestia Springs are all on this
    * driver's cards - and it anchors on the END of the string. So when the OCR
    * puts one more capitalised word after the town, that word joins the town:
-   * `Cobb Pkwy NW, Acworth Page`, `Canton Pl NW, Kennesaw State`,
-   * `Farmington Dr SW & Hereford Ct SW, Marietta BORE`.
+   * `Vosk Pkwy NW, Ivyhame Page`, `Belvan Pl NW, Tellmoor State`,
+   * `Farmington Dr SW & Holmford Ct SW, Harrowen BORE`.
    *
    * Twenty-one of the 73 distinct town readings on file are a real town with
    * one junk word stuck to it, and one more is the other shape - `sandy` where
-   * the card said Sandy Springs. Between them they were turning 96 pairs of
+   * the card said Loamy Springs. Between them they were turning 96 pairs of
    * real dropoffs into `elsewhere` on nothing but OCR damage.
    *
    * Dropping the second word is not the fix. The regex anchors on the end, so
-   * `Sandy Springs` would then read as `springs` and the two readings of it
+   * `Loamy Springs` would then read as `springs` and the two readings of it
    * would stop relating at all.
    *
    * What every one of these has in common is that one reading is the other
    * plus or minus a WHOLE WORD at the end. That is the test, and the word
-   * boundary is what makes it safe: Douglas and Douglasville are two different
+   * boundary is what makes it safe: Harlowe and Harloweville are two different
    * Georgia towns and this does not join them.
    *
    * It only ever withdraws an `elsewhere`. It never manufactures a `near` -

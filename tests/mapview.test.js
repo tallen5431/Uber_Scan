@@ -61,8 +61,8 @@ eq('one value four states away does not move it',
 
 /* ---- reading a position off a row --------------------------------------- */
 eq('a row with both numbers and the gate\'s yes carries a fix',
-   JSON.stringify(MV.fixOf({ lat: 33.9, lon: -84.5, gpsOk: true })),
-   JSON.stringify({ lat: 33.9, lon: -84.5 }));
+   JSON.stringify(MV.fixOf({ lat: 33.9, lon: -44.5, gpsOk: true })),
+   JSON.stringify({ lat: 33.9, lon: -44.5 }));
 eq('a row with neither does not', MV.fixOf({ pay: 12, gpsOk: true }), null);
 eq('...nor one with only a latitude', MV.fixOf({ lat: 33.9, gpsOk: true }), null);
 // NaN is the one that matters. `typeof NaN === 'number'`, so a check that only
@@ -70,32 +70,32 @@ eq('...nor one with only a latitude', MV.fixOf({ lat: 33.9, gpsOk: true }), null
 // median it lands in meaningless, which is every box and the shift's centre.
 eq('a NaN is not a position', MV.fixOf({ lat: 33.9, lon: NaN, gpsOk: true }), null);
 eq('...and neither is an infinity',
-   MV.fixOf({ lat: Infinity, lon: -84.5, gpsOk: true }), null);
+   MV.fixOf({ lat: Infinity, lon: -44.5, gpsOk: true }), null);
 // The gate is rpi/gps.py's usable(), and its answer is on the row. Read here,
 // never worked out again: a mode-3 fix gpsd itself put at 129 m is the same
 // two numbers as a clear sky's, and only `gpsOk` tells them apart.
 eq('a fix the GPS gate refused is no position here',
-   MV.fixOf({ lat: 33.9526, lon: -84.5499, gpsErr: 129.2, gpsMode: 3,
+   MV.fixOf({ lat: 33.9526, lon: -44.5499, gpsErr: 129.2, gpsMode: 3,
               gpsOk: false, gpsWhy: 'rough' }), null);
 eq('...nor one nobody judged — a row from before the gate, or not from the rig',
-   MV.fixOf({ lat: 33.9526, lon: -84.5499 }), null);
+   MV.fixOf({ lat: 33.9526, lon: -44.5499 }), null);
 eq('...and the refusal says which, so a count can say it',
-   MV.fixRefused({ lat: 33.9526, lon: -84.5499, gpsOk: false, gpsWhy: 'rough' }),
+   MV.fixRefused({ lat: 33.9526, lon: -44.5499, gpsOk: false, gpsWhy: 'rough' }),
    'rough');
 eq('...or that nobody judged it',
-   MV.fixRefused({ lat: 33.9526, lon: -84.5499 }), 'unjudged');
+   MV.fixRefused({ lat: 33.9526, lon: -44.5499 }), 'unjudged');
 eq('a usable fix is not a refusal',
-   MV.fixRefused({ lat: 33.9526, lon: -84.5499, gpsOk: true }), null);
+   MV.fixRefused({ lat: 33.9526, lon: -44.5499, gpsOk: true }), null);
 eq('...and a row with no coordinate is not one either: it did not know',
    MV.fixRefused({ pay: 12 }), null);
 
 /* ---- you are here --------------------------------------------------------
  *
- * The beat's newest fix, as both maps draw it. Marietta Square, a public
+ * The beat's newest fix, as both maps draw it. Harrowen Square, a public
  * place; 27.8 m is the owner's receiver indoors, 129.2 m a four-satellite fix
  * real gpsd made mode 3. `freshFor` is how long gps.py said the fix stayed
  * inside its staleness rule when the beat left. */
-var BEAT = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 27.8,
+var BEAT = { lat: 33.9526, lon: -44.5499, gpsAge: 0.6, gpsErr: 27.8,
              gpsMode: 3, gpsOk: true, gpsWhy: null, freshFor: 19.4 };
 var dot = MV.hereDot(BEAT, 1400);
 eq('a usable fix is a dot where it is', dot && dot.lat, 33.9526);
@@ -109,25 +109,25 @@ eq('a dot whose beat stopped coming greys once its time is up',
    silent && silent.grey, true);
 eq('...and its age keeps counting, not frozen at the beat', silent && silent.label,
    '±28 m · 26 s old');
-var stale = MV.hereDot({ lat: 33.9526, lon: -84.5499, gpsAge: 45.0, gpsErr: 12.0,
+var stale = MV.hereDot({ lat: 33.9526, lon: -44.5499, gpsAge: 45.0, gpsErr: 12.0,
                          gpsMode: 3, gpsOk: false, gpsWhy: 'stale', freshFor: 0 }, 500);
 eq('a fix the gate called stale is drawn grey, where it was',
    stale && [stale.lat, stale.grey, stale.label].join('|'), '33.9526|true|±12 m · 46 s old');
-var rough = MV.hereDot({ lat: 33.9526, lon: -84.5499, gpsAge: 0.5, gpsErr: 129.2,
+var rough = MV.hereDot({ lat: 33.9526, lon: -44.5499, gpsAge: 0.5, gpsErr: 129.2,
                          gpsMode: 3, gpsOk: false, gpsWhy: 'rough' }, 0);
 eq('a rough fix is not drawn, and says why with the figure',
    rough && [rough.lat, rough.line].join('|'), '|GPS too rough here (±129 m)');
 eq('a fix with no error figure says so rather than vanishing',
-   (MV.hereDot({ lat: 33.9526, lon: -84.5499, gpsOk: false, gpsWhy: 'unrated' }, 0)
+   (MV.hereDot({ lat: 33.9526, lon: -44.5499, gpsOk: false, gpsWhy: 'unrated' }, 0)
     || {}).line, MV.GPS_REFUSED.unrated);
-var stuck = MV.hereDot({ lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 16.8,
+var stuck = MV.hereDot({ lat: 33.9526, lon: -44.5499, gpsAge: 0.6, gpsErr: 16.8,
                          gpsMode: 3, gpsOk: false, gpsWhy: 'frozen' }, 0);
 eq('a frozen fix is not drawn as where the car is, and says it is stuck',
    stuck && [stuck.lat, stuck.line].join('|'), '|GPS stuck on one spot');
 eq('no fix at all is nothing drawn and nothing said', MV.hereDot(null, 0), null);
 eq('...and a beat that says no fix is the same', MV.hereDot({ lat: null }, 0), null);
 eq('a fix with no time left on it is grey from the start',
-   (MV.hereDot({ lat: 33.9526, lon: -84.5499, gpsAge: 0.5, gpsErr: 12, gpsMode: 3,
+   (MV.hereDot({ lat: 33.9526, lon: -44.5499, gpsAge: 0.5, gpsErr: 12, gpsMode: 3,
                  gpsOk: true }, 10) || {}).grey, true);
 eq('minutes past the first sixty seconds',
    (MV.hereDot(BEAT, 185000) || {}).label, '±28 m · 3 min old');
@@ -142,26 +142,26 @@ ok_('a degree of latitude is about 69 miles',
 ok_('a degree of longitude at 33°N is about 58',
     Math.abs(MV.crowMiles({ lat: 33, lon: -84 }, { lat: 33, lon: -83 }) - 57.9) < 1);
 eq('a point is no distance from itself',
-   MV.crowMiles({ lat: 33.9, lon: -84.5 }, { lat: 33.9, lon: -84.5 }), 0);
+   MV.crowMiles({ lat: 33.9, lon: -44.5 }, { lat: 33.9, lon: -44.5 }), 0);
 
 /* ---- how far out of the way a stop is -------------------------------------
  *
  * The driver's own question about a second offer: is the pickup on the way to
  * where I am already going, or behind me? Three points, and the answer is what
  * the stop adds to the trip. */
-var HERE = { lat: 33.90, lon: -84.50 };
-var AHEAD = { lat: 34.00, lon: -84.50 };          // due north, about 7 miles
+var HERE = { lat: 33.90, lon: -44.50 };
+var AHEAD = { lat: 34.00, lon: -44.50 };          // due north, about 7 miles
 ok_('a stop on the line adds nothing',
-    Math.abs(MV.detour(HERE, { lat: 33.95, lon: -84.50 }, AHEAD)) < 0.01);
+    Math.abs(MV.detour(HERE, { lat: 33.95, lon: -44.50 }, AHEAD)) < 0.01);
 // Half way there and half a degree east: out and back again.
 ok_('a stop off to the side adds the going and the coming back',
-    MV.detour(HERE, { lat: 33.95, lon: -84.20 }, AHEAD) > 20);
+    MV.detour(HERE, { lat: 33.95, lon: -44.20 }, AHEAD) > 20);
 // The case the driver is really asking about. A pickup BEHIND you costs twice
 // the distance back to it, and on a map alone that is easy to misjudge: the
 // pin looks close, and it is close — in the wrong direction.
-var BACK = MV.detour(HERE, { lat: 33.80, lon: -84.50 }, AHEAD);
+var BACK = MV.detour(HERE, { lat: 33.80, lon: -44.50 }, AHEAD);
 ok_('a stop behind you costs twice the distance back to it (%s)',
-    Math.abs(BACK - 2 * MV.crowMiles(HERE, { lat: 33.80, lon: -84.50 })) < 0.01);
+    Math.abs(BACK - 2 * MV.crowMiles(HERE, { lat: 33.80, lon: -44.50 })) < 0.01);
 // Two points is not a smaller detour. It is no answer at all, and computed
 // anyway it comes out zero — which reads as "right on your way", which is the
 // most expensive thing this could get wrong.
@@ -180,9 +180,9 @@ function runMi(pts) {
   for (var k = 0; k + 1 < pts.length; k++) m += MV.crowMiles(pts[k], pts[k + 1]);
   return m;
 }
-var REST_N = { lat: 33.97, lon: -84.50 };          // the restaurant, ahead
-var NEW_NE = { lat: 33.985, lon: -84.47 };         // the new pickup, past it
-var NEW_S = { lat: 33.89, lon: -84.53 };           // ...or behind the car
+var REST_N = { lat: 33.97, lon: -44.50 };          // the restaurant, ahead
+var NEW_NE = { lat: 33.985, lon: -44.47 };         // the new pickup, past it
+var NEW_S = { lat: 33.89, lon: -44.53 };           // ...or behind the car
 eq('with no restaurant ahead, the figure through the held run is MV.detour\'s exactly',
    MV.detourThrough(HERE, NEW_NE, [], AHEAD).miles, MV.detour(HERE, NEW_NE, AHEAD));
 var thruAfter = MV.detourThrough(HERE, NEW_NE, [REST_N], AHEAD);
@@ -209,37 +209,37 @@ eq('...and a restaurant with no point is no figure, not a run without it',
    ways round, with a figure only where the two ways give one answer
    (MV.detourOrders, the street-stretch rule). Invented places. */
 var PLAN2 = [
-  { kind: 'pickup', name: 'Larkspur Tacos', street: '310 Mill St', city: 'Roswell',
-    line: '310 Mill St, Roswell, GA 30075', of: 'b@2' },
-  { kind: 'dropoff', name: 'Lee M.', street: '77 Birch Ln', city: 'Roswell',
-    line: '77 Birch Ln, Roswell' },
-  { kind: 'pickup', name: 'Wren Street Noodles', street: '12 Wren St', city: 'Marietta',
-    line: '12 Wren St, Marietta, GA 30060', of: 'a@1' },
-  { kind: 'dropoff', name: 'Pat Q.', street: '4821 Kestrel Dr', city: 'Marietta',
-    line: '4821 Kestrel Dr, Marietta' }];
-var ORD2 = [{ n: 1, holdId: 'a@1', end: '4821 Kestrel Dr, Marietta, GA 30060', planAt: 3 },
-            { n: 2, holdId: 'b@2', end: '77 Birch Ln, Roswell, GA 30075', planAt: 1 }];
+  { kind: 'pickup', name: 'Larkspur Tacos', street: '310 Mill St', city: 'Ruswold',
+    line: '310 Mill St, Ruswold, GA 90675', of: 'b@2' },
+  { kind: 'dropoff', name: 'Lee M.', street: '77 Birch Ln', city: 'Ruswold',
+    line: '77 Birch Ln, Ruswold' },
+  { kind: 'pickup', name: 'Wren Street Noodles', street: '12 Wren St', city: 'Harrowen',
+    line: '12 Wren St, Harrowen, GA 90660', of: 'a@1' },
+  { kind: 'dropoff', name: 'Pat Q.', street: '4821 Kestrel Dr', city: 'Harrowen',
+    line: '4821 Kestrel Dr, Harrowen' }];
+var ORD2 = [{ n: 1, holdId: 'a@1', end: '4821 Kestrel Dr, Harrowen, GA 90660', planAt: 3 },
+            { n: 2, holdId: 'b@2', end: '77 Birch Ln, Ruswold, GA 90675', planAt: 1 }];
 function runSaid(r) { return r.map(function (e) { return e.n ? 'D' + e.n : e.q.split(',')[0]; }).join(' > '); }
 /* Where the held order's run starts with no card's fix (MV.routeFrom): the
    live fix, kept until the car is ROUTE_MOVE_M from it or the leg changes,
    so the road is asked once per leg and per ~300 m, never per GPS fix. */
-var RF0 = { lat: 33.9526, lon: -84.5499 };
+var RF0 = { lat: 33.9526, lon: -44.5499 };
 var rf = MV.routeFrom(null, RF0, 'end|pick');
 eq('[road run] the run starts at the live fix, for its leg',
    JSON.stringify(rf), JSON.stringify({ at: RF0, leg: 'end|pick' }));
 eq('[road run] ...and a fix 100 m on keeps that start, the same object: no new '
-   + 'question', MV.routeFrom(rf, { lat: 33.9535, lon: -84.5499 }, 'end|pick'), rf);
-var rfFar = MV.routeFrom(rf, { lat: 33.9556, lon: -84.5499 }, 'end|pick');
+   + 'question', MV.routeFrom(rf, { lat: 33.9535, lon: -44.5499 }, 'end|pick'), rf);
+var rfFar = MV.routeFrom(rf, { lat: 33.9556, lon: -44.5499 }, 'end|pick');
 ok_('[road run] ...a fix ~330 m on starts it again from there',
     rfFar !== rf && rfFar.at.lat === 33.9556);
-var rfLeg = MV.routeFrom(rf, { lat: 33.9527, lon: -84.5499 }, 'end');
+var rfLeg = MV.routeFrom(rf, { lat: 33.9527, lon: -44.5499 }, 'end');
 ok_('[road run] ...and so does a new leg (a pickup visited), however near',
     rfLeg !== rf && rfLeg.leg === 'end' && rfLeg.at.lat === 33.9527);
 eq('[road run] ...the move is 300 m, chosen', MV.ROUTE_MOVE_M, 300);
 eq('[road run] ...and with no fix there is no start: the straight run, as before',
    MV.routeFrom(rf, null, 'end|pick'), null);
 eq('[road run] ...nor with a fix missing a number (no lat, a NaN lon)',
-   JSON.stringify([MV.routeFrom(rf, { lon: -84.5499 }, 'end|pick'),
+   JSON.stringify([MV.routeFrom(rf, { lon: -44.5499 }, 'end|pick'),
                    MV.routeFrom(null, { lat: 33.9526, lon: NaN }, 'end|pick')]),
    '[null,null]');
 
@@ -247,7 +247,7 @@ var hr = MV.heldRuns(PLAN2, ORD2, []);
 eq('one planner listing both orders sets the run order',
    JSON.stringify([hr.known, hr.runs.map(runSaid)]),
    JSON.stringify([true, ['310 Mill St > D2 > 12 Wren St > D1']]));
-var hrDone = MV.heldRuns(PLAN2, ORD2, ['310 Mill St, Roswell, GA 30075']);
+var hrDone = MV.heldRuns(PLAN2, ORD2, ['310 Mill St, Ruswold, GA 90675']);
 eq('...less a pickup the car has visited',
    hrDone.runs.map(runSaid).join(' | '), 'D2 > 12 Wren St > D1');
 // No planner that places both ends — two apps, or the planner of one order
@@ -272,12 +272,12 @@ eq('...and an end nobody named is no run at all',
    left ① out): each end its pin or its area, faded, in the run's order;
    a place with no point at all left out and said. Drawing only: the figure
    (detourOrders over pins) is not handed these points. Invented places. */
-var AREA1 = { lat: 34.01, lon: -84.52, approx: true, n: 4, miles: 0.24 },
-    CORNER2 = { lat: 34.03, lon: -84.36 }, MILL = { lat: 34.02, lon: -84.36 },
-    WREN = { lat: 33.96, lon: -84.55 };
+var AREA1 = { lat: 34.01, lon: -44.52, approx: true, n: 4, miles: 0.24 },
+    CORNER2 = { lat: 34.03, lon: -44.36 }, MILL = { lat: 34.02, lon: -44.36 },
+    WREN = { lat: 33.96, lon: -44.55 };
 var atAll = {};
 atAll[ORD2[0].end] = AREA1; atAll[ORD2[1].end] = CORNER2;
-atAll['310 Mill St, Roswell, GA 30075'] = MILL; atAll['12 Wren St, Marietta, GA 30060'] = WREN;
+atAll['310 Mill St, Ruswold, GA 90675'] = MILL; atAll['12 Wren St, Harrowen, GA 90660'] = WREN;
 var drawnKnown = MV.heldRunsDrawn(hr, atAll);
 eq('[two drawn] the planner\'s order through both ends, ①\'s area in its place',
    JSON.stringify([drawnKnown.lines, drawnKnown.skip]),
@@ -298,24 +298,24 @@ eq('[two drawn] ...and no runs, nothing', MV.heldRunsDrawn(null, atAll), null);
 eq('[two drawn] a held DoorDash order\'s map label is its guessed end until an end is read',
    JSON.stringify([MV.guessOf({ app: 'doordash', dropoff: null,
                                 dropoffGuess: { line: '61 Saddle Cv', from: MV.GUESS_FROM } }),
-                   MV.guessOf({ app: 'doordash', dropoff: 'Fabletown, GA 30199',
+                   MV.guessOf({ app: 'doordash', dropoff: 'Fabletown, GA 90799',
                                 dropoffGuess: { line: '61 Saddle Cv', from: MV.GUESS_FROM } }),
                    MV.guessOf({ app: 'doordash', dropoff: null, dropoffGuess: null })]),
    JSON.stringify(['61 Saddle Cv', null, null]));
 eq('[two drawn] ...the figure is still refused with an approximate end (no pin in `found`)',
-   MV.detourOrders({ lat: 33.95, lon: -84.55 }, { lat: 34.0, lon: -84.56 },
+   MV.detourOrders({ lat: 33.95, lon: -44.55 }, { lat: 34.0, lon: -44.56 },
                    [[null, CORNER2]]), null);
 
-// The car at Marietta Square; ① ends 7 mi north, ② 9 mi east, and the new
+// The car at Harrowen Square; ① ends 7 mi north, ② 9 mi east, and the new
 // pickup a few blocks off the road north. North first, it is on the way
 // (0.09 mi); east first it is 2.27 mi out of the way: two answers.
-var SQ2 = { lat: 33.95, lon: -84.55 }, N2 = { lat: 34.05, lon: -84.55 },
-    E2 = { lat: 33.95, lon: -84.40 }, P2 = { lat: 34.0, lon: -84.56 };
+var SQ2 = { lat: 33.95, lon: -44.55 }, N2 = { lat: 34.05, lon: -44.55 },
+    E2 = { lat: 33.95, lon: -44.40 }, P2 = { lat: 34.0, lon: -44.56 };
 var both = MV.detourOrders(SQ2, P2, [[N2, E2], [E2, N2]]);
 eq('cross-app orderings that disagree give no figure',
    JSON.stringify([both.stated, both.lo.toFixed(2), both.hi.toFixed(2)]),
    JSON.stringify([false, '0.09', '2.27']));
-var atCar = MV.detourOrders(SQ2, { lat: 33.9505, lon: -84.5505 }, [[N2, E2], [E2, N2]]);
+var atCar = MV.detourOrders(SQ2, { lat: 33.9505, lon: -44.5505 }, [[N2, E2], [E2, N2]]);
 eq('...and orderings that agree, here both on the way, give one',
    [atCar.stated, atCar.hi < MV.ON_WAY_MI].join(','), 'true,true');
 eq('...the order known is one run, its figure detourThrough\'s through both ends',
@@ -324,17 +324,17 @@ eq('...and a point missing is no figure', MV.detourOrders(SQ2, P2, [[N2, null]])
 
 /* ---- the card's own disc --------------------------------------------------
  *
- * The design study's wrong-branch case, in invented points round Marietta
+ * The design study's wrong-branch case, in invented points round Harrowen
  * Square: a 9.4 mi card, a fix the gate passed, and the map's McDonald's
  * 21.8 mi north of it — the right branch was 2.1 mi away and the map never
  * returned it. With the order in the car ending 20.2 mi east, the panel's old
  * arithmetic printed "+31.3 mi out of your way" off that pin. A straight line
  * cannot beat the road, so a pin 21.8 mi from where the card came up cannot
  * be the pickup of a job the card says is 9.4 mi in all. */
-var SQUARE = { lat: 33.9526, lon: -84.5499 };
-var WRONG_BRANCH = { lat: 34.2683, lon: -84.5499 };   // 21.8 mi north
-var RIGHT_BRANCH = { lat: 33.9830, lon: -84.5499 };   // 2.1 mi north
-var HELD_END = { lat: 33.9526, lon: -84.1974 };       // 20.2 mi east
+var SQUARE = { lat: 33.9526, lon: -44.5499 };
+var WRONG_BRANCH = { lat: 34.2683, lon: -44.5499 };   // 21.8 mi north
+var RIGHT_BRANCH = { lat: 33.9830, lon: -44.5499 };   // 2.1 mi north
+var HELD_END = { lat: 33.9526, lon: -44.1974 };       // 20.2 mi east
 function card(extra) {
   return Object.assign({ lat: SQUARE.lat, lon: SQUARE.lon, gpsAge: 0.6,
                          gpsErr: 27.8, gpsMode: 3, gpsOk: true, gpsWhy: null,
@@ -420,9 +420,9 @@ eq('a coordinate nobody judged is not a fix either',
 
 // The order in the car, checked against its OWN card the same way.
 eq('the held order\'s end is checked against its own card',
-   MV.againstCard(card({ miles: 9.4 }), SQUARE, HELD_END, 'Powder Springs Rd',
+   MV.againstCard(card({ miles: 9.4 }), SQUARE, HELD_END, 'Gorrel Springs Rd',
                   'held'),
-   "wrong pin for Powder Springs Rd — 20.2 mi from your order's card, past "
+   "wrong pin for Gorrel Springs Rd — 20.2 mi from your order's card, past "
    + 'its 9.4 mi');
 eq('...and passes when its card allows it',
    MV.againstCard(card({ miles: 22.0 }), SQUARE, HELD_END, 'X', 'held'), null);
@@ -483,7 +483,7 @@ eq('the wrong branch is refused with the figures the line states',
  * top is the HIGHER latitude. Getting that order wrong does not fail: it
  * sends a box that is inside out, and every lookup inside it comes back
  * empty, which reads exactly like a week of bad OCR. */
-var box = MV.boxAround({ lat: 33.94, lon: -84.58 }).split(',').map(Number);
+var box = MV.boxAround({ lat: 33.94, lon: -44.58 }).split(',').map(Number);
 ok_('the box is longitude first, and the left is west of the right',
     box[0] < box[2]);
 ok_('...and the top is north of the bottom', box[1] > box[3]);
@@ -511,9 +511,9 @@ eq('no anchor, no box', MV.boxAround(null), null);
  * Snapped, an anchor moving within a cell asks the same question. These
  * three points are within a few hundred feet of each other, which is the
  * spread one more card of the same shop actually produces. */
-var NEARBY = [{ lat: 34.0300, lon: -84.6000 },
-              { lat: 34.0330, lon: -84.6012 },
-              { lat: 34.0290, lon: -84.5980 }];
+var NEARBY = [{ lat: 34.0300, lon: -44.6000 },
+              { lat: 34.0330, lon: -44.6012 },
+              { lat: 34.0290, lon: -44.5980 }];
 var keys = NEARBY.map(function (at) { return MV.boxAround(at); });
 eq('an anchor that drifts a few hundred feet asks the same question',
    keys.filter(function (k) { return k !== keys[0]; }).length, 0);
@@ -521,7 +521,7 @@ eq('an anchor that drifts a few hundred feet asks the same question',
 // metro is still a different question, or the box has stopped meaning
 // anything.
 no_('...while somewhere genuinely else is still a different one',
-    MV.boxAround({ lat: 33.7490, lon: -84.3880 }) === keys[0]);
+    MV.boxAround({ lat: 33.7490, lon: -44.3880 }) === keys[0]);
 
 /* What the padding is for. Snapping moves the centre by up to half a step,
  * so without padding the snapped box would sit off to one side of the box
@@ -529,7 +529,7 @@ no_('...while somewhere genuinely else is still a different one',
  * a narrower search that quietly misses the long deliveries, which is the
  * one direction BOX_MILES exists to prevent. The box must therefore
  * CONTAIN every point the true box would have. */
-var worst = { lat: 34.0000 + MV.ANCHOR_STEP / 2, lon: -84.5000 + MV.ANCHOR_STEP / 2 };
+var worst = { lat: 34.0000 + MV.ANCHOR_STEP / 2, lon: -44.5000 + MV.ANCHOR_STEP / 2 };
 var wb = MV.boxAround(worst).split(',').map(Number);
 var reach = [[MV.BOX_MILES / 69, 0], [-MV.BOX_MILES / 69, 0],
              [0, MV.BOX_MILES / (69 * Math.cos(worst.lat * Math.PI / 180))],
@@ -547,20 +547,20 @@ ok_('a box near the pole stays a box', isFinite(polar[0]) && polar[2] - polar[0]
 
 /* ---- which place gets searched near where the car actually was ----------- */
 var ROWS = [
-  { pickup: 'Chipotle', dropoff: 'Duval Ct', lat: 33.90, lon: -84.50, gpsOk: true },
-  { pickup: 'Chipotle', dropoff: 'Manchester Ln', lat: 33.92, lon: -84.52, gpsOk: true },
+  { pickup: 'Chipotle', dropoff: 'Toval Ct', lat: 33.90, lon: -44.50, gpsOk: true },
+  { pickup: 'Chipotle', dropoff: 'Manchester Ln', lat: 33.92, lon: -44.52, gpsOk: true },
   // A fix rpi/gps.py's gate refused, far off: it must not pull the anchor.
-  { pickup: 'Chipotle', dropoff: 'Kestrel Ct', lat: 34.80, lon: -85.40, gpsOk: false,
+  { pickup: 'Chipotle', dropoff: 'Kestrel Ct', lat: 34.80, lon: -45.40, gpsOk: false,
     gpsWhy: 'rough' },
   // The same shop, from a row that never knew where it was — every row the rig
   // wrote before it had a GPS, and every row whose fix had gone stale.
-  { pickup: 'Chipotle', dropoff: 'Hereford Ct' },
+  { pickup: 'Chipotle', dropoff: 'Holmford Ct' },
   { pickup: 'Panda Express', dropoff: 'Farmington Dr' }
 ];
 var anchor = MV.anchorFor(ROWS, 'Chipotle');
 eq('a place named by rows that knew where they were gets an anchor',
    anchor.lat, 33.91);
-eq('...at the middle of those rows and not of the whole range', anchor.lon, -84.51);
+eq('...at the middle of those rows and not of the whole range', anchor.lon, -44.51);
 // A place whose OWN rows are silent gets nothing. The middle of the whole
 // range was tried as a fallback and is deliberately not used: on a journal
 // where only the last week carries positions it would box a place from eight
@@ -583,22 +583,22 @@ eq('...and a place nothing names gets none either',
  * The cards already carry the answer, so this reads it back rather than
  * guessing at geography. */
 var TOWNS = [
-  { pickup: 'Chipotle (Barrett Pkwy), Marietta', dropoff: 'Oak Ln, Marietta' },
-  { pickup: 'Zaxbys, Kennesaw', dropoff: 'Ring Rd NW, Marietta' },
-  { pickup: 'McDonalds', dropoff: 'Cobb Pkwy, Marietta' },
-  { pickup: 'Wendys', dropoff: 'Barrett Pkwy, Kennesaw' }
+  { pickup: 'Chipotle (Tallett Pkwy), Harrowen', dropoff: 'Oak Ln, Harrowen' },
+  { pickup: 'Zaxbys, Tellmoor', dropoff: 'Ring Rd NW, Harrowen' },
+  { pickup: 'McDonalds', dropoff: 'Vosk Pkwy, Harrowen' },
+  { pickup: 'Wendys', dropoff: 'Tallett Pkwy, Tellmoor' }
 ];
 eq('the town the cards keep naming is what a bare name is searched near',
-   MV.localityOf(TOWNS, ADV.area), 'Marietta');
+   MV.localityOf(TOWNS, ADV.area), 'Harrowen');
 // Counted over DISTINCT place strings, not over offers: one restaurant the
 // driver is sent to forty times must not decide where the window is searched.
 var REPEATED = [
-  { pickup: 'Chipotle, Kennesaw' }, { pickup: 'Chipotle, Kennesaw' },
-  { pickup: 'Chipotle, Kennesaw' }, { pickup: 'Chipotle, Kennesaw' },
-  { pickup: 'A St, Marietta' }, { pickup: 'B St, Marietta' }
+  { pickup: 'Chipotle, Tellmoor' }, { pickup: 'Chipotle, Tellmoor' },
+  { pickup: 'Chipotle, Tellmoor' }, { pickup: 'Chipotle, Tellmoor' },
+  { pickup: 'A St, Harrowen' }, { pickup: 'B St, Harrowen' }
 ];
 eq('...counted once per distinct place, not once per offer',
-   MV.localityOf(REPEATED, ADV.area), 'Marietta');
+   MV.localityOf(REPEATED, ADV.area), 'Harrowen');
 // OCR wreckage is not a town. "ies, LAS" is one of the strings that really did
 // produce a stray pin, and a hint taken off it would send the whole window to
 // Nevada.
@@ -607,7 +607,7 @@ eq('a shouted OCR fragment is not taken for a town',
 eq('...nor is a number', MV.localityOf([{ pickup: 'Store, 414' }], ADV.area), null);
 // A suite number reads as a town to anything that only asks "does it have a
 // lowercase letter in it". The driver's own cards carry plenty — "ALDI (860
-// Cobb Pl Blvd NW Ste 400)" — and a window searched near "Ste 400" is a window
+// Vosk Pl Blvd NW Ste 400)" — and a window searched near "Ste 400" is a window
 // searched nowhere.
 eq('a suite number is not a town',
    MV.localityOf([{ pickup: 'ALDI, Ste 400' }, { dropoff: 'x, Ste 400' }], ADV.area), null);
@@ -616,7 +616,7 @@ eq('...nor is a tail that starts small',
 // ...and a real town still wins against a cardful of those, rather than the
 // guard quietly rejecting everything.
 eq('...while a real town among them still wins',
-   MV.localityOf([{ pickup: 'ALDI, Ste 400' }, { dropoff: 'y, Smyrna' }], ADV.area), 'Smyrna');
+   MV.localityOf([{ pickup: 'ALDI, Ste 400' }, { dropoff: 'y, Pyrnel' }], ADV.area), 'Pyrnel');
 // Nothing to go on is answered as nothing, so the page leaves the box empty
 // and says so rather than inventing a metro.
 eq('places with no town in them give no hint',
@@ -626,9 +626,9 @@ eq('...and neither does nothing', MV.localityOf(null, ADV.area), null);
 
 /* ---- a pin that cannot be in this shift --------------------------------- */
 var FOUND = {
-  'Chipotle': { lat: 33.90, lon: -84.50 },
-  'Duval Ct': { lat: 33.95, lon: -84.61 },
-  'Manchester Ln': { lat: 33.88, lon: -84.44 },
+  'Chipotle': { lat: 33.90, lon: -44.50 },
+  'Toval Ct': { lat: 33.95, lon: -44.61 },
+  'Manchester Ln': { lat: 33.88, lon: -44.44 },
   // "Daffodll Ln" resolved to a real Daffodil Lane, four states away.
   'Daffodll Ln': { lat: 41.88, lon: -87.63 }
 };
@@ -638,14 +638,14 @@ ok_('...and it is the one in another state', strays['Daffodll Ln'] > 500);
 // The threshold is deliberately generous: a long ride is forty miles and
 // nothing under seventy-five is refused, so what this catches is another
 // state rather than a longer trip than usual.
-var LONG = { a: { lat: 33.9, lon: -84.5 }, b: { lat: 33.9, lon: -84.4 },
-             c: { lat: 34.5, lon: -84.5 } };   // 41 miles out
+var LONG = { a: { lat: 33.9, lon: -44.5 }, b: { lat: 33.9, lon: -44.4 },
+             c: { lat: 34.5, lon: -44.5 } };   // 41 miles out
 eq('a forty-mile job is not a stray', Object.keys(MV.straysAmong(LONG)).length, 0);
 // A place that could not be found at all is not a stray — it is a different
 // failure with a different list, and folding the two together would report
 // "the geocoder got it wrong" over "the card never said".
 eq('a place with no answer is not a stray',
-   Object.keys(MV.straysAmong({ a: { lat: 33.9, lon: -84.5 }, b: null })).length, 0);
+   Object.keys(MV.straysAmong({ a: { lat: 33.9, lon: -44.5 }, b: null })).length, 0);
 eq('nothing found, nothing stray', Object.keys(MV.straysAmong({})).length, 0);
 
 /* ---- the same accusation, against a point that was measured ---------------
@@ -656,7 +656,7 @@ eq('nothing found, nothing stray', Object.keys(MV.straysAmong({})).length, 0);
  * answered two states away was drawn, framed, and used as one end of the "out
  * of your way" figure. farFrom asks a different question: how far is this pin
  * from where the car actually WAS, which is measured rather than looked up. */
-var CAR = { lat: 33.90, lon: -84.50 };
+var CAR = { lat: 33.90, lon: -44.50 };
 var FAR = MV.farFrom(CAR, FOUND);
 eq('only the pin in another state is called wrong', Object.keys(FAR).length, 1);
 ok_('...and it is named, with how far out it is', FAR['Daffodll Ln'] > 500);
@@ -673,7 +673,7 @@ ok_('...and names it', !!MV.farFrom(CAR, PAIR)['Daffodll Ln']);
 // A long job is not a bad lookup. The threshold is the same generous one the
 // shift map uses, so what this catches is another state and not another county.
 eq('a forty-mile job is not called wrong',
-   Object.keys(MV.farFrom(CAR, { a: { lat: 34.5, lon: -84.5 } })).length, 0);
+   Object.keys(MV.farFrom(CAR, { a: { lat: 34.5, lon: -44.5 } })).length, 0);
 // No anchor, no accusation. A rig whose rows carry no position knows nothing
 // new about these places, and guessing on thinner evidence is how a right pin
 // gets called wrong.
@@ -690,10 +690,10 @@ eq('...and a place with no answer is not accused either',
  * straight line longer than the card's own total distance means a PIN is
  * wrong — never the card, never the rate, never the verdict the driver saw. */
 var judged = MV.judge(
-  [{ pickup: 'Chipotle', dropoff: 'Duval Ct', miles: 12 },
+  [{ pickup: 'Chipotle', dropoff: 'Toval Ct', miles: 12 },
    { pickup: 'Chipotle', dropoff: 'Daffodll Ln', miles: 12 },
    { pickup: 'Chipotle', dropoff: null, miles: 4 },
-   { pickup: 'Nowhere At All', dropoff: 'Duval Ct', miles: 9 }],
+   { pickup: 'Nowhere At All', dropoff: 'Toval Ct', miles: 9 }],
   FOUND, strays);
 no_('a job whose straight line fits inside the card is believed',
     judged[0].impossible);
@@ -721,9 +721,9 @@ no_('a card with no stated distance is never called impossible',
  * then blamed for a shortfall the READER produced, in the words "This cannot
  * be right", on the page whose whole job is to say whether the rig is right.
  *
- * Chipotle to Duval Ct is about 7.2 miles here, so a card carrying 3 is
+ * Chipotle to Toval Ct is about 7.2 miles here, so a card carrying 3 is
  * accused by the old rule whatever else the row says. */
-var SHORT = { pickup: 'Chipotle', dropoff: 'Duval Ct', miles: 3 };
+var SHORT = { pickup: 'Chipotle', dropoff: 'Toval Ct', miles: 3 };
 var yard = MV.judge(
   [SHORT,
    // The shape that manufactures this: a leg lost its distance, so the sum is
@@ -793,8 +793,8 @@ no_('a job with one end is neither accused nor unjudged',
  * who goes back to the card to settle which pin is wrong finds 95 and
  * concludes the page is broken. */
 var said = MV.judge(
-  [{ pickup: 'Chipotle', dropoff: 'Duval Ct', miles: 9.5 },
-   { pickup: 'Chipotle', dropoff: 'Duval Ct', miles: 9.5, milesCorrected: true }],
+  [{ pickup: 'Chipotle', dropoff: 'Toval Ct', miles: 9.5 },
+   { pickup: 'Chipotle', dropoff: 'Toval Ct', miles: 9.5, milesCorrected: true }],
   FOUND, {});
 eq('a figure off the card is reported as the card’s', MV.statedBy(said[0]),
    'card said 9.5 mi total');
@@ -838,9 +838,9 @@ eq('a pair that WAS checked gets no such sentence', MV.unchecked(yard[0]), '');
  * geocoder happened to agree on are two things the rig read, and this page
  * exists to check what the rig read. */
 var pins = MV.byPlace(MV.judge(
-  [{ pickup: 'Chipotle', dropoff: 'Duval Ct' },
+  [{ pickup: 'Chipotle', dropoff: 'Toval Ct' },
    { pickup: 'Chipotle', dropoff: 'Manchester Ln' },
-   { pickup: 'Chipotle', dropoff: 'Duval Ct' }], FOUND, {}));
+   { pickup: 'Chipotle', dropoff: 'Toval Ct' }], FOUND, {}));
 eq('three jobs at one shop make one pin', pins.length, 3);
 eq('...carrying the count', pins[0].jobs.length, 3);
 eq('...and named as the card named it', pins[0].name, 'Chipotle');
@@ -851,9 +851,9 @@ eq('...and named as the card named it', pins[0].name, 'Chipotle');
    a boolean tells a different lie — a range where nothing was ever ticked would
    report "0 taken" of twelve, which reads as twelve refusals. */
 var TALLY = MV.byPlace(MV.judge(
-  [{ pickup: 'Chipotle', dropoff: 'Duval Ct', accepted: true },
+  [{ pickup: 'Chipotle', dropoff: 'Toval Ct', accepted: true },
    { pickup: 'Chipotle', dropoff: 'Manchester Ln', accepted: false },
-   { pickup: 'Chipotle', dropoff: 'Duval Ct' }], FOUND, {}))[0];
+   { pickup: 'Chipotle', dropoff: 'Toval Ct' }], FOUND, {}))[0];
 eq('a pin counts every offer at the place', TALLY.jobs.length, 3);
 eq('...the ones that were taken', TALLY.took, 1);
 eq('...the ones that were passed on', TALLY.passed, 1);
@@ -863,12 +863,12 @@ eq('...the ones that were passed on', TALLY.passed, 1);
 eq('...and the ones nobody marked, kept apart from both', TALLY.unmarked, 1);
 eq('a range where nothing was ticked reports none taken and none refused',
    JSON.stringify([TALLY.took, TALLY.passed].length && MV.byPlace(MV.judge(
-     [{ pickup: 'Chipotle', dropoff: 'Duval Ct' }], FOUND, {}))[0])
+     [{ pickup: 'Chipotle', dropoff: 'Toval Ct' }], FOUND, {}))[0])
      .indexOf('"took":0,"passed":0,"unmarked":1') !== -1, true);
 
 eq('a place used as both ends is one pin with both roles',
-   MV.byPlace(MV.judge([{ pickup: 'Chipotle', dropoff: 'Duval Ct' },
-                        { pickup: 'Duval Ct', dropoff: 'Chipotle' }], FOUND, {}))
+   MV.byPlace(MV.judge([{ pickup: 'Chipotle', dropoff: 'Toval Ct' },
+                        { pickup: 'Toval Ct', dropoff: 'Chipotle' }], FOUND, {}))
      .filter(function (p) { return p.roles.pickup && p.roles.dropoff; }).length, 2);
 
 /* ---- the shift in the order it happened ----------------------------------
@@ -886,7 +886,7 @@ var SHIFT = MV.chain(MV.judge([
   // offer and nothing promises these arrive sorted.
   { pickup: 'Manchester Ln', dropoff: 'Chipotle', at: T0 + HOUR,
     accepted: true, minutes: 20 },
-  { pickup: 'Chipotle', dropoff: 'Duval Ct', at: T0, accepted: true, minutes: 20 },
+  { pickup: 'Chipotle', dropoff: 'Toval Ct', at: T0, accepted: true, minutes: 20 },
   // Turned down. It sits between the two in neither time nor space, and it
   // must not appear in the chain at all.
   { pickup: 'Chipotle', dropoff: 'Manchester Ln', at: T0 + HOUR / 2, minutes: 20 }
@@ -896,14 +896,14 @@ eq('...and two of them make one hop', SHIFT.hops.length, 1);
 // The hop is the EMPTY run: out of where the last job ended, into where the
 // next one began. Drawing pickup-to-pickup or dropoff-to-dropoff would be a
 // line the car never drove.
-eq('the hop leaves from where the first job ended', SHIFT.hops[0].fromName, 'Duval Ct');
+eq('the hop leaves from where the first job ended', SHIFT.hops[0].fromName, 'Toval Ct');
 eq('...and arrives where the next one began', SHIFT.hops[0].toName, 'Manchester Ln');
 // The COORDINATE as well as the name, because the two are worked out from the
 // same end separately. A line drawn between the right pair of points under the
 // wrong pair of names, or the reverse, is a popup that lies about a line that
 // is fine — and either half on its own cannot catch that.
 eq('...from the coordinate that end resolved to',
-   SHIFT.hops[0].from.lat, FOUND['Duval Ct'].lat);
+   SHIFT.hops[0].from.lat, FOUND['Toval Ct'].lat);
 eq('...to the coordinate the next one resolved to',
    SHIFT.hops[0].to.lon, FOUND['Manchester Ln'].lon);
 ok_('...having sorted them by time and not by list order',
@@ -915,7 +915,7 @@ no_('an hour apart on a twenty-minute job is not a stack', SHIFT.hops[0].stacked
 // and the line between them is then NOT an empty run — the popup says so, and
 // it can only say so if this flag is right.
 var STACK = MV.chain(MV.judge([
-  { pickup: 'Chipotle', dropoff: 'Duval Ct', at: T0, accepted: true, minutes: 30 },
+  { pickup: 'Chipotle', dropoff: 'Toval Ct', at: T0, accepted: true, minutes: 30 },
   { pickup: 'Manchester Ln', dropoff: 'Chipotle', at: T0 + 6 * 60000,
     accepted: true, minutes: 30 }
 ], FOUND, {}));
@@ -927,12 +927,12 @@ ok_('an offer six minutes into a thirty-minute job is a stack', STACK.hops[0].st
 // have come back true.
 eq('a job with no stated minutes cannot say whether the next one stacked',
    MV.chain(MV.judge([
-     { pickup: 'Chipotle', dropoff: 'Duval Ct', at: T0, accepted: true },
+     { pickup: 'Chipotle', dropoff: 'Toval Ct', at: T0, accepted: true },
      { pickup: 'Manchester Ln', dropoff: 'Chipotle', at: T0 + 60000, accepted: true }
    ], FOUND, {})).hops[0].stacked, null);
 eq('...where a card that did state one answers yes or no',
    MV.chain(MV.judge([
-     { pickup: 'Chipotle', dropoff: 'Duval Ct', at: T0, accepted: true, minutes: 20 },
+     { pickup: 'Chipotle', dropoff: 'Toval Ct', at: T0, accepted: true, minutes: 20 },
      { pickup: 'Manchester Ln', dropoff: 'Chipotle', at: T0 + HOUR, accepted: true }
    ], FOUND, {})).hops[0].stacked, false);
 
@@ -942,7 +942,7 @@ eq('...where a card that did state one answers yes or no',
    belongs in the chain — it was taken — so the usable end stands in. */
 var STRAYEND = MV.chain(MV.judge([
   { pickup: 'Chipotle', dropoff: 'Daffodll Ln', at: T0, accepted: true },
-  { pickup: 'Manchester Ln', dropoff: 'Duval Ct', at: T0 + HOUR, accepted: true }
+  { pickup: 'Manchester Ln', dropoff: 'Toval Ct', at: T0 + HOUR, accepted: true }
 ], FOUND, strays));
 eq('a job whose dropoff landed in another state still joins the chain',
    STRAYEND.hops.length, 1);
@@ -953,11 +953,11 @@ ok_('...and the miles are a real shift, not four states',
 // separate field: a stray PICKUP must not be what the chain arrives at either.
 var STRAYSTART = MV.chain(MV.judge([
   { pickup: 'Manchester Ln', dropoff: 'Chipotle', at: T0, accepted: true },
-  { pickup: 'Daffodll Ln', dropoff: 'Duval Ct', at: T0 + HOUR, accepted: true }
+  { pickup: 'Daffodll Ln', dropoff: 'Toval Ct', at: T0 + HOUR, accepted: true }
 ], FOUND, strays));
 eq('a job whose pickup landed in another state still joins the chain',
    STRAYSTART.hops.length, 1);
-eq('...arriving at the end that is not a stray', STRAYSTART.hops[0].toName, 'Duval Ct');
+eq('...arriving at the end that is not a stray', STRAYSTART.hops[0].toName, 'Toval Ct');
 ok_('...and the miles are a real shift, not four states',
     STRAYSTART.hops[0].miles < 75);
 
@@ -966,7 +966,7 @@ ok_('...and the miles are a real shift, not four states',
    carries the count — drawing across a gap without saying it is a gap is the
    same lie the rest of this page exists to refuse. */
 var GAP = MV.chain(MV.judge([
-  { pickup: 'Chipotle', dropoff: 'Duval Ct', at: T0, accepted: true },
+  { pickup: 'Chipotle', dropoff: 'Toval Ct', at: T0, accepted: true },
   { pickup: 'Nowhere At All', dropoff: 'Nor Here', at: T0 + HOUR, accepted: true },
   { pickup: 'Manchester Ln', dropoff: 'Chipotle', at: T0 + 2 * HOUR, accepted: true }
 ], FOUND, strays));
@@ -978,10 +978,10 @@ eq('...and named as having no pin', GAP.unplaced, 1);
 // forward, every later hop in the shift would claim a job went missing inside
 // it too, and a driver checking the one real gap would find four.
 var GAPTHEN = MV.chain(MV.judge([
-  { pickup: 'Chipotle', dropoff: 'Duval Ct', at: T0, accepted: true },
+  { pickup: 'Chipotle', dropoff: 'Toval Ct', at: T0, accepted: true },
   { pickup: 'Nowhere At All', dropoff: 'Nor Here', at: T0 + HOUR, accepted: true },
   { pickup: 'Manchester Ln', dropoff: 'Chipotle', at: T0 + 2 * HOUR, accepted: true },
-  { pickup: 'Duval Ct', dropoff: 'Manchester Ln', at: T0 + 3 * HOUR, accepted: true }
+  { pickup: 'Toval Ct', dropoff: 'Manchester Ln', at: T0 + 3 * HOUR, accepted: true }
 ], FOUND, strays));
 eq('the gap is reported once', GAPTHEN.hops[0].skipped, 1);
 eq('...and the hop after it is clean', GAPTHEN.hops[1].skipped, 0);
@@ -990,7 +990,7 @@ eq('...and the hop after it is clean', GAPTHEN.hops[1].skipped, 0);
 // dropped from the reckoning silently.
 eq('a taken job with no pin at the end of the shift is still counted',
    MV.chain(MV.judge([
-     { pickup: 'Chipotle', dropoff: 'Duval Ct', at: T0, accepted: true },
+     { pickup: 'Chipotle', dropoff: 'Toval Ct', at: T0, accepted: true },
      { pickup: 'Manchester Ln', dropoff: 'Chipotle', at: T0 + HOUR, accepted: true },
      { pickup: 'Nowhere At All', dropoff: 'Nor Here', at: T0 + 2 * HOUR, accepted: true }
    ], FOUND, strays)).unplaced, 1);
@@ -998,7 +998,7 @@ eq('a taken job with no pin at the end of the shift is still counted',
 // Without a timestamp there is no order to put it in, and putting it first or
 // last would be inventing one.
 eq('a taken job with no time cannot be placed in an order',
-   MV.chain(MV.judge([{ pickup: 'Chipotle', dropoff: 'Duval Ct', accepted: true }],
+   MV.chain(MV.judge([{ pickup: 'Chipotle', dropoff: 'Toval Ct', accepted: true }],
                      FOUND, {})).taken, 0);
 
 // The offers page calls this on every draw, before anybody has ticked
@@ -1007,7 +1007,7 @@ eq('an empty range has no hops', MV.chain([]).hops.length, 0);
 eq('...and nothing taken', MV.chain([]).taken, 0);
 eq('...and no argument at all is the same', MV.chain().hops.length, 0);
 eq('a range with nothing ticked draws no chain',
-   MV.chain(MV.judge([{ pickup: 'Chipotle', dropoff: 'Duval Ct', at: T0 }],
+   MV.chain(MV.judge([{ pickup: 'Chipotle', dropoff: 'Toval Ct', at: T0 }],
                      FOUND, {})).taken, 0);
 
 /* ---- the rate limit, against a clock that costs nothing -------------------
@@ -1056,12 +1056,12 @@ function gaps(sent) {
  * Against the REAL server.js, relaying to tests/fake-nucbox.js — the one fake
  * NucBox the three suites share, in the real install's answer shapes — so
  * what is checked is the page's half and the server's half together, through
- * real HTTP. Every point is invented round Marietta Square (33.9526,
- * -84.5499) and the public places near it; distances from the Square,
+ * real HTTP. Every point is invented round Harrowen Square (33.9526,
+ * -44.5499) and the public places near it; distances from the Square,
  * measured with crowMiles: the fake's McDonald's are 2.10 mi (north), 5.49
- * (Cumberland), 10.64 (Kennesaw) and 21.81 (Acworth); Shadowood Parkway's two
- * pieces are 7.27 away and 0.275 apart; 1985 Cobb Parkway is 3.36; the two
- * Church Streets 0.39 (Marietta) and 5.23 (Smyrna). */
+ * (Hollowmere), 10.64 (Tellmoor) and 21.81 (Ivyhame); Gloamwood Parkway's two
+ * pieces are 7.27 away and 0.275 apart; 1985 Vosk Parkway is 3.36; the two
+ * Church Streets 0.39 (Harrowen) and 5.23 (Pyrnel). */
 function startServer(env) {
   var cp = require('child_process'), path = require('path'), os = require('os');
   var fs = require('fs'), net = require('net');
@@ -1099,13 +1099,14 @@ function streetIndex() {
   require('child_process').execFileSync('python3', [
     path.join(__dirname, '..', 'tools', 'street_index.py'),
     path.join(__dirname, 'fixtures', 'streets.osm'), file,
-    '--opl', path.join(__dirname, 'fixtures', 'streets.opl')], { stdio: 'ignore' });
+    '--opl', path.join(__dirname, 'fixtures', 'streets.opl'),
+    '--bbox=-45.00,33.50,-43.95,34.40'], { stdio: 'ignore' });
   return { file: file, drop: function () { fs.rmSync(dir, { recursive: true, force: true }); } };
 }
 
 async function nucbox() {
   var FAKE = require('./fake-nucbox.js');
-  var SQ = { lat: 33.9526, lon: -84.5499 };
+  var SQ = { lat: 33.9526, lon: -44.5499 };
   function card(o) {
     return Object.assign({ lat: SQ.lat, lon: SQ.lon, gpsAge: 0.6, gpsErr: 12, gpsMode: 3,
                            gpsOk: true, gpsWhy: null, miles: 9.4, hasTotal: true,
@@ -1121,17 +1122,17 @@ async function nucbox() {
 
   /* What is asked, by the shape of the string. */
   eq('a bracket that opens with a house number is asked as that street',
-     JSON.stringify(MV.searchPlan("Jimmy John's (1985 Cobb Parkway NW)")),
-     JSON.stringify({ kind: 'street', street: '1985 Cobb Parkway NW', door: true,
+     JSON.stringify(MV.searchPlan("Jimmy John's (1985 Vosk Parkway NW)")),
+     JSON.stringify({ kind: 'street', street: '1985 Vosk Parkway NW', door: true,
                       house: '1985' }));
   eq('...and one the card\'s edge cut off is still the street',
      MV.searchPlan("Culver's (1275 Hwy").street, '1275 Hwy');
   eq('"Street, Town" is the street, the town not kept at all',
-     JSON.stringify(MV.searchPlan('Shadowood Pkwy SE, Atlanta Pverel')),
-     JSON.stringify({ kind: 'street', street: 'Shadowood Pkwy SE', door: false,
+     JSON.stringify(MV.searchPlan('Gloamwood Pkwy SE, Solvane Pverel')),
+     JSON.stringify({ kind: 'street', street: 'Gloamwood Pkwy SE', door: false,
                       house: null }));
   eq('...and the Trip Planner\'s door line the same, a door with its number',
-     JSON.stringify(MV.searchPlan('77 Birch Ln NW, Roswell, GA 30075')),
+     JSON.stringify(MV.searchPlan('77 Birch Ln NW, Ruswold, GA 90675')),
      JSON.stringify({ kind: 'street', street: '77 Birch Ln NW', door: true,
                       house: '77' }));
   // 19 Oct: a planner pickup's town line lost; the disc bounds the search.
@@ -1147,15 +1148,15 @@ async function nucbox() {
   // reader's misreads of the type word are put back before it is asked.
   eq('the type word\'s misreads are put back: Bivd, Tri, PI and Or, before a quadrant or last',
      [MV.searchPlan('Fable Grill (790 Wren Place Bivd NW)').street,
-      MV.searchPlan('12 Creek Crossing Tri, Kennesaw').street,
-      MV.searchPlan('129 Wren PI, Acworth').street,
-      MV.searchPlan('412 Brindle Or NW, Kennesaw').street].join(' | '),
+      MV.searchPlan('12 Creek Crossing Tri, Tellmoor').street,
+      MV.searchPlan('129 Wren PI, Ivyhame').street,
+      MV.searchPlan('412 Brindle Or NW, Tellmoor').street].join(' | '),
      '790 Wren Place Blvd NW | 12 Creek Crossing Trl | 129 Wren Pl | 412 Brindle Dr NW');
   eq('...and Lr for Ln (the owner\'s batch of 23 Oct)',
-     MV.searchPlan('1301 Brindle Lr, Woodstock').street, '1301 Brindle Ln');
+     MV.searchPlan('1301 Brindle Lr, Marrowick').street, '1301 Brindle Ln');
   eq('...but never a word that is the street\'s name, or one not in the type\'s place',
-     [MV.searchPlan('5 Or Rd, Marietta').street, MV.searchPlan('12 Tri Oak Ct').street,
-      MV.searchPlan('9 Or, Marietta').street].join(' | '),
+     [MV.searchPlan('5 Or Rd, Harrowen').street, MV.searchPlan('12 Tri Oak Ct').street,
+      MV.searchPlan('9 Or, Harrowen').street].join(' | '),
      '5 Or Rd | 12 Tri Oak Ct | 9 Or');
   eq('...but a number then a name with no street type stays a name',
      [MV.searchPlan('1000 Degrees Pizza').kind, MV.searchPlan('77 Ln').kind,
@@ -1166,59 +1167,59 @@ async function nucbox() {
      [MV.searchPlan('Birch Hollow Ln').kind, MV.searchPlan('1200 41 Hwy').kind].join(','),
      'name,name');
   eq('cross streets are not asked of a search that answers one point a street',
-     JSON.stringify(MV.searchPlan('Birch Ln & Kestrel Dr, Roswell')),
+     JSON.stringify(MV.searchPlan('Birch Ln & Kestrel Dr, Ruswold')),
      JSON.stringify({ kind: 'cross', a: 'Birch Ln', b: 'Kestrel Dr' }));
   // 63 of the week's 403 corner dropoffs came off the card with no comma, a
   // town or the OCR's litter run on after the second street: those go to
   // Nominatim as a name, as they always did, never to the street index
   // (README "Corners and streets").
   eq('a corner with no comma before its town is asked as a name, not as a corner',
-     JSON.stringify(MV.searchPlan('Birch Ln & Kestrel Dr NE Roswell')),
-     JSON.stringify({ kind: 'name', q: 'Birch Ln & Kestrel Dr NE Roswell' }));
+     JSON.stringify(MV.searchPlan('Birch Ln & Kestrel Dr NE Ruswold')),
+     JSON.stringify({ kind: 'name', q: 'Birch Ln & Kestrel Dr NE Ruswold' }));
   eq('...and three names, or an empty one, are not a corner',
-     JSON.stringify([MV.searchPlan('Atami Grill & Sushi Atwater Dr & Kolora Chase, Smyrna'),
-                     MV.searchPlan(' & Kolora Chase, Smyrna')]),
+     JSON.stringify([MV.searchPlan('Atami Grill & Sushi Elmwhit Dr & Mevora Chase, Pyrnel'),
+                     MV.searchPlan(' & Mevora Chase, Pyrnel')]),
      JSON.stringify([{ kind: 'cross', a: null, b: null }, { kind: 'cross', a: null, b: null }]));
   eq('a merchant is asked by name, its "(Plaza)" dropped',
-     JSON.stringify(MV.searchPlan("McDonald's (Marietta Sq)")),
+     JSON.stringify(MV.searchPlan("McDonald's (Harrowen Sq)")),
      JSON.stringify({ kind: 'name', q: "McDonald's" }));
   // The shape the rig held as the order in the car's end on shift — OCR
   // litter in front of the door — on a made-up street. Asked as written it
   // was a street called "ss be 4 1610 Pverel Blvd" with no door, which no
   // search holds, and the held end had no pin (see searchText).
   eq('litter before a door ("ss be 4 1610 <Street> Blvd, <Town>, GA <zip>") is not searched',
-     JSON.stringify(MV.searchPlan('ss be 4 1610 Pverel Blvd, Kestrelton, GA 30144')),
+     JSON.stringify(MV.searchPlan('ss be 4 1610 Pverel Blvd, Kestrelton, GA 90744')),
      JSON.stringify({ kind: 'street', street: '1610 Pverel Blvd', door: true,
                       house: '1610' }));
   eq('...and the public map is asked the same words, by the same rule',
      new MV.Geocoder({ hint: function () { return ''; } })
-       .queryFor('ss be 4 1610 Pverel Blvd, Kestrelton, GA 30144', '1,2,3,4'),
-     '1610 Pverel Blvd, Kestrelton, GA 30144');
+       .queryFor('ss be 4 1610 Pverel Blvd, Kestrelton, GA 90744', '1,2,3,4'),
+     '1610 Pverel Blvd, Kestrelton, GA 90744');
   eq('...while a street with a number in its NAME keeps it (capitalised, nothing in front)',
-     JSON.stringify(['Hwy 92 Bypass, Woodstock', 'US 41, Marietta', 'Old 41 Hwy, Kennesaw',
+     JSON.stringify(['Hwy 63 Bypass, Marrowick', 'US 41, Harrowen', 'Old 88 Hwy, Tellmoor',
                      '1610 Pverel Blvd, Kestrelton'].map(MV.searchText)),
-     JSON.stringify(['Hwy 92 Bypass, Woodstock', 'US 41, Marietta', 'Old 41 Hwy, Kennesaw',
+     JSON.stringify(['Hwy 63 Bypass, Marrowick', 'US 41, Harrowen', 'Old 88 Hwy, Tellmoor',
                      '1610 Pverel Blvd, Kestrelton']));
   /* A merchant's label for one branch (MV.storeName): its store number is
      no part of the name OSM holds, so the NucBox is asked the name. */
-  eq('a merchant\'s store-number tail is not searched: "AtHome - 0020-Kennesaw" is asked '
+  eq('a merchant\'s store-number tail is not searched: "AtHome - 0020-Tellmoor" is asked '
      + 'as At Home, "Papa John\'s Store 181 4" and "...Store 3317" as Papa John\'s',
-     JSON.stringify(['AtHome - 0020-Kennesaw', "Papa John's Store 181 4",
+     JSON.stringify(['AtHome - 0020-Tellmoor', "Papa John's Store 181 4",
                      "Papa John's Store 3317", 'Papa Johns Store #414']
        .map(function (p) { return MV.searchPlan(p).q; })),
      JSON.stringify(['At Home', "Papa John's", "Papa John's", 'Papa Johns']));
   eq('...a two-letter word run into the next is split only with such a tail, never '
      + '"Mc", never a longer first word, and a name with no tail is asked as it reads',
-     JSON.stringify(["McDonald's - 1234-Marietta", 'PetSmart Store 12', 'AtHome',
-                     'Waffle House', 'Shell - 24', 'Kroger (Shiloh Square)']
+     JSON.stringify(["McDonald's - 1234-Harrowen", 'PetSmart Store 12', 'AtHome',
+                     'Waffle House', 'Shell - 24', 'Kroger (Merlah Square)']
        .map(function (p) { return MV.searchPlan(p).q; })),
      JSON.stringify(["McDonald's", 'PetSmart', 'AtHome', 'Waffle House', 'Shell', 'Kroger']));
   eq('...the NucBox\'s search only: the public map, which pins its one answer with no '
      + 'disc to choose by, is asked the label as read, and the label is kept',
      [new MV.Geocoder({ hint: function () { return ''; } })
-        .queryFor('AtHome - 0020-Kennesaw', '1,2,3,4'),
+        .queryFor('AtHome - 0020-Tellmoor', '1,2,3,4'),
       MV.searchText("Papa John's Store 181 4")].join(' | '),
-     "AtHome - 0020-Kennesaw | Papa John's Store 181 4");
+     "AtHome - 0020-Tellmoor | Papa John's Store 181 4");
 
   /* The held order's pickups off its Trip Planner (made-up restaurant and
      street, the shape the driver's planner was read as on shift). */
@@ -1240,8 +1241,8 @@ async function nucbox() {
      JSON.stringify(['Fable Grill', 'Fable Crust Pizza', 'anise v', 'Pat Q', 'Fable Grill ab']));
   var HELD_STOPS = [
     { kind: 'pickup', name: 'oe Fable Crust Pizza', street: '4410 Fable W Lantern Parkway Northwest',
-      city: 'Kestrelton', zip: '30144',
-      line: '4410 Fable W Lantern Parkway Northwest, Kestrelton, GA 30144' },
+      city: 'Kestrelton', zip: '90744',
+      line: '4410 Fable W Lantern Parkway Northwest, Kestrelton, GA 90744' },
     { kind: 'pickup', name: 'oe Fable Grill', street: '12 Fable St', city: null, zip: null,
       line: '12 Fable St' },
     { kind: 'pickup', name: 'Fable Wok', street: null, city: null, zip: null, line: null },
@@ -1251,7 +1252,7 @@ async function nucbox() {
      + 'planner\'s order, searched with their town when it read and alone when not; '
      + 'never a dropoff, never a name with no street',
      JSON.stringify(MV.heldPickups(HELD_STOPS)),
-     JSON.stringify([{ q: '4410 Fable W Lantern Parkway Northwest, Kestrelton, GA 30144',
+     JSON.stringify([{ q: '4410 Fable W Lantern Parkway Northwest, Kestrelton, GA 90744',
                        name: 'Fable Crust Pizza' },
                      { q: '12 Fable St,', name: 'Fable Grill' }]));
   eq('...and each is a door, searched by the one rule every place is — the street '
@@ -1449,41 +1450,41 @@ async function nucbox() {
   var mcd = hitsOf(FAKE.MCD);
   var one = MV.pickInDisc(mcd, MV.discFor(card({ miles: 3.0 })), MV.searchPlan("McDonald's"));
   eq('the disc keeps the one branch inside a 3.0 mi card\'s distance, of four',
-     one.at && [one.at.lat, one.at.lon, one.n].join(','), '33.983,-84.5499,1');
+     one.at && [one.at.lat, one.at.lon, one.n].join(','), '33.983,-44.5499,1');
   var two = MV.pickInDisc(mcd, d94, MV.searchPlan("McDonald's"));
   eq('...and refuses two inside a 9.4 mi card that are not one place',
      JSON.stringify([two.at, two.why, two.n]), JSON.stringify([null, 'several', 2]));
-  var far = MV.pickInDisc(mcd, MV.discFor(card({ lat: 33.9700, lon: -84.5650, miles: 0.6 })),
+  var far = MV.pickInDisc(mcd, MV.discFor(card({ lat: 33.9700, lon: -44.5650, miles: 0.6 })),
                           MV.searchPlan("McDonald's"));
   eq('...and refuses when none is inside, saying how far the nearest was',
      JSON.stringify([far.at, far.why, typeof far.nearest === 'number' ? far.nearest.toFixed(2) : null]),
      JSON.stringify([null, 'none', '1.25']));
-  var street = MV.pickInDisc(hitsOf(FAKE.SHADOWOOD), d94,
-                             MV.searchPlan('Shadowood Pkwy SE, Atlanta'));
+  var street = MV.pickInDisc(hitsOf(FAKE.GLOAMWOOD), d94,
+                             MV.searchPlan('Gloamwood Pkwy SE, Solvane'));
   ok_('a street answered in two pieces 0.275 mi apart is one street, pinned between them',
       street.at && Math.abs(street.at.lat - 33.8779) < 0.0001);
   var church = hitsOf(FAKE.CHURCH);
-  var tie = MV.pickInDisc(church, d94, MV.searchPlan('Church St, Marietta'));
+  var tie = MV.pickInDisc(church, d94, MV.searchPlan('Church St, Harrowen'));
   eq('two streets of one name in two towns, both inside, are refused whatever '
      + 'the card\'s town says', JSON.stringify([tie.at, tie.why, tie.n]),
      JSON.stringify([null, 'several', 2]));
-  /* The verifier's probe: the street in Cumberland and a namesake 1.35 mi
-     off whose OSM address says Atlanta, both inside a 3.0 mi card. The
-     card's postal "Atlanta" pinned the namesake when the town broke ties. */
+  /* The verifier's probe: the street in Hollowmere and a namesake 1.35 mi
+     off whose OSM address says Solvane, both inside a 3.0 mi card. The
+     card's postal "Solvane" pinned the namesake when the town broke ties. */
   var shadow2 = MV.pickInDisc(
-    [{ lat: 33.94, lon: -84.52, name: 'Shadowood Parkway Southeast, Cumberland, Cobb County, Georgia' },
-     { lat: 33.925, lon: -84.505, name: 'Shadowood Parkway Southeast, Atlanta, Fulton County, Georgia' }],
-    MV.discFor(card({ miles: 3.0 })), MV.searchPlan('Shadowood Pkwy SE, Atlanta'));
-  eq('...so "Shadowood Pkwy SE, Atlanta" with a namesake in OSM\'s Atlanta 1.35 mi '
-     + 'off is refused, not pinned on the word Atlanta',
+    [{ lat: 33.94, lon: -44.52, name: 'Gloamwood Parkway Southeast, Hollowmere, Vosk County, Georgia' },
+     { lat: 33.925, lon: -44.505, name: 'Gloamwood Parkway Southeast, Solvane, Wexton County, Georgia' }],
+    MV.discFor(card({ miles: 3.0 })), MV.searchPlan('Gloamwood Pkwy SE, Solvane'));
+  eq('...so "Gloamwood Pkwy SE, Solvane" with a namesake in OSM\'s Solvane 1.35 mi '
+     + 'off is refused, not pinned on the word Solvane',
      JSON.stringify([shadow2.at, shadow2.why]), JSON.stringify([null, 'several']));
   eq('...and the town is never a filter: a lone candidate in another town is used',
-     (MV.pickInDisc(church.slice(1), d94, MV.searchPlan('Church St, Marietta')).at || {}).lat,
+     (MV.pickInDisc(church.slice(1), d94, MV.searchPlan('Church St, Harrowen')).at || {}).lat,
      33.883);
 
   /* The words. The refusal leads, so the clamp keeps "no pin for". */
   eq('none inside, the card\'s words',
-     MV.nbxRefusal(far, MV.discFor(card({ lat: 33.97, lon: -84.565, miles: 0.6 })),
+     MV.nbxRefusal(far, MV.discFor(card({ lat: 33.97, lon: -44.565, miles: 0.6 })),
                    "McDonald's", 'new'),
      "no pin for McDonald's — none fit the card · within 0.6 mi of you, nearest 1.2 mi");
   eq('several, the card\'s words',
@@ -1509,14 +1510,14 @@ async function nucbox() {
 
   /* A door asked, its street answered: never pinned as the door. */
   var d30 = MV.discFor(card({ miles: 3.0 }));
-  var kestrel = MV.pickInDisc(hitsOf(FAKE.KESTREL), d30, MV.searchPlan('4821 Kestrel Dr, Marietta'));
+  var kestrel = MV.pickInDisc(hitsOf(FAKE.KESTREL), d30, MV.searchPlan('4821 Kestrel Dr, Harrowen'));
   eq('a house number answered only by its street is refused, not pinned as the door',
      JSON.stringify([kestrel.at, kestrel.why]), JSON.stringify([null, 'nodoor']));
   eq('...in words that say the street was found and not the door',
-     MV.nbxRefusal(kestrel, d30, '4821 Kestrel Dr, Marietta', 'new'),
-     'no pin for 4821 Kestrel Dr, Marietta — street found, not that door');
+     MV.nbxRefusal(kestrel, d30, '4821 Kestrel Dr, Harrowen', 'new'),
+     'no pin for 4821 Kestrel Dr, Harrowen — street found, not that door');
   eq('...while the same street asked with no number is pinned as the street',
-     (MV.pickInDisc(hitsOf(FAKE.KESTREL), d30, MV.searchPlan('Kestrel Dr, Marietta')).at || {}).lat,
+     (MV.pickInDisc(hitsOf(FAKE.KESTREL), d30, MV.searchPlan('Kestrel Dr, Harrowen')).at || {}).lat,
      33.97);
   /* ---- the general area, for routing only (the owner, 24 Oct): withArea ----
    *
@@ -1525,99 +1526,99 @@ async function nucbox() {
    * refusal now carries their middle as `area` — `approx`, the `why` kept,
    * `at` still null — when every candidate inside is within AREA_MI. */
   var d50 = MV.discFor(card({ miles: 5.0 }));
-  var near2 = MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150), d50,
-                            MV.searchPlan('3150 Thornbury Mill Rd SE, Marietta'));
+  var near2 = MV.pickInDisc(hitsOf(FAKE.GORSEBURY_3150), d50,
+                            MV.searchPlan('3150 Gorsebury Mill Rd SE, Harrowen'));
   eq('[area] two doors 0.33 mi apart inside the disc: still no pin, still "several", '
      + 'and an approximate area at their middle',
      JSON.stringify([near2.at, near2.why, near2.n, near2.area && near2.area.approx,
                      near2.area && [near2.area.lat, near2.area.lon, near2.area.n,
                                     near2.area.miles.toFixed(2)]]),
-     JSON.stringify([null, 'several', 2, true, [33.962, -84.5435, 2, '0.33']]));
+     JSON.stringify([null, 'several', 2, true, [33.962, -44.5435, 2, '0.33']]));
   eq('[area] ...the middle is middleOf\'s, the pin rule\'s own',
-     JSON.stringify(MV.middleOf(hitsOf(FAKE.THORNBURY_3150))),
+     JSON.stringify(MV.middleOf(hitsOf(FAKE.GORSEBURY_3150))),
      JSON.stringify({ lat: near2.area.lat, lon: near2.area.lon }));
   eq('[area] ...a mile, chosen: the same as a numberless street\'s pieces',
      JSON.stringify([MV.AREA_MI, MV.AREA_MI === MV.STREET_AGREE_MI]), '[1,true]');
-  var far2 = MV.pickInDisc(hitsOf(FAKE.THORNBURY_3152), d50,
-                           MV.searchPlan('3152 Thornbury Mill Rd SE, Marietta'));
+  var far2 = MV.pickInDisc(hitsOf(FAKE.GORSEBURY_3152), d50,
+                           MV.searchPlan('3152 Gorsebury Mill Rd SE, Harrowen'));
   eq('[area] two doors 2.5 mi apart are no area: "several" as before, nothing to route to',
      JSON.stringify([far2.at, far2.why, far2.area]), JSON.stringify([null, 'several', null]));
   eq('[area] ...nor three where one of them is past AREA_MI from the others',
-     MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150).concat(hitsOf(FAKE.THORNBURY_3152).slice(1)
+     MV.pickInDisc(hitsOf(FAKE.GORSEBURY_3150).concat(hitsOf(FAKE.GORSEBURY_3152).slice(1)
        .map(function (h) { return Object.assign({}, h, { name: h.name.replace('3152', '3150') }); })),
-       d50, MV.searchPlan('3150 Thornbury Mill Rd SE, Marietta')).area, undefined);
+       d50, MV.searchPlan('3150 Gorsebury Mill Rd SE, Harrowen')).area, undefined);
   // (Since the owner's DoorDash snap of 24 Oct a cut list that is one
   // general area carries one: the "capped" here is the spread pair's.)
   eq('[area] never for "none", a spread "capped", a corner, a merchant\'s name, or no disc',
      JSON.stringify([
-       MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150),
-                     MV.discFor(card({ lat: 33.90, lon: -84.60, miles: 0.5 })),
-                     MV.searchPlan('3150 Thornbury Mill Rd SE, Marietta')).why,
-       MV.pickInDisc(hitsOf(FAKE.THORNBURY_3152), d50,
-                     MV.searchPlan('3152 Thornbury Mill Rd SE, Marietta'), 10).why,
-       MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150), d50,
-                     { kind: 'cross', a: 'Thornbury Mill Rd', b: 'Oak St' }).why,
+       MV.pickInDisc(hitsOf(FAKE.GORSEBURY_3150),
+                     MV.discFor(card({ lat: 33.90, lon: -44.60, miles: 0.5 })),
+                     MV.searchPlan('3150 Gorsebury Mill Rd SE, Harrowen')).why,
+       MV.pickInDisc(hitsOf(FAKE.GORSEBURY_3152), d50,
+                     MV.searchPlan('3152 Gorsebury Mill Rd SE, Harrowen'), 10).why,
+       MV.pickInDisc(hitsOf(FAKE.GORSEBURY_3150), d50,
+                     { kind: 'cross', a: 'Gorsebury Mill Rd', b: 'Oak St' }).why,
        MV.pickInDisc(hitsOf(FAKE.MCD), d94, MV.searchPlan("McDonald's")).why,
-       MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150), null,
-                     MV.searchPlan('3150 Thornbury Mill Rd SE, Marietta')).why]),
+       MV.pickInDisc(hitsOf(FAKE.GORSEBURY_3150), null,
+                     MV.searchPlan('3150 Gorsebury Mill Rd SE, Harrowen')).why]),
      JSON.stringify(['none', 'capped', 'several', 'several', 'several']));
   ok_('[area] ...and none of those carries an area',
-      [MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150),
-                     MV.discFor(card({ lat: 33.90, lon: -84.60, miles: 0.5 })),
-                     MV.searchPlan('3150 Thornbury Mill Rd SE, Marietta')),
-       MV.pickInDisc(hitsOf(FAKE.THORNBURY_3152), d50,
-                     MV.searchPlan('3152 Thornbury Mill Rd SE, Marietta'), 10),
-       MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150), d50,
-                     { kind: 'cross', a: 'Thornbury Mill Rd', b: 'Oak St' }),
+      [MV.pickInDisc(hitsOf(FAKE.GORSEBURY_3150),
+                     MV.discFor(card({ lat: 33.90, lon: -44.60, miles: 0.5 })),
+                     MV.searchPlan('3150 Gorsebury Mill Rd SE, Harrowen')),
+       MV.pickInDisc(hitsOf(FAKE.GORSEBURY_3152), d50,
+                     MV.searchPlan('3152 Gorsebury Mill Rd SE, Harrowen'), 10),
+       MV.pickInDisc(hitsOf(FAKE.GORSEBURY_3150), d50,
+                     { kind: 'cross', a: 'Gorsebury Mill Rd', b: 'Oak St' }),
        MV.pickInDisc(hitsOf(FAKE.MCD), d94, MV.searchPlan("McDonald's")),
-       MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150), null,
-                     MV.searchPlan('3150 Thornbury Mill Rd SE, Marietta'))]
+       MV.pickInDisc(hitsOf(FAKE.GORSEBURY_3150), null,
+                     MV.searchPlan('3150 Gorsebury Mill Rd SE, Harrowen'))]
         .every(function (r) { return !r.at && r.area === undefined; }));
   eq('[area] a door answered by its street alone, the street inside the disc: '
      + '"nodoor" kept, the street\'s area beside it',
      JSON.stringify([kestrel.at, kestrel.why, kestrel.area && kestrel.area.approx,
                      kestrel.area && [kestrel.area.lat, kestrel.area.lon]]),
-     JSON.stringify([null, 'nodoor', true, [33.97, -84.53]]));
+     JSON.stringify([null, 'nodoor', true, [33.97, -44.53]]));
   eq('[area] ...but not its street outside the disc',
-     MV.pickInDisc(hitsOf(FAKE.KESTREL), MV.discFor(card({ lat: 33.90, lon: -84.60, miles: 0.5 })),
-                   MV.searchPlan('4821 Kestrel Dr, Marietta')).area, undefined);
+     MV.pickInDisc(hitsOf(FAKE.KESTREL), MV.discFor(card({ lat: 33.90, lon: -44.60, miles: 0.5 })),
+                   MV.searchPlan('4821 Kestrel Dr, Harrowen')).area, undefined);
   eq('[area] ...and the refusal\'s words are the refusal\'s, unchanged',
-     MV.nbxRefusal(near2, MV.discFor(card({ miles: 14.9 })), '3150 Thornbury…', 'held'),
-     'no pin for 3150 Thornbury… — 2 fit its card and disagree · within 14.9 mi');
+     MV.nbxRefusal(near2, MV.discFor(card({ miles: 14.9 })), '3150 Gorsebury…', 'held'),
+     'no pin for 3150 Gorsebury… — 2 fit its card and disagree · within 14.9 mi');
   /* The run: the area is its own rung, said "≈", never the door's. */
   eq('[area] the area\'s rung is "area" — before street or door, whatever the text',
-     JSON.stringify([MV.routeRung('3150 Thornbury Mill Rd SE, Marietta', near2.area),
-                     MV.routeRung('3150 Thornbury Mill Rd SE, Marietta', near2.area, 'street'),
-                     MV.routeRung('3150 Thornbury Mill Rd SE, Marietta', { lat: 1, lon: 2 })]),
+     JSON.stringify([MV.routeRung('3150 Gorsebury Mill Rd SE, Harrowen', near2.area),
+                     MV.routeRung('3150 Gorsebury Mill Rd SE, Harrowen', near2.area, 'street'),
+                     MV.routeRung('3150 Gorsebury Mill Rd SE, Harrowen', { lat: 1, lon: 2 })]),
      JSON.stringify(['area', 'area', 'door']));
-  var areaRun = MV.routeLadder({ lat: 33.9526, lon: -84.5499 }, [], near2.area, 'area');
+  var areaRun = MV.routeLadder({ lat: 33.9526, lon: -44.5499 }, [], near2.area, 'area');
   eq('[area] ...routed car -> area, said with how many answers and how far apart',
      JSON.stringify([areaRun.pts.length, areaRun.note]),
      JSON.stringify([2, '≈ route to area, 2 within 0.3 mi']));
   eq('[area] ...one answer (a street\'s) says no spread',
-     MV.routeLadder({ lat: 33.9526, lon: -84.5499 }, [], kestrel.area, 'area').note,
+     MV.routeLadder({ lat: 33.9526, lon: -44.5499 }, [], kestrel.area, 'area').note,
      '≈ route to area');
-  var REF2 = 'no pin for 3150 Thornbury… — 2 fit its card and disagree · within 14.9 mi';
-  var areaSaid = MV.routeSaid(REF2, [areaRun.note], '3150 Thornbury…');
+  var REF2 = 'no pin for 3150 Gorsebury… — 2 fit its card and disagree · within 14.9 mi';
+  var areaSaid = MV.routeSaid(REF2, [areaRun.note], '3150 Gorsebury…');
   eq('[area] the caption that is the routed end\'s own refusal carries the area\'s words '
      + 'in place of the disc\'s figures',
-     areaSaid, 'no pin for 3150 Thornbury… — 2 fit its card and disagree · ≈ routed, '
+     areaSaid, 'no pin for 3150 Gorsebury… — 2 fit its card and disagree · ≈ routed, '
      + '2 within 0.3 mi');
   eq('[area] ...and its chip says "≈" as its reason',
-     MV.captionChip(areaSaid), 'NO PIN · 3150 Thornbury…, ≈ routed, 2 within 0.3 mi');
+     MV.captionChip(areaSaid), 'NO PIN · 3150 Gorsebury…, ≈ routed, 2 within 0.3 mi');
   eq('[area] ...a street\'s one answer, "routed to area"',
      MV.captionChip(MV.routeSaid('no pin for 4821 Kestrel… — street found, not that door',
                                  ['≈ route to area'], '4821 Kestrel…')),
      'NO PIN · 4821 Kestrel…, ≈ routed to area');
   eq('[area] ...a caption about another place keeps the area as a note after its chip',
      MV.captionChip(MV.routeSaid(REF2, [areaRun.note], 'Somewhere Else')),
-     'NO PIN · 3150 Thornbury…, 2 fit its card and disagree · ≈ route to area, 2 within 0.3 mi');
+     'NO PIN · 3150 Gorsebury…, 2 fit its card and disagree · ≈ route to area, 2 within 0.3 mi');
   eq('[area] ...and the offer\'s trip says it as a trip\'s note',
      MV.routeSaid('on your way by road', ['trip: ' + areaRun.note]),
      'on your way by road · trip: ≈ route to area, 2 within 0.3 mi');
   ok_('[area] ...and the candidates drawn say the run went to their area, not a door',
-      MV.located(Object.assign({ seen: { hits: hitsOf(FAKE.THORNBURY_3150), door: '3150' } }, near2),
-                 d50, '3150 Thornbury…', 'held').marks.every(function (m) {
+      MV.located(Object.assign({ seen: { hits: hitsOf(FAKE.GORSEBURY_3150), door: '3150' } }, near2),
+                 d50, '3150 Gorsebury…', 'held').marks.every(function (m) {
         return m.tip.indexOf(' · ≈ routed to the area, not a door') > 0;
       }));
 
@@ -1625,7 +1626,7 @@ async function nucbox() {
    * route something than nothing at all." A list cut at the limit whose
    * answers inside the disc are one area carries it (`cut`); a door nothing
    * answered, its street alone (streetArea, `rough`). Never a pin. */
-  var vPlan = MV.searchPlan('10800 Vessington Hwy, Marietta');
+  var vPlan = MV.searchPlan('10800 Vessington Hwy, Harrowen');
   var capArea = MV.pickInDisc(hitsOf(FAKE.VESSINGTON_10800), d50, vPlan, 10);
   eq('[area more] a list cut at the limit, all ten inside within 0.3 mi: still no pin, still '
      + '"capped", an area at their middle marked cut',
@@ -1637,7 +1638,7 @@ async function nucbox() {
      JSON.stringify(MV.middleOf(hitsOf(FAKE.VESSINGTON_10800))),
      JSON.stringify({ lat: capArea.area.lat, lon: capArea.area.lon }));
   var capSpread = MV.pickInDisc(hitsOf(FAKE.VESSINGTON_10900), d50,
-                                MV.searchPlan('10900 Vessington Hwy, Marietta'), 10);
+                                MV.searchPlan('10900 Vessington Hwy, Harrowen'), 10);
   eq('[area more] ...a cut list spread over 3 mi is refused as before, no area',
      JSON.stringify([capSpread.at, capSpread.why, capSpread.area]),
      JSON.stringify([null, 'capped', null]));
@@ -1648,16 +1649,16 @@ async function nucbox() {
   for (var qi = 0; qi < 10; qi++) {
     var qDoor = qi === 3 || qi === 4;
     qHits.push({ lat: qDoor ? 33.9600 + (qi - 3) * 0.0008 : 33.9300 + qi * 0.0050,
-                 lon: qDoor ? -84.5450 : -84.5600 + qi * 0.0030,
-                 name: (qDoor ? '512' : String(600 + qi * 10)) + ', Quarrel Lane, Marietta, Georgia' });
+                 lon: qDoor ? -44.5450 : -44.5600 + qi * 0.0030,
+                 name: (qDoor ? '512' : String(600 + qi * 10)) + ', Quarrel Lane, Harrowen, Georgia' });
   }
-  var qCut = MV.pickInDisc(qHits, d50, MV.searchPlan('512 Quarrel Ln, Marietta'), 10);
+  var qCut = MV.pickInDisc(qHits, d50, MV.searchPlan('512 Quarrel Ln, Harrowen'), 10);
   eq('[area more] a cut list spread over 3 mi holding the asked door twice close together: '
      + 'still "capped", no pin, the area and the band\'s candidates the two doors\'',
      JSON.stringify([qCut.at, qCut.why, qCut.n, qCut.area && qCut.area.n,
                      qCut.area && qCut.area.cut, (qCut.cands || []).length]),
      JSON.stringify([null, 'capped', 10, 2, true, 2]));
-  var qNone = MV.pickInDisc(qHits, d50, MV.searchPlan('514 Quarrel Ln, Marietta'), 10);
+  var qNone = MV.pickInDisc(qHits, d50, MV.searchPlan('514 Quarrel Ln, Harrowen'), 10);
   eq('[area more] ...and with no door of that number in it, all ten, as before: spread, so no '
      + 'area, ten candidates',
      JSON.stringify([qNone.why, qNone.area || null, (qNone.cands || []).length]),
@@ -1669,7 +1670,7 @@ async function nucbox() {
   eq('[area more] ...the refusal\'s words unchanged',
      MV.nbxRefusal(capArea, d50, '10800 Vessington…', 'new'),
      'no pin for 10800 Vessington… — too many to be sure · the NucBox lists 10 at most');
-  var capNote = MV.routeLadder({ lat: 33.9526, lon: -84.5499 }, [], capArea.area, 'area').note;
+  var capNote = MV.routeLadder({ lat: 33.9526, lon: -44.5499 }, [], capArea.area, 'area').note;
   eq('[area more] ...routed to, said "10+": the list was cut',
      capNote, '≈ route to area, 10+ within 0.3 mi');
   var capSaid = MV.routeSaid('no pin for 10800 Vessington… — too many to be sure · the NucBox '
@@ -1691,7 +1692,7 @@ async function nucbox() {
      MV.captionChip(MV.routeSaid(REF2, ['trip: ' + MV.areaNote(capArea.area, true)],
                                  [['10800 Vessington…', 'trip: ' + MV.areaNote(capArea.area, true),
                                    capArea.area]])),
-     'NO PIN · 3150 Thornbury…, 2 fit its card and disagree');
+     'NO PIN · 3150 Gorsebury…, 2 fit its card and disagree');
 
   // The street alone, as the index answers `whole` (streets.js, the fake's).
   var STR = require('../streets.js');
@@ -1707,7 +1708,7 @@ async function nucbox() {
      + 'a rough area ON the street',
      JSON.stringify(pell && [pell.approx, pell.rough, pell.n, +pell.lat.toFixed(6),
                              +pell.lon.toFixed(6), pell.miles < MV.ROUGH_AREA_MI]),
-     JSON.stringify([true, true, 1, 33.958, -84.544, true]));
+     JSON.stringify([true, true, 1, 33.958, -44.544, true]));
   eq('[area more] ...1.5 mi, chosen: a street the index sends whole always fits',
      JSON.stringify([MV.ROUGH_AREA_MI, 2000 / 1609.344 < MV.ROUGH_AREA_MI]), '[1.5,true]');
   eq('[area more] ...a long street (sent by its length alone) is none',
@@ -1716,16 +1717,16 @@ async function nucbox() {
      MV.streetArea(wholeOf('Fennick Court'), d50), null);
   eq('[area more] ...a street outside the disc is none, and so is no disc',
      JSON.stringify([MV.streetArea(wholeOf('Pellmore Street'),
-                                   MV.discFor(card({ lat: 33.90, lon: -84.60, miles: 0.5 }))),
+                                   MV.discFor(card({ lat: 33.90, lon: -44.60, miles: 0.5 }))),
                      MV.streetArea(wholeOf('Pellmore Street'), null)]),
      JSON.stringify([null, null]));
   eq('[area more] ...and a name the index reads as two names is none',
      MV.streetArea({ ok: true, names: ['Pellmore Street', 'Pellmore Court'], how: 'ocr',
                      streets: wholeOf('Pellmore Street').streets }, d50), null);
   eq('[area more] ...said "street area", no count',
-     JSON.stringify([MV.routeLadder({ lat: 33.9526, lon: -84.5499 }, [], pell, 'area').note,
+     JSON.stringify([MV.routeLadder({ lat: 33.9526, lon: -44.5499 }, [], pell, 'area').note,
                      MV.areaNote(pell, true),
-                     MV.routeRung('10495 Pellmore Street, Marietta', pell)]),
+                     MV.routeRung('10495 Pellmore Street, Harrowen', pell)]),
      JSON.stringify(['≈ route to street area', '≈ pickup area', 'area']));
   var pellSaid = MV.routeSaid('no pin for 10495 Pellmore… — none found · within 5.0 mi of you',
                               ['trip: ' + MV.areaNote(pell, true)],
@@ -1750,7 +1751,7 @@ async function nucbox() {
       if (how === 'down') body = { ok: false, unreachable: true, error: 'down' };
       else if (/\/stretch\?/.test(u)) {
         body = { ok: true, names: ['Dunmere Parkway'], how: 'exact', points: 2, cutAt: null,
-                 lines: [[[33.9526, -84.5499], [34.0300, -84.5499]]] };
+                 lines: [[[33.9526, -44.5499], [34.0300, -44.5499]]] };
       } else {
         var pts = decodeURIComponent(u.split('points=')[1]).split(';').map(function (c) {
           var x = c.split(',').map(Number);
@@ -1766,8 +1767,8 @@ async function nucbox() {
   var dash = function (o) {
     return card(Object.assign({ miles: 3.0, stops: 2, hasTotal: false, legs: 1 }, o));
   };
-  var tPlan = '3152 Thornbury Mill Rd SE, Marietta';
-  var tRes = MV.pickInDisc(hitsOf(FAKE.THORNBURY_3152), d50, MV.searchPlan(tPlan));
+  var tPlan = '3152 Gorsebury Mill Rd SE, Harrowen';
+  var tRes = MV.pickInDisc(hitsOf(FAKE.GORSEBURY_3152), d50, MV.searchPlan(tPlan));
   eq('[band] the width: 0.4 mi, or 15% of a long figure — chosen',
      JSON.stringify([MV.bandMiles(1.0), +MV.bandMiles(4.0).toFixed(2), MV.BAND_MIN_MI,
                      MV.BAND_FRAC]), JSON.stringify([0.4, 0.6, 0.4, 0.15]));
@@ -1803,18 +1804,18 @@ async function nucbox() {
      + 'out — an area at that door, the band\'s, not a pin',
      JSON.stringify(bPick && [bPick.lat, bPick.lon, bPick.approx, bPick.band, bPick.n,
                               bPick.cardMi, tRes.at, tRes.why]),
-     JSON.stringify([33.96, -84.545, true, true, 1, 0.7, null, 'several']));
+     JSON.stringify([33.96, -44.545, true, true, 1, 0.7, null, 'several']));
   eq('[band] ...two road questions, car to each door, through the relay\'s two-point route',
      JSON.stringify([bandAsked.length, bandAsked.every(function (u) {
-       return /^\/api\/nbx\/route\?points=-84\.54990,33\.95260;/.test(u); })]),
+       return /^\/api\/nbx\/route\?points=-44\.54990,33\.95260;/.test(u); })]),
      JSON.stringify([2, true]));
   eq('[band] ...said by the card\'s figure, in the end\'s own refusal and its chip',
      JSON.stringify([MV.areaNote(bPick), MV.captionChip(MV.routeSaid(
-       'no pin for 3152 Thornbury… — 2 fit its card and disagree · within 5.5 mi',
+       'no pin for 3152 Gorsebury… — 2 fit its card and disagree · within 5.5 mi',
        ['trip: ' + MV.areaNote(bPick, true)],
-       [['3152 Thornbury…', 'trip: ' + MV.areaNote(bPick, true), bPick]]))]),
+       [['3152 Gorsebury…', 'trip: ' + MV.areaNote(bPick, true), bPick]]))]),
      JSON.stringify(['≈ route to area, by card\'s 0.7 mi',
-                     'NO PIN · 3152 Thornbury…, ≈ routed, by card\'s 0.7 mi']));
+                     'NO PIN · 3152 Gorsebury…, ≈ routed, by card\'s 0.7 mi']));
   var bDrop = await bandNbx().band(tPlan, tRes, d50,
                                    MV.bandTarget(uber({ toPickupMiles: 4.3 }), 'dropoff'),
                                    SQ, { left: 24 }, true);
@@ -1831,7 +1832,7 @@ async function nucbox() {
   eq('[band] ...a ceiling over both throws nothing out, so no band',
      await bandNbx().band(tPlan, tRes, d50, MV.bandTarget(dash({ miles: 5.0 }), 'pickup'), null,
                           { left: 24 }, true), null);
-  var ddPick = { lat: 33.9526, lon: -84.54 };
+  var ddPick = { lat: 33.9526, lon: -44.54 };
   var bDashDrop = await bandNbx().band(tPlan, tRes, d50, MV.bandTarget(dash({ miles: 1.5 }),
                                                                        'dropoff'),
                                        ddPick, { left: 24 }, true);
@@ -1844,36 +1845,36 @@ async function nucbox() {
                                           null, { left: 24 }, true), tRes.area, tRes.why]),
      JSON.stringify([null, null, 'several']));
   var vRes = MV.pickInDisc(hitsOf(FAKE.VESSINGTON_10900), d50,
-                           MV.searchPlan('10900 Vessington Hwy, Marietta'), 10);
+                           MV.searchPlan('10900 Vessington Hwy, Harrowen'), 10);
   eq('[band] a cut list spread over 3 mi: at 2.1 mi the doors kept are still miles apart, so '
      + 'no band, as before',
      JSON.stringify([(vRes.cands || []).length,
-                     await bandNbx().band('10900 Vessington Hwy, Marietta', vRes, d50,
+                     await bandNbx().band('10900 Vessington Hwy, Harrowen', vRes, d50,
                                           MV.bandTarget(uber({ toPickupMiles: 2.1 }), 'pickup'),
                                           null, { left: 24 }, true)]),
      JSON.stringify([10, null]));
-  var vBand = await bandNbx().band('10900 Vessington Hwy, Marietta', vRes, d50,
+  var vBand = await bandNbx().band('10900 Vessington Hwy, Harrowen', vRes, d50,
                                    MV.bandTarget(dash({ miles: 0.3 }), 'pickup'), null,
                                    { left: 24 }, true);
   eq('[band] ...and a ceiling of 0.3 mi keeps the three nearest, one area of the cut list',
      JSON.stringify(vBand && [vBand.n, vBand.miles < MV.AREA_MI, vBand.band, vRes.why]),
      JSON.stringify([3, true, true, 'capped']));
   var dunRes = { at: null, why: 'none', nearest: null, n: 0 };
-  var dun = await bandNbx().band('10497 Dunmere Parkway, Marietta', dunRes, d50,
+  var dun = await bandNbx().band('10497 Dunmere Parkway, Harrowen', dunRes, d50,
                                  MV.bandTarget(uber({ toPickupMiles: 2.0 }), 'pickup'), null,
                                  { left: 24 }, true);
   eq('[band] a door nothing answered on a long street: its stretch sampled (10 points), and '
      + 'the two whose road miles meet the card\'s 2.0 are an area where the street crosses it',
      JSON.stringify(dun && [+dun.lat.toFixed(4), dun.lon, dun.n, dun.band, dunRes.why, dunRes.at]),
-     JSON.stringify([33.9719, -84.5499, 2, true, 'none', null]));
+     JSON.stringify([33.9719, -44.5499, 2, true, 'none', null]));
   eq('[band] ...sampled every 150 m or wider, never past BAND_ASKS_MAX points',
-     JSON.stringify([MV.bandSamples([[[33.9526, -84.5499], [34.0300, -84.5499]]], d50, 10, '')
+     JSON.stringify([MV.bandSamples([[[33.9526, -44.5499], [34.0300, -44.5499]]], d50, 10, '')
                        .length,
-                     MV.bandSamples([[[33.9526, -84.5499], [33.9600, -84.5499]]], d50, 10, '')
+                     MV.bandSamples([[[33.9526, -44.5499], [33.9600, -44.5499]]], d50, 10, '')
                        .length, MV.BAND_STEP_M]),
      JSON.stringify([10, 5, 150]));
   eq('[band] ...without the street index the street is not asked',
-     await bandNbx().band('10497 Dunmere Parkway, Marietta', dunRes, d50,
+     await bandNbx().band('10497 Dunmere Parkway, Harrowen', dunRes, d50,
                           MV.bandTarget(uber({ toPickupMiles: 2.0 }), 'pickup'), null,
                           { left: 24 }, false), null);
   eq('[band] router down: no band, silently',
@@ -1923,10 +1924,10 @@ async function nucbox() {
      band's point as an approximate one, never a door. */
   eq('[band] no circularity: the refusal keeps no pin, so the card is never held against the '
      + 'band\'s point, and its words are the refusal\'s',
-     JSON.stringify([tRes.at, MV.nbxRefusal(tRes, d50, '3152 Thornbury…', 'new'),
+     JSON.stringify([tRes.at, MV.nbxRefusal(tRes, d50, '3152 Gorsebury…', 'new'),
                      MV.dropPoint(Object.assign({}, tRes, { bandArea: bPick }))]),
-     JSON.stringify([null, 'no pin for 3152 Thornbury… — 2 fit the card and disagree · within '
-                     + '5 mi of you', { lat: 33.96, lon: -84.545, approx: true, band: true }]));
+     JSON.stringify([null, 'no pin for 3152 Gorsebury… — 2 fit the card and disagree · within '
+                     + '5 mi of you', { lat: 33.96, lon: -44.545, approx: true, band: true }]));
 
   /* ---- DoorDash's map label as the trip's end (the owner, 27 Oct) -------
    *
@@ -1970,16 +1971,16 @@ async function nucbox() {
      JSON.stringify([MV.cardStores({ stores: [twoStores.stores[0]] }), MV.cardStores({}),
                      MV.cardStores(null), MV.cardStores({ stores: [null, { door: 'x' }] })]),
      JSON.stringify([[], [], [], []]));
-  var hs = MV.heldStores([{ name: 'A', door: '1 A Rd', at: { lat: 34.01, lon: -84.6 } },
+  var hs = MV.heldStores([{ name: 'A', door: '1 A Rd', at: { lat: 34.01, lon: -44.6 } },
                           { name: 'B', door: '2 B St', at: null },
-                          { name: 'C', door: '3 C Ln', at: { lat: 34.03, lon: -84.62 },
+                          { name: 'C', door: '3 C Ln', at: { lat: 34.03, lon: -44.62 },
                             visited: true },
-                          { name: 'D', door: '4 D Way', at: { lat: 34.04, lon: -84.63 } }]);
+                          { name: 'D', door: '4 D Way', at: { lat: 34.04, lon: -44.63 } }]);
   eq('[stores] an order\'s stores as the server gave them: the run through those pinned and '
      + 'not behind the car, in the card\'s order; the one with no pin counted as skipped',
      JSON.stringify([hs.pts, hs.skipped, hs.marks.map(function (m) {
        return m.n + (m.at ? '@' : '-') + (m.visited ? 'v' : ''); })]),
-     JSON.stringify([[{ lat: 34.01, lon: -84.6 }, { lat: 34.04, lon: -84.63 }], 1,
+     JSON.stringify([[{ lat: 34.01, lon: -44.6 }, { lat: 34.04, lon: -44.63 }], 1,
                      ['1@', '2-', '3@v', '4@']]));
   eq('[stores] ...none for an order with fewer than two, and the words for the skipped',
      JSON.stringify([MV.heldStores(null), MV.heldStores([{ name: 'A' }]),
@@ -1994,12 +1995,12 @@ async function nucbox() {
                      null, null]));
   eq('[stores] the run through two stores to a guessed end: car -> store 1 -> store 2 -> the '
      + 'label, its rung "≈ from DoorDash\'s map"',
-     JSON.stringify(MV.routeLadder({ lat: 34, lon: -84.5 },
-                                   [{ lat: 34.01, lon: -84.6 }, { lat: 34.04, lon: -84.63 }],
-                                   { lat: 34.05, lon: -84.64, approx: true, guess: true }, 'guess')),
-     JSON.stringify({ pts: [{ lat: 34, lon: -84.5 }, { lat: 34.01, lon: -84.6 },
-                            { lat: 34.04, lon: -84.63 },
-                            { lat: 34.05, lon: -84.64, approx: true, guess: true }],
+     JSON.stringify(MV.routeLadder({ lat: 34, lon: -44.5 },
+                                   [{ lat: 34.01, lon: -44.6 }, { lat: 34.04, lon: -44.63 }],
+                                   { lat: 34.05, lon: -44.64, approx: true, guess: true }, 'guess')),
+     JSON.stringify({ pts: [{ lat: 34, lon: -44.5 }, { lat: 34.01, lon: -44.6 },
+                            { lat: 34.04, lon: -44.63 },
+                            { lat: 34.05, lon: -44.64, approx: true, guess: true }],
                       note: '≈ from DoorDash\'s map' }));
   /* ...but on a card for two customers ("Multiple dropoffs (2 stops)") the
      label is ONE of the dropoffs and which comes first is not known, so it
@@ -2013,18 +2014,18 @@ async function nucbox() {
      JSON.stringify([2, 3, 0, 0, 0]));
   eq('[stores] ...its leg from the last store to the label, two points and no more; none with '
      + 'either end missing',
-     JSON.stringify([MV.oneOfLeg({ lat: 34.04, lon: -84.63 },
-                                 { lat: 34.05, lon: -84.64, approx: true, guess: true }),
-                     MV.oneOfLeg(null, { lat: 34.05, lon: -84.64 }),
-                     MV.oneOfLeg({ lat: 34.04, lon: -84.63 }, { lat: NaN, lon: -84.64 })]),
-     JSON.stringify([[[34.04, -84.63], [34.05, -84.64]], null, null]));
+     JSON.stringify([MV.oneOfLeg({ lat: 34.04, lon: -44.63 },
+                                 { lat: 34.05, lon: -44.64, approx: true, guess: true }),
+                     MV.oneOfLeg(null, { lat: 34.05, lon: -44.64 }),
+                     MV.oneOfLeg({ lat: 34.04, lon: -44.63 }, { lat: NaN, lon: -44.64 })]),
+     JSON.stringify([[[34.04, -44.63], [34.05, -44.64]], null, null]));
   eq('[stores] ...and the run the road is asked for ends at the last store, the label nowhere '
      + 'on it',
-     JSON.stringify(MV.routeLadder({ lat: 34, lon: -84.5 },
-                                   [{ lat: 34.01, lon: -84.6 }, { lat: 34.04, lon: -84.63 }],
+     JSON.stringify(MV.routeLadder({ lat: 34, lon: -44.5 },
+                                   [{ lat: 34.01, lon: -44.6 }, { lat: 34.04, lon: -44.63 }],
                                    null, null).pts),
-     JSON.stringify([{ lat: 34, lon: -84.5 }, { lat: 34.01, lon: -84.6 },
-                     { lat: 34.04, lon: -84.63 }]));
+     JSON.stringify([{ lat: 34, lon: -44.5 }, { lat: 34.01, lon: -44.6 },
+                     { lat: 34.04, lon: -44.63 }]));
 
   var gDisc = MV.guessDisc(dash({ miles: 1.5 }), ddPick);
   var gBand = await bandNbx().band(tPlan, tRes, gDisc, MV.bandTarget(dash({ miles: 1.5 }), 'dropoff'),
@@ -2034,7 +2035,7 @@ async function nucbox() {
      JSON.stringify(gBand && [gBand.lat, gBand.n, gBand.approx, gBand.band,
                               MV.dropPoint(Object.assign({}, tRes, { bandArea: gBand })).approx]),
      JSON.stringify([33.96, 1, true, true, true]));
-  var gLad = MV.routeLadder(SQ, [ddPick], { lat: 33.96, lon: -84.545, approx: true, guess: true },
+  var gLad = MV.routeLadder(SQ, [ddPick], { lat: 33.96, lon: -44.545, approx: true, guess: true },
                             'guess');
   eq('[guess] the run car -> pickup -> the guess, said "≈ from DoorDash\'s map"',
      JSON.stringify([gLad.pts.length, gLad.note, MV.ROUTE_NOTES.guess]),
@@ -2053,9 +2054,9 @@ async function nucbox() {
 
   ok_('...and a door is read off the first two parts of the name, so the '
       + 'postcode is never taken for the house number',
-      MV.hasDoor({ name: '1985, Cobb Parkway, Kennesaw' }, '1985')
-      && MV.hasDoor({ name: "McDonald's, 1155, Roswell Street Northeast" }, '1155')
-      && !MV.hasDoor({ name: 'Kestrel Drive, Marietta, Cobb County, Georgia, 30060' }, '30060'));
+      MV.hasDoor({ name: '1985, Vosk Parkway, Tellmoor' }, '1985')
+      && MV.hasDoor({ name: "McDonald's, 1155, Ruswold Street Northeast" }, '1155')
+      && !MV.hasDoor({ name: 'Kestrel Drive, Harrowen, Vosk County, Georgia, 90660' }, '90660'));
 
   /* ---- the held end by its PLACE (the owner, 17 Oct): pickPlace ----------
    *
@@ -2095,8 +2096,8 @@ async function nucbox() {
   var deck = hitsOf(FAKE.DECK)[0];
   eq('namedFeature: an amenity with a name of its own is a named feature, a road, a bare '
      + 'house number and a building with no name are not',
-     JSON.stringify([deck, hitsOf(FAKE.QUARRY)[0], hitsOf(FAKE.COBB_1985)[2],
-                     hitsOf(FAKE.COBB_1985)[0]].map(MV.namedFeature)),
+     JSON.stringify([deck, hitsOf(FAKE.QUARRY)[0], hitsOf(FAKE.VOSK_1985)[2],
+                     hitsOf(FAKE.VOSK_1985)[0]].map(MV.namedFeature)),
      JSON.stringify([true, false, false, false]));
   eq('placeQuery: the place as read, its spacing closed up and its edges\' marks off; under '
      + 'four letters is nothing to ask',
@@ -2106,7 +2107,7 @@ async function nucbox() {
   var byPlace = MV.pickPlace([deck], d30, 'Wrenfield Parking Deck', null);
   eq('pickPlace: the deck of that name inside a 3.0 mi card is the end, by place',
      JSON.stringify([byPlace.at && [byPlace.at.lat, byPlace.at.lon], byPlace.by]),
-     JSON.stringify([[33.9712, -84.5288], 'place']));
+     JSON.stringify([[33.9712, -44.5288], 'place']));
   eq('...a road of the place\'s name is not, nor is a deck of another name',
      JSON.stringify([MV.pickPlace(hitsOf(FAKE.QUARRY), d30, 'Quarry Hall', null).why,
                      MV.pickPlace([deck], d30, 'Wrenfield Deck', null).why]),
@@ -2119,7 +2120,7 @@ async function nucbox() {
   eq('...one outside the disc is refused, and saying how far it was',
      JSON.stringify([lantern.at, lantern.why, (lantern.nearest || 0).toFixed(1)]),
      JSON.stringify([null, 'none', '6.9']));
-  var twin = { lat: 33.99, lon: -84.53, name: 'Wrenfield Parking Deck, Marietta',
+  var twin = { lat: 33.99, lon: -44.53, name: 'Wrenfield Parking Deck, Harrowen',
                kind: 'amenity', called: 'Wrenfield Parking Deck' };
   eq('...two of that name inside that are not one place are refused',
      MV.pickPlace([deck, twin], d30, 'Wrenfield Parking Deck', null).why, 'several');
@@ -2135,14 +2136,14 @@ async function nucbox() {
      owner's 17 Oct evening snap, "1830 <Name> Creek Cts SW" answered with
      nothing). Invented streets throughout (tests/fake-nucbox.js, Tansy Creek). */
   var RETRY = [
-    ['1830 Tansy Creek Cts SW, Marietta', '1830 Tansy Creek SW', 'court', 'an unusual plural and a quadrant'],
-    ['1830 Tansy Creek Ct, Marietta', '1830 Tansy Creek', 'court', 'no quadrant'],
-    ['12A Birch Hollow Dr. NE, Marietta', '12A Birch Hollow NE', 'drive', 'a lettered house and a stop after the type'],
-    ['100 Court St, Marietta', '100 Court', 'street', 'a name that is itself a type word'],
-    ['100 Main SW, Marietta', null, null, 'no type word to leave out'],
-    ['100 Ct SW, Marietta', null, null, 'nothing in front of the type but the house'],
-    ['Tansy Creek Cts SW, Marietta', null, null, 'no house number: no door to ask for'],
-    ['100 N Ct, Marietta', null, null, 'only a quadrant letter in front of the type']
+    ['1830 Tansy Creek Cts SW, Harrowen', '1830 Tansy Creek SW', 'court', 'an unusual plural and a quadrant'],
+    ['1830 Tansy Creek Ct, Harrowen', '1830 Tansy Creek', 'court', 'no quadrant'],
+    ['12A Birch Hollow Dr. NE, Harrowen', '12A Birch Hollow NE', 'drive', 'a lettered house and a stop after the type'],
+    ['100 Court St, Harrowen', '100 Court', 'street', 'a name that is itself a type word'],
+    ['100 Main SW, Harrowen', null, null, 'no type word to leave out'],
+    ['100 Ct SW, Harrowen', null, null, 'nothing in front of the type but the house'],
+    ['Tansy Creek Cts SW, Harrowen', null, null, 'no house number: no door to ask for'],
+    ['100 N Ct, Harrowen', null, null, 'only a quadrant letter in front of the type']
   ];
   RETRY.forEach(function (c) {
     var again = MV.streetRetry(MV.searchPlan(c[0]));
@@ -2153,42 +2154,42 @@ async function nucbox() {
   eq('streetType: every spelling of a court is one family, and a name is none',
      JSON.stringify(['Cts', 'ct', 'Court', 'COURTS', 'Crt', 'Ct.', 'Creek'].map(MV.streetType)),
      JSON.stringify(['court', 'court', 'court', 'court', 'court', 'court', null]));
-  var tansy = MV.streetRetry(MV.searchPlan('1830 Tansy Creek Cts SW, Marietta'));
+  var tansy = MV.streetRetry(MV.searchPlan('1830 Tansy Creek Cts SW, Harrowen'));
   function fits(name) { return MV.retryFits({ name: name }, tansy); }
   eq('retryFits: the same name with the type in any spelling or none, and a quadrant or none, '
      + 'is the street; another type, another name, another number\'s place in the name is not',
      JSON.stringify([
-       fits('1830, Tansy Creek Court Southwest, Marietta'),
-       fits('1830, Tansy Creek Ct SW, Marietta'),
-       fits('1830, Tansy Creek Courts, Marietta'),
-       fits('1830, Tansy Creek Southwest, Marietta'),
-       fits('Clubhouse, 1830, Tansy Creek Court Southwest, Marietta'),
-       fits('1830, Tansy Creek Drive Southwest, Marietta'),
-       fits('1830, Tansy Creek Court Extension, Marietta'),
-       fits('1830, North Tansy Creek Court, Marietta'),
-       fits('1830, Tansy Court, Marietta'),
-       fits('Tansy Creek Court Southwest, Marietta')]),
+       fits('1830, Tansy Creek Court Southwest, Harrowen'),
+       fits('1830, Tansy Creek Ct SW, Harrowen'),
+       fits('1830, Tansy Creek Courts, Harrowen'),
+       fits('1830, Tansy Creek Southwest, Harrowen'),
+       fits('Clubhouse, 1830, Tansy Creek Court Southwest, Harrowen'),
+       fits('1830, Tansy Creek Drive Southwest, Harrowen'),
+       fits('1830, Tansy Creek Court Extension, Harrowen'),
+       fits('1830, North Tansy Creek Court, Harrowen'),
+       fits('1830, Tansy Court, Harrowen'),
+       fits('Tansy Creek Court Southwest, Harrowen')]),
      JSON.stringify([true, true, true, true, true, false, false, false, false, true]));
   var d50r = MV.discFor(card({ miles: 5.0 }));
   var both = MV.pickRetry(hitsOf(FAKE.TANSY_1830), d50r, tansy, null);
   eq('pickRetry: of the Court\'s door and the Drive\'s same number, both inside a 5.0 mi card, '
      + 'the Court\'s is the door',
      JSON.stringify([both.at && [both.at.lat, both.at.lon], both.n]),
-     JSON.stringify([[33.98, -84.57], 1]));
+     JSON.stringify([[33.98, -44.57], 1]));
   eq('...where pickInDisc alone would call the two "several"',
      MV.pickInDisc(hitsOf(FAKE.TANSY_1830), d50r, tansy, null).why, 'several');
   var drive = MV.pickRetry(hitsOf(FAKE.TANSY_2040),
-                           d50r, MV.streetRetry(MV.searchPlan('2040 Tansy Creek Cts SW, Marietta')), null);
+                           d50r, MV.streetRetry(MV.searchPlan('2040 Tansy Creek Cts SW, Harrowen')), null);
   eq('...and the Drive\'s door alone is never the Court\'s',
      JSON.stringify([drive.at, drive.why]), JSON.stringify([null, 'none']));
   eq('...a cut list proves nothing, and the street alone is not the door',
      JSON.stringify([MV.pickRetry(hitsOf(FAKE.TANSY_1830), d50r, tansy, 10).why,
-                     MV.pickRetry([{ lat: 33.98, lon: -84.57,
-                                     name: 'Tansy Creek Court Southwest, Marietta' }],
+                     MV.pickRetry([{ lat: 33.98, lon: -44.57,
+                                     name: 'Tansy Creek Court Southwest, Harrowen' }],
                                   d50r, tansy, null).why]),
      JSON.stringify(['capped', 'nodoor']));
-  var far = { lat: 34.3, lon: -84.2, name: 'Tansy Creek Court' };
-  var near = { lat: 33.97, lon: -84.53, name: 'Tansy Creek Court' };
+  var far = { lat: 34.3, lon: -44.2, name: 'Tansy Creek Court' };
+  var near = { lat: 33.97, lon: -44.53, name: 'Tansy Creek Court' };
   eq('retryWanted: nothing answered, or nothing inside, or the street only outside the disc; '
      + 'never the street inside, several, capped, or a pin',
      JSON.stringify([
@@ -2214,21 +2215,21 @@ async function nucbox() {
      the road and not the door). Invented streets (tests/fake-nucbox.js,
      Ardley W Corwin Parkway). */
   var DIRS = [
-    ['810 Ardley West Corwin Parkway, Kennesaw, GA 30144', '810 Ardley W Corwin Parkway',
+    ['810 Ardley West Corwin Parkway, Tellmoor, GA 90744', '810 Ardley W Corwin Parkway',
      ['ardley', 'w', 'corwin'], 'a middle initial spelled out'],
-    ['810 Ardley W Corwin Pkwy, Kennesaw', '810 Ardley West Corwin Pkwy',
+    ['810 Ardley W Corwin Pkwy, Tellmoor', '810 Ardley West Corwin Pkwy',
      ['ardley', 'w', 'corwin'], 'a middle initial as its letter'],
     ['Outback Steakhouse (810 Ardley West Corwin Parkway)', '810 Ardley W Corwin Parkway',
      ['ardley', 'w', 'corwin'], 'a store\'s bracketed door'],
-    ['810 Ardley Corwin Pkwy Northwest, Kennesaw', '810 Ardley Corwin Pkwy NW',
+    ['810 Ardley Corwin Pkwy Northwest, Tellmoor', '810 Ardley Corwin Pkwy NW',
      ['ardley', 'corwin'], 'a quadrant spelled out last'],
-    ['810 Ardley N Corwin Pkwy NW, Kennesaw', '810 Ardley North Corwin Pkwy Northwest',
+    ['810 Ardley N Corwin Pkwy NW, Tellmoor', '810 Ardley North Corwin Pkwy Northwest',
      ['ardley', 'n', 'corwin'], 'both, each the other way'],
-    ['810 West Paces Ferry Rd, Atlanta', null, null, 'only the name\'s opening word'],
-    ['810 Ardley West Corwin, Kennesaw', null, null, 'no type word after the name'],
-    ['810 N W Pkwy, Kennesaw', null, null, 'no name word that is not a directional'],
-    ['Ardley West Corwin Parkway, Kennesaw', null, null, 'no house number'],
-    ['4821 Kestrel Dr, Marietta', null, null, 'no directional anywhere']
+    ['810 West Tolls Ferry Rd, Solvane', null, null, 'only the name\'s opening word'],
+    ['810 Ardley West Corwin, Tellmoor', null, null, 'no type word after the name'],
+    ['810 N W Pkwy, Tellmoor', null, null, 'no name word that is not a directional'],
+    ['Ardley West Corwin Parkway, Tellmoor', null, null, 'no house number'],
+    ['4821 Kestrel Dr, Harrowen', null, null, 'no directional anywhere']
   ];
   DIRS.forEach(function (c) {
     var d = MV.dirRetry(MV.searchPlan(c[0]));
@@ -2237,24 +2238,24 @@ async function nucbox() {
        JSON.stringify(c[1] ? [c[1], c[2], true, '810'] : null));
   });
   eq('dirFlip: every directional both ways, and a name none',
-     JSON.stringify(['West', 'w', 'W.', 'NW', 'northwest', 'South', 'e', 'Westover'].map(MV.dirFlip)),
+     JSON.stringify(['West', 'w', 'W.', 'NW', 'northwest', 'South', 'e', 'Tilmoore'].map(MV.dirFlip)),
      JSON.stringify(['W', 'West', 'West', 'Northwest', 'NW', 'S', 'East', null]));
-  var ard = MV.dirRetry(MV.searchPlan('810 Ardley West Corwin Parkway, Kennesaw'));
+  var ard = MV.dirRetry(MV.searchPlan('810 Ardley West Corwin Parkway, Tellmoor'));
   function dfits(name) { return MV.retryFits({ name: name }, ard); }
   eq('retryFits (directional): the name with West or W, the type in any spelling or none, '
      + 'a quadrant or none; another type, a dropped initial, another letter is not',
-     JSON.stringify([dfits('810, Ardley W Corwin Parkway Northwest, Kennesaw'),
-                     dfits('810, Ardley West Corwin Pkwy, Kennesaw'),
-                     dfits('810, Ardley W Corwin NW, Kennesaw'),
-                     dfits('810, Ardley W Corwin Circle Northwest, Kennesaw'),
-                     dfits('810, Ardley Corwin Parkway, Kennesaw'),
-                     dfits('810, Ardley E Corwin Parkway, Kennesaw')]),
+     JSON.stringify([dfits('810, Ardley W Corwin Parkway Northwest, Tellmoor'),
+                     dfits('810, Ardley West Corwin Pkwy, Tellmoor'),
+                     dfits('810, Ardley W Corwin NW, Tellmoor'),
+                     dfits('810, Ardley W Corwin Circle Northwest, Tellmoor'),
+                     dfits('810, Ardley Corwin Parkway, Tellmoor'),
+                     dfits('810, Ardley E Corwin Parkway, Tellmoor')]),
      JSON.stringify([true, true, true, false, false, false]));
   var d50d = MV.discFor(card({ miles: 5.0 }));
   var d10d = MV.discFor(card({ miles: 1.0 }));
   var ardDoor = MV.pickRetry(hitsOf(FAKE.ARDLEY_810), d50d, ard, null);
   eq('pickRetry (directional): the door 3.1 mi out inside a 5.0 mi card',
-     JSON.stringify(ardDoor.at && [ardDoor.at.lat, ardDoor.at.lon]), JSON.stringify([33.99, -84.58]));
+     JSON.stringify(ardDoor.at && [ardDoor.at.lat, ardDoor.at.lon]), JSON.stringify([33.99, -44.58]));
   eq('...outside a 1.0 mi card refused, the Circle\'s 812 never the Parkway\'s, the road alone '
      + 'not the door',
      JSON.stringify([MV.pickRetry(hitsOf(FAKE.ARDLEY_810), d10d, ard, null).why,
@@ -2286,22 +2287,22 @@ async function nucbox() {
      door is asked once more with that word left out, by the type retry and
      the directional retry alike. Invented streets (Tansy Creek, Ardley). */
   var TAILS = [
-    ['1830 Tansy Creek Ct NUP, Marietta', '1830 Tansy Creek Ct', 'NUP', 'a slipped quadrant after the type'],
-    ['1830 Tansy Creek Ct Xq, Marietta', '1830 Tansy Creek Ct', 'Xq', 'any short word of letters'],
-    ['1830 Tansy Creek Ct NW, Marietta', null, null, 'a quadrant is no unknown word'],
-    ['1830 Tansy Creek Ct Dr, Marietta', null, null, 'nor a type'],
-    ['1830 Tansy Creek Ct 12, Marietta', null, null, 'nor a number'],
-    ['1830 Tansy Creek NUP, Marietta', null, null, 'nor a word after no type'],
-    ['1830 Ct NUP, Marietta', null, null, 'nor a type with no name in front'],
+    ['1830 Tansy Creek Ct NUP, Harrowen', '1830 Tansy Creek Ct', 'NUP', 'a slipped quadrant after the type'],
+    ['1830 Tansy Creek Ct Xq, Harrowen', '1830 Tansy Creek Ct', 'Xq', 'any short word of letters'],
+    ['1830 Tansy Creek Ct NW, Harrowen', null, null, 'a quadrant is no unknown word'],
+    ['1830 Tansy Creek Ct Dr, Harrowen', null, null, 'nor a type'],
+    ['1830 Tansy Creek Ct 12, Harrowen', null, null, 'nor a number'],
+    ['1830 Tansy Creek NUP, Harrowen', null, null, 'nor a word after no type'],
+    ['1830 Ct NUP, Harrowen', null, null, 'nor a type with no name in front'],
     // A designator is part of the road's name, not a slip (review of 6 Nov;
     // invented): "1450 Tansy Springs Rd Ext" asked as "1450 Tansy Springs Rd"
     // took the base road's 1450 — another road, and the GPS drop armed on it.
-    ['1450 Tansy Springs Rd Ext, Canton', null, null, 'nor a road\'s extension'],
-    ['1450 Tansy Springs Rd Conn, Canton', null, null, 'nor a connector'],
-    ['1450 Tansy Springs Rd Spur, Canton', null, null, 'nor a spur'],
-    ['1450 Tansy Springs Hwy Byp, Canton', null, null, 'nor a bypass'],
-    ['1450 Tansy Springs Hwy Alt, Canton', null, null, 'nor an alternate'],
-    ['1450 Tansy Springs Hwy Bus, Canton', null, null, 'nor a business route']
+    ['1450 Tansy Springs Rd Ext, Belvan', null, null, 'nor a road\'s extension'],
+    ['1450 Tansy Springs Rd Conn, Belvan', null, null, 'nor a connector'],
+    ['1450 Tansy Springs Rd Spur, Belvan', null, null, 'nor a spur'],
+    ['1450 Tansy Springs Hwy Byp, Belvan', null, null, 'nor a bypass'],
+    ['1450 Tansy Springs Hwy Alt, Belvan', null, null, 'nor an alternate'],
+    ['1450 Tansy Springs Hwy Bus, Belvan', null, null, 'nor a business route']
   ];
   TAILS.forEach(function (c) {
     var again = MV.streetRetry(MV.searchPlan(c[0]));
@@ -2311,9 +2312,9 @@ async function nucbox() {
   });
   eq('streetRetry/dirRetry: no second question at all for a road with a designator after its '
      + 'type (Ext), with a quadrant too, or with a directional in its name',
-     JSON.stringify([MV.streetRetry(MV.searchPlan('1450 Tansy Springs Rd Ext, Canton')),
-                     MV.dirRetry(MV.searchPlan('1450 Tansy Springs Rd Ext, Canton')),
-                     MV.streetRetry(MV.searchPlan('1450 Tansy Springs Rd Ext NW, Canton')),
+     JSON.stringify([MV.streetRetry(MV.searchPlan('1450 Tansy Springs Rd Ext, Belvan')),
+                     MV.dirRetry(MV.searchPlan('1450 Tansy Springs Rd Ext, Belvan')),
+                     MV.streetRetry(MV.searchPlan('1450 Tansy Springs Rd Ext NW, Belvan')),
                      MV.dirRetry(MV.searchPlan('810 Ardley West Corwin Pkwy Ext, X'))]),
      JSON.stringify([null, null, null, null]));
   // ...and retryFits, by itself, never takes a road without the designator
@@ -2322,13 +2323,13 @@ async function nucbox() {
   var extPlan = { house: '1450', retry: { name: ['tansy', 'springs'], type: 'road', quadrant: null,
                                           keep: ['ext'] } };
   eq('retryFits: a hit on the base road is not the extension\'s door; the extension\'s is',
-     JSON.stringify([MV.retryFits({ name: '1450, Tansy Springs Road, Canton, GA' }, extPlan),
-                     MV.retryFits({ name: '1450, Tansy Springs Road Extension, Canton, GA' },
+     JSON.stringify([MV.retryFits({ name: '1450, Tansy Springs Road, Belvan, GA' }, extPlan),
+                     MV.retryFits({ name: '1450, Tansy Springs Road Extension, Belvan, GA' },
                                   extPlan),
-                     MV.retryFits({ name: '1450, Tansy Springs Rd Ext, Canton, GA' }, extPlan)]),
+                     MV.retryFits({ name: '1450, Tansy Springs Rd Ext, Belvan, GA' }, extPlan)]),
      JSON.stringify([false, true, true]));
-  var nup = MV.streetRetry(MV.searchPlan('1830 Tansy Creek Ct NUP, Marietta'));
-  var nupDir = MV.dirRetry(MV.searchPlan('1830 Tansy Creek Ct NUP, Marietta'));
+  var nup = MV.streetRetry(MV.searchPlan('1830 Tansy Creek Ct NUP, Harrowen'));
+  var nupDir = MV.dirRetry(MV.searchPlan('1830 Tansy Creek Ct NUP, Harrowen'));
   eq('dirRetry: a word after the type left out is a second question by itself; with a '
      + 'directional in the name, both',
      JSON.stringify([nupDir && nupDir.street,
@@ -2339,44 +2340,44 @@ async function nucbox() {
                        var at = MV.pickRetry(hitsOf(FAKE.TANSY_1830), d50r, pl, null).at;
                        return at && [at.lat, at.lon];
                      }), MV.pickRetry(hitsOf(FAKE.TANSY_2040), d50r, nup, null).why]),
-     JSON.stringify([[[33.98, -84.57], [33.98, -84.57]], 'none']));
+     JSON.stringify([[[33.98, -44.57], [33.98, -44.57]], 'none']));
 
   /* The door by the one street the street index says the name as read is
      (the owner's 19 Oct night fault, "1106 <Name> Ln" read "<Nam..>r").
-     Invented streets throughout (tests/fake-nucbox.js, Tamarons Lane). */
-  var tam = MV.searchPlan('1106 Tamaror, Marietta');
+     Invented streets throughout (tests/fake-nucbox.js, Pelarons Lane). */
+  var tam = MV.searchPlan('1106 Pelaror, Harrowen');
   eq('nameAsked: the street less its house number; none for no door or no letters',
      JSON.stringify([MV.nameAsked(tam), MV.nameAsked(MV.searchPlan('12A Birch Hollow Dr NE, X')),
-                     MV.nameAsked(MV.searchPlan('Tamaror, Marietta')),
-                     MV.nameAsked(MV.searchPlan('1106 7, Marietta')), MV.nameAsked(null)]),
-     JSON.stringify(['Tamaror', 'Birch Hollow Dr NE', null, null, null]));
-  var one = { names: ['Tamarons Lane'], how: 'cut', among: 1 };
+                     MV.nameAsked(MV.searchPlan('Pelaror, Harrowen')),
+                     MV.nameAsked(MV.searchPlan('1106 7, Harrowen')), MV.nameAsked(null)]),
+     JSON.stringify(['Pelaror', 'Birch Hollow Dr NE', null, null, null]));
+  var one = { names: ['Pelarons Lane'], how: 'cut', among: 1 };
   var tr = MV.nameRetry(tam, one);
   eq('nameRetry: the house number and the index\'s one street, held to its name and type',
      JSON.stringify(tr && [tr.street, tr.house, tr.door, tr.retry]),
-     JSON.stringify(['1106 Tamarons Lane', '1106', true,
-                     { name: ['tamarons'], type: 'lane', quadrant: null }]));
+     JSON.stringify(['1106 Pelarons Lane', '1106', true,
+                     { name: ['pelarons'], type: 'lane', quadrant: null }]));
   eq('...and none where the index named no one street, two, a bad answer, or the name asked',
      JSON.stringify([MV.nameRetry(tam, { names: [], among: 0 }),
-                     MV.nameRetry(tam, { names: ['Tamarons Lane'], among: 2 }),
+                     MV.nameRetry(tam, { names: ['Pelarons Lane'], among: 2 }),
                      MV.nameRetry(tam, { names: [7], among: 1 }), MV.nameRetry(tam, null),
-                     MV.nameRetry(tam, { names: ['tamaror'], among: 1 }),
-                     MV.nameRetry(MV.searchPlan('Tamaror, Marietta'), one)]),
+                     MV.nameRetry(tam, { names: ['pelaror'], among: 1 }),
+                     MV.nameRetry(MV.searchPlan('Pelaror, Harrowen'), one)]),
      JSON.stringify([null, null, null, null, null, null]));
   eq('...and a street with no type word is asked by its name alone, no retry words',
      JSON.stringify(MV.nameRetry(tam, { names: ['Broadway'], among: 1 })),
      JSON.stringify({ kind: 'street', street: '1106 Broadway', door: true, house: '1106' }));
   var d50n = MV.discFor(card({ miles: 5.0 }));
-  var tamHits = hitsOf(FAKE.TAMARONS_1106);
+  var tamHits = hitsOf(FAKE.PELARONS_1106);
   var lane = MV.pickNamed(tamHits, d50n, tr, null);
   eq('pickNamed: the door on the one street, inside the disc',
-     JSON.stringify(lane.at && [lane.at.lat, lane.at.lon]), JSON.stringify([33.9752, -84.5601]));
+     JSON.stringify(lane.at && [lane.at.lat, lane.at.lon]), JSON.stringify([33.9752, -44.5601]));
   eq('...the same number on a street of a like name is not it, nor a door outside the disc, '
      + 'nor the street alone, nor a cut list',
-     JSON.stringify([MV.pickNamed([{ lat: 33.9752, lon: -84.5601,
-                                     name: '1106, Tamarons Lane Court, Marietta' }], d50n, tr, null).why,
+     JSON.stringify([MV.pickNamed([{ lat: 33.9752, lon: -44.5601,
+                                     name: '1106, Pelarons Lane Court, Harrowen' }], d50n, tr, null).why,
                      MV.pickNamed(tamHits, MV.discFor(card({ miles: 1.0 })), tr, null).why,
-                     MV.pickNamed([{ lat: 33.9752, lon: -84.5601, name: 'Tamarons Lane, Marietta' }],
+                     MV.pickNamed([{ lat: 33.9752, lon: -44.5601, name: 'Pelarons Lane, Harrowen' }],
                                   d50n, tr, null).why,
                      MV.pickNamed(tamHits, d50n, tr, 10).why]),
      JSON.stringify(['none', 'none', 'nodoor', 'capped']));
@@ -2420,7 +2421,7 @@ async function nucbox() {
       } });
     } });
   }
-  var P1 = { lat: 33.95, lon: -84.55 }, P2 = { lat: 33.96, lon: -84.54 }, P3 = { lat: 33.97, lon: -84.53 };
+  var P1 = { lat: 33.95, lon: -44.55 }, P2 = { lat: 33.96, lon: -44.54 }, P3 = { lat: 33.97, lon: -44.53 };
   eq('a road detour a hair below zero (-0.037 mi) is the panel\'s 0.0 and stands',
      ((await stubRoad(1000, 1060).detour(P1, P2, P3)).miles || 0).toFixed(3), '-0.037');
   eq('...past the rounding (-0.062 mi) the router took different roads, and no '
@@ -2435,7 +2436,7 @@ async function nucbox() {
       } });
     } });
   }
-  var L2 = [[33.95, -84.55], [33.95, -84.54], [33.96, -84.54]];
+  var L2 = [[33.95, -44.55], [33.95, -44.54], [33.96, -44.54]];
   eq('a run whose road starts 321 m from a pin is drawn along it',
      JSON.stringify(await stubLine([3, 321], L2).runLine([P1, P2])), JSON.stringify(L2));
   eq('...and one 323 m off (past SNAP_MI) is not: that road starts somewhere else',
@@ -2495,8 +2496,8 @@ async function nucbox() {
       } });
     } });
   }
-  var SQ2r = { lat: 33.95, lon: -84.55 }, N2r = { lat: 34.05, lon: -84.55 },
-      E2r = { lat: 33.95, lon: -84.40 }, P2r = { lat: 34.0, lon: -84.56 };
+  var SQ2r = { lat: 33.95, lon: -44.55 }, N2r = { lat: 34.05, lon: -44.55 },
+      E2r = { lat: 33.95, lon: -44.40 }, P2r = { lat: 34.0, lon: -44.56 };
   var sizes = [];
   var cr = crowRouter(sizes);
   var twoWays = await cr.detourOrders(SQ2r, P2r, [[N2r, E2r], [E2r, N2r]]);
@@ -2603,7 +2604,7 @@ async function nucbox() {
   /* A numberless street's stretch, kept inside the disc (MV.stretchInDisc).
      Lines are [[lat, lon], ...], as the street index sends them. */
   var d1 = MV.discFor(card({ miles: 0.5 }));                  // 1.0 mi round the Square
-  var across = [[[SQ.lat, -84.60], [SQ.lat, -84.50]]];         // through it, ends far out
+  var across = [[[SQ.lat, -44.60], [SQ.lat, -44.50]]];         // through it, ends far out
   var runs = MV.clipToDisc(across, d1);
   var ends = runs.length === 1 ? [runs[0][0], runs[0][runs[0].length - 1]] : [];
   ok_('a segment with both ends outside the disc is kept for the part through it, '
@@ -2612,18 +2613,18 @@ async function nucbox() {
         var d = MV.crowMiles(SQ, p);
         return d <= 1.0 && d > 0.999;
       }));
-  var inOut = [[[SQ.lat, -84.5499], [SQ.lat, -84.53], [SQ.lat + 0.001, -84.53],
-                [SQ.lat + 0.001, -84.5499]]];                  // out east and back
+  var inOut = [[[SQ.lat, -44.5499], [SQ.lat, -44.53], [SQ.lat + 0.001, -44.53],
+                [SQ.lat + 0.001, -44.5499]]];                  // out east and back
   eq('...and a line that leaves the disc and comes back is two runs, never a '
      + 'chord across the outside', MV.clipToDisc(inOut, d1).length, 2);
-  var lark = [[[33.948, -84.565], [33.948, -84.56], [33.948, -84.552]],
-              [[33.88, -84.47], [33.88, -84.46]]];             // the fixture's Larkspur
+  var lark = [[[33.948, -44.565], [33.948, -44.56], [33.948, -44.552]],
+              [[33.88, -44.47], [33.88, -44.46]]];             // the fixture's Larkspur
   var d3 = MV.discFor(card({ miles: 3.0 }));
   var st3 = MV.stretchInDisc(lark, d3, SQ, 'Larkspur Parkway Southeast');
   eq('a stretch is pinned at its point nearest the car — here its east end',
-     st3.at && [st3.at.lat, st3.at.lon, st3.at.nearestOf].join(','), '33.948,-84.552,true');
+     st3.at && [st3.at.lat, st3.at.lon, st3.at.nearestOf].join(','), '33.948,-44.552,true');
   eq('...and with the car at its west end, there: the pin is the car\'s, not the street\'s',
-     (MV.stretchInDisc(lark, d3, { lat: 33.948, lon: -84.58 }, 'L').at || {}).lon, -84.565);
+     (MV.stretchInDisc(lark, d3, { lat: 33.948, lon: -44.58 }, 'L').at || {}).lon, -44.565);
   eq('...carrying the part of the street inside the disc, for the figure along it',
      JSON.stringify(st3.at && st3.at.stretch), JSON.stringify([lark[0]]));
   var st94 = MV.stretchInDisc(lark, d94, SQ, 'L');
@@ -2640,7 +2641,7 @@ async function nucbox() {
      pin nearest the car: a street running 8 mi north-south a mile east of
      the car, in a 6.5 mi disc, showed true +1.5 as +0.6, true +0.7 as "on
      your way" and true +0.4 as +5.1. */
-  var CAR = { lat: 33.95, lon: -84.55 };
+  var CAR = { lat: 33.95, lon: -44.55 };
   function mi(eastMi, northMi) {
     return { lat: CAR.lat + northMi / 69.0,
              lon: CAR.lon + eastMi / (69.0 * Math.cos(CAR.lat * Math.PI / 180)) };
@@ -2797,28 +2798,28 @@ async function nucbox() {
     var nbx = new MV.NbxSearch({ base: on.base + '/api/nbx' });
     var got = await nbx.place("McDonald's", MV.discFor(card({ miles: 3.0 })));
     eq('through the server, a 3.0 mi card\'s McDonald\'s is the one 2.1 mi north',
-       got.at && [got.at.lat, got.at.lon].join(','), '33.983,-84.5499');
-    got = await nbx.place("McDonald's (Marietta Sq)", d94);
+       got.at && [got.at.lat, got.at.lon].join(','), '33.983,-44.5499');
+    got = await nbx.place("McDonald's (Harrowen Sq)", d94);
     eq('...and a 9.4 mi card\'s is refused as two that disagree',
        [got.why, got.n].join(','), 'several,2');
     var n0 = fake.asked.length;
-    got = await nbx.place('Shadowood Pkwy SE, Atlanta', d94);
+    got = await nbx.place('Gloamwood Pkwy SE, Solvane', d94);
     var sent = fake.asked.slice(n0).join(' ');
-    ok_('"Shadowood Pkwy SE, Atlanta" is pinned in Cumberland, where OSM has it',
-        got.at && /Cumberland/.test(got.at.name));
+    ok_('"Gloamwood Pkwy SE, Solvane" is pinned in Hollowmere, where OSM has it',
+        got.at && /Hollowmere/.test(got.at.name));
     ok_('...asked as the street alone, the town left at home (' + sent + ')',
-        /street=Shadowood%20Pkwy%20SE&/.test(sent) && !/Atlanta/i.test(sent)
+        /street=Gloamwood%20Pkwy%20SE&/.test(sent) && !/Solvane/i.test(sent)
         && !/city=/.test(sent));
-    got = await nbx.place("Jimmy John's (1985 Cobb Parkway NW)", d94);
-    ok_('a bracketed door is pinned at 1985, Cobb Parkway, Kennesaw — the postal '
-        + 'town on the card was never asked', got.at && /^1985, Cobb Parkway, Kennesaw/.test(got.at.name));
-    got = await nbx.place('4821 Kestrel Dr, Marietta', d94);
+    got = await nbx.place("Jimmy John's (1985 Vosk Parkway NW)", d94);
+    ok_('a bracketed door is pinned at 1985, Vosk Parkway, Tellmoor — the postal '
+        + 'town on the card was never asked', got.at && /^1985, Vosk Parkway, Tellmoor/.test(got.at.name));
+    got = await nbx.place('4821 Kestrel Dr, Harrowen', d94);
     eq('through the server, a door the NucBox answers with only its street is '
        + 'refused as the street', [got.at, got.why].join(','), ',nodoor');
     // ...and with the place the phone printed for it (the held end's, the
     // owner's rule of 17 Oct): asked by name, alone, inside the disc.
     n0 = fake.asked.length;
-    got = await nbx.place('4821 Kestrel Dr, Marietta', d94, { place: 'Wrenfield Parking Deck' });
+    got = await nbx.place('4821 Kestrel Dr, Harrowen', d94, { place: 'Wrenfield Parking Deck' });
     sent = fake.asked.slice(n0).join(' ');
     eq('through the server, the door not held and its place given, the place is pinned',
        JSON.stringify([got.at && got.at.lat, got.by]), JSON.stringify([33.9712, 'place']));
@@ -2826,17 +2827,17 @@ async function nucbox() {
     ok_('...asked after the door, as the place alone inside the disc\'s box, bounded ('
         + sent + ')',
         /^\/search\?format=jsonv2&limit=10&q=Wrenfield%20Parking%20Deck&viewbox=[-0-9.,%C]+&bounded=1$/
-          .test(sent) && !/Marietta/.test(sent));
-    got = await nbx.place('4821 Kestrel Dr, Marietta', d94, { place: 'Quarry Hall' });
+          .test(sent) && !/Harrowen/.test(sent));
+    got = await nbx.place('4821 Kestrel Dr, Harrowen', d94, { place: 'Quarry Hall' });
     eq('...a road of that name is refused, in the place\'s words',
        [got.at, got.why].join(','), ',noplace');
-    got = await nbx.place('1985 Cobb Parkway, Kennesaw', MV.discFor(card({ miles: 2.0 })),
+    got = await nbx.place('1985 Vosk Parkway, Tellmoor', MV.discFor(card({ miles: 2.0 })),
                           { place: 'Wrenfield Parking Deck' });
     eq('...a door found outside the disc is that refusal, the place not asked in its stead '
        + '(the deck is inside a 2.0 mi card, the door 3.4 mi out)',
        [got.at, got.why, got.by].join(','), ',none,');
     n0 = fake.asked.length;
-    got = await nbx.place('1985 Cobb Parkway, Kennesaw', d94, { place: 'Wrenfield Parking Deck' });
+    got = await nbx.place('1985 Vosk Parkway, Tellmoor', d94, { place: 'Wrenfield Parking Deck' });
     eq('...and a door the NucBox holds is pinned by the door, the place never asked',
        JSON.stringify([!!got.at, got.by || null,
                        fake.asked.slice(n0).filter(function (u) { return /q=/.test(u); }).length]),
@@ -2849,7 +2850,7 @@ async function nucbox() {
        + 'NucBox that is down', [got.why, got.error].join(' | '),
        'refused | q must be 1 to 120 printable characters');
     n0 = fake.asked.length;
-    got = await nbx.place('Birch Ln & Kestrel Dr, Roswell', d94);
+    got = await nbx.place('Birch Ln & Kestrel Dr, Ruswold', d94);
     eq('a cross street is refused without asking anybody',
        [got.why, fake.asked.length - n0].join(','), 'cross,0');
 
@@ -2857,28 +2858,28 @@ async function nucbox() {
     // with the type left out, and the Court's door pinned, not the Drive's.
     var d50t = MV.discFor(card({ miles: 5.0 }));
     n0 = fake.asked.length;
-    got = await nbx.place('1830 Tansy Creek Cts SW, Marietta', d50t);
+    got = await nbx.place('1830 Tansy Creek Cts SW, Harrowen', d50t);
     sent = fake.asked.slice(n0);
     eq('through the server, a door printed with an unusual type is found with the type left '
        + 'out, at the door on the same street (' + sent.join(' ') + ')',
        JSON.stringify([got.at && [got.at.lat, got.at.lon], sent.map(function (u) {
          return decodeURIComponent(/street=([^&]*)/.exec(u)[1]);
        })]),
-       JSON.stringify([[33.98, -84.57], ['1830 Tansy Creek Cts SW', '1830 Tansy Creek SW']]));
+       JSON.stringify([[33.98, -44.57], ['1830 Tansy Creek Cts SW', '1830 Tansy Creek SW']]));
     n0 = fake.asked.length;
     got = await new MV.NbxSearch({ base: on.base + '/api/nbx' })
-      .place('1830 Tansy Creek Cts SW, Marietta', d50t);
+      .place('1830 Tansy Creek Cts SW, Harrowen', d50t);
     eq('...and asked again by another page, both questions come from the server\'s cache',
        JSON.stringify([!!got.at, fake.asked.length - n0]), JSON.stringify([true, 0]));
-    got = await nbx.place('2040 Tansy Creek Cts SW, Marietta', d50t);
+    got = await nbx.place('2040 Tansy Creek Cts SW, Harrowen', d50t);
     eq('...a door of that number on another type of street is not the door: the first '
        + 'refusal stands', [got.at, got.why].join(','), ',none');
     n0 = fake.asked.length;
-    got = await nbx.place('4821 Kestrel Dr, Marietta', MV.discFor(card({ miles: 4.0 })));
+    got = await nbx.place('4821 Kestrel Dr, Harrowen', MV.discFor(card({ miles: 4.0 })));
     eq('...and a street the NucBox found inside the disc is never asked again: the type '
        + 'word was not the trouble', [got.why, fake.asked.length - n0].join(','), 'nodoor,1');
     n0 = fake.asked.length;
-    got = await nbx.place('1830 Tansy Creek Cts SW, Marietta', null);
+    got = await nbx.place('1830 Tansy Creek Cts SW, Harrowen', null);
     eq('...and with no disc, no retry', fake.asked.slice(n0).filter(function (u) {
       return /Tansy%20Creek%20SW/.test(u);
     }).length, 0);
@@ -2886,28 +2887,28 @@ async function nucbox() {
     // The 20 Oct fault, invented: "810 <A> West <B> Parkway" answered as the
     // road inside the disc and not the door; asked once more with "W".
     n0 = fake.asked.length;
-    got = await nbx.place('810 Ardley West Corwin Parkway, Kennesaw, GA 30144', d50t);
+    got = await nbx.place('810 Ardley West Corwin Parkway, Tellmoor, GA 90744', d50t);
     sent = fake.asked.slice(n0);
     eq('through the server, a door printed with its directional spelled out is found with it '
        + 'as its letter (' + sent.join(' ') + ')',
        JSON.stringify([got.at && [got.at.lat, got.at.lon], sent.map(function (u) {
          return decodeURIComponent(/street=([^&]*)/.exec(u)[1]);
        })]),
-       JSON.stringify([[33.99, -84.58], ['810 Ardley West Corwin Parkway',
+       JSON.stringify([[33.99, -44.58], ['810 Ardley West Corwin Parkway',
                                          '810 Ardley W Corwin Parkway']]));
     n0 = fake.asked.length;
     got = await new MV.NbxSearch({ base: on.base + '/api/nbx' })
       .place('Outback Steakhouse (810 Ardley West Corwin Parkway)', d50t);
     eq('...a store\'s bracketed door the same, both questions from the server\'s cache',
        JSON.stringify([got.at && got.at.lat, fake.asked.length - n0]), JSON.stringify([33.99, 0]));
-    got = await nbx.place('812 Ardley West Corwin Parkway, Kennesaw', d50t);
+    got = await nbx.place('812 Ardley West Corwin Parkway, Tellmoor', d50t);
     eq('...a house of that number on the Circle is not the Parkway\'s door: the road stands',
        [got.at, got.why].join(','), ',nodoor');
-    got = await nbx.place('810 Ardley West Corwin Parkway, Kennesaw', MV.discFor(card({ miles: 1.0 })));
+    got = await nbx.place('810 Ardley West Corwin Parkway, Tellmoor', MV.discFor(card({ miles: 1.0 })));
     eq('...nor the door outside a 1.0 mi card, the road inside it',
        [got.at, got.why].join(','), ',nodoor');
 
-    // The 19 Oct night fault, invented: a door filed "1106 Tamaror", which
+    // The 19 Oct night fault, invented: a door filed "1106 Pelaror", which
     // the search answers with nothing; the street index (the fake's, by the
     // real streets.js) says the one street that read is, and the door is
     // asked by its name. Only with the street index set (opts.streets).
@@ -2915,40 +2916,40 @@ async function nucbox() {
     try {
       var nbxN = new MV.NbxSearch({ base: named.base + '/api/nbx' });
       n0 = fake.asked.length;
-      got = await nbxN.place('1106 Tamaror, Marietta', d50t, { streets: true });
+      got = await nbxN.place('1106 Pelaror, Harrowen', d50t, { streets: true });
       sent = fake.asked.slice(n0).map(decodeURIComponent);
       eq('through the server, a door filed under a name read short is found by the one street '
          + 'the index says it is, and says by which (' + sent.join(' ') + ')',
          JSON.stringify([got.at && [got.at.lat, got.at.lon], got.asked, sent.map(function (u) {
            return /[?&](?:street|name)=([^&]*)/.exec(u)[1];
          })]),
-         JSON.stringify([[33.9752, -84.5601], '1106 Tamarons Lane',
-                         ['1106 Tamaror', 'Tamaror', '1106 Tamarons Lane']]));
+         JSON.stringify([[33.9752, -44.5601], '1106 Pelarons Lane',
+                         ['1106 Pelaror', 'Pelaror', '1106 Pelarons Lane']]));
       ok_('...the index asked as /api/streets/named with the disc\'s box, the town left home',
-          /^\/api\/streets\/named\?name=Tamaror&box=[-0-9.,]+$/.test(sent[1]));
+          /^\/api\/streets\/named\?name=Pelaror&box=[-0-9.,]+$/.test(sent[1]));
       n0 = fake.asked.length;
       got = await new MV.NbxSearch({ base: named.base + '/api/nbx' })
-        .place('1106 Tamaror, Marietta', d50t, { streets: true });
+        .place('1106 Pelaror, Harrowen', d50t, { streets: true });
       eq('...and asked again by another page, all three come from the server\'s cache',
          JSON.stringify([!!got.at, fake.asked.length - n0]), JSON.stringify([true, 0]));
       n0 = fake.asked.length;
-      got = await nbxN.place('1106 Brindler, Marietta', d50t, { streets: true });
+      got = await nbxN.place('1106 Brindler, Harrowen', d50t, { streets: true });
       sent = fake.asked.slice(n0).map(decodeURIComponent);
       eq('...a read two near streets can be is neither: the first refusal stands, and no door '
          + 'is asked by either name', JSON.stringify([got.at, got.why, sent.filter(function (u) {
            return /Brindle(wood|ton)/.test(u);
          })]), JSON.stringify([null, 'none', []]));
-      got = await nbxN.place('1106 Tamaror, Marietta', MV.discFor(card({ miles: 1.0 })),
+      got = await nbxN.place('1106 Pelaror, Harrowen', MV.discFor(card({ miles: 1.0 })),
                              { streets: true });
       eq('...the door found outside a 1.0 mi card is refused as before',
          [got.at, got.why].join(','), ',none');
       n0 = fake.asked.length;
-      got = await nbxN.place('1106 Tamaror, Marietta', d50t);
+      got = await nbxN.place('1106 Pelaror, Harrowen', d50t);
       eq('...and without the street index set, the index is never asked',
          JSON.stringify([got.why, fake.asked.slice(n0).filter(function (u) {
            return /named/.test(u);
          }).length]), JSON.stringify(['none', 0]));
-      got = await nbxN.place('1106 Tamaror, Marietta', null, { streets: true });
+      got = await nbxN.place('1106 Pelaror, Harrowen', null, { streets: true });
       eq('...nor with no disc', got.asked, undefined);
 
       // The owner's snap of 2 Nov 16:31, invented, through the server: a
@@ -2958,7 +2959,7 @@ async function nucbox() {
       // The card is no yardstick ("2 stops (3.0 mi)", one leg, no total), so
       // its disc is the sixty-mile one, as the snap's was.
       var ddDisc = MV.discFor(card({ miles: 3.0, hasTotal: false, legs: 1 }));
-      var WR = '164 Wrenley Pkwy, Marietta, GA 30066';
+      var WR = '164 Wrenley Pkwy, Harrowen, GA 90666';
       var ofSent = function (from) {
         return fake.asked.slice(from).map(decodeURIComponent).map(function (u) {
           var m = /^\/api\/streets\/(\w+)\?name=([^&]*)/.exec(u) || /[?&](q|street)=([^&]*)/.exec(u);
@@ -2971,7 +2972,7 @@ async function nucbox() {
       eq('[store] what the index is asked: the street less its number, ending in a type (a '
          + 'quadrant after it allowed), with a name word before it',
          JSON.stringify([MV.tailAsked(wrPlan), MV.tailAsked(MV.searchPlan('9 Wrenley Pkwy NW, X')),
-                         MV.tailAsked(MV.searchPlan('1106 Tamaror, X')),
+                         MV.tailAsked(MV.searchPlan('1106 Pelaror, X')),
                          MV.tailAsked(MV.searchPlan('Wrenley Pkwy, X'))]),
          JSON.stringify(['Wrenley Pkwy', 'Wrenley Pkwy NW', null, null]));
       eq('[store] the store asked by its name, never a street or a corner',
@@ -2984,7 +2985,7 @@ async function nucbox() {
            .concat([MV.tailWanted({ at: { lat: 1, lon: 1 } })])),
          JSON.stringify([true, true, true, true, false, false, false]));
       var wrAns = { names: ['Ossian W Wrenley Parkway Northwest'], how: 'tail', among: 1,
-                    lines: [[[33.96, -84.56], [33.96, -84.53]]], cutAt: null };
+                    lines: [[[33.96, -44.56], [33.96, -44.53]]], cutAt: null };
       eq('[store] the door by the full name only for ONE street found by the tail',
          JSON.stringify([(MV.tailRetry(wrPlan, wrAns) || {}).street,
                          MV.tailRetry(wrPlan, Object.assign({}, wrAns, { among: 2, names: [] })),
@@ -3010,7 +3011,7 @@ async function nucbox() {
       eq('[store] the box the name is asked in: the street\'s shape, ALONG_M (' + MV.ALONG_M
          + ' m, chosen) wider, inside the disc\'s box, to the hundredth; none with no shape',
          JSON.stringify([MV.alongBox(wrAns, ddDisc), MV.alongBox({ lines: [] }, ddDisc)]),
-         JSON.stringify(['-84.57,33.97,-84.52,33.95', null]));
+         JSON.stringify(['-44.57,33.97,-44.52,33.95', null]));
       n0 = fake.asked.length;
       got = await nbxN.place(WR, ddDisc, { streets: true });
       eq('[store] with no store\'s name (a dropoff, or a card with none) the refusal is as today: '
@@ -3023,12 +3024,12 @@ async function nucbox() {
          + 'door asked again by the one full name it knows by the tail, and not there), and the '
          + 'one place of that name along its street is the pin, by the store',
          JSON.stringify([got.at && [got.at.lat, got.at.lon], got.by, ofSent(n0)]),
-         JSON.stringify([[33.9612, -84.545], 'store',
+         JSON.stringify([[33.9612, -44.545], 'store',
                          ['tail Wrenley Pkwy', 'street 164 Ossian W Wrenley Parkway Northwest',
                           'q Lark Owl Grill']]));
       ok_('...the name asked in the box round the street\'s own shape, not the disc\'s (' +
           fake.asked[fake.asked.length - 1] + ')',
-          /viewbox=-84\.57%2C33\.97%2C-84\.52%2C33\.95&bounded=1$/.test(
+          /viewbox=-44\.57%2C33\.97%2C-44\.52%2C33\.95&bounded=1$/.test(
             fake.asked[fake.asked.length - 1]));
       n0 = fake.asked.length;
       got = await new MV.NbxSearch({ base: named.base + '/api/nbx' })
@@ -3038,18 +3039,18 @@ async function nucbox() {
       got = await nbxN.place(WR, ddDisc, { store: 'Lark Owl Grill' });
       eq('[store] ...without the street index set, never asked', got.why, 'several');
       // Two branches along the street; one off it; one along and one off.
-      var pz = await nbxN.place('180 Wrenley Pkwy, Marietta', ddDisc,
+      var pz = await nbxN.place('180 Wrenley Pkwy, Harrowen', ddDisc,
                                 { streets: true, store: 'Fable Pizza' });
-      var tc = await nbxN.place('190 Wrenley Pkwy, Marietta', ddDisc,
+      var tc = await nbxN.place('190 Wrenley Pkwy, Harrowen', ddDisc,
                                 { streets: true, store: 'Kestrel Tacos' });
-      var dl = await nbxN.place('200 Wrenley Pkwy, Marietta', ddDisc,
+      var dl = await nbxN.place('200 Wrenley Pkwy, Harrowen', ddDisc,
                                 { streets: true, store: 'Wren Hollow Deli' });
       eq('[store] two places of the name along the street are none, one off the street is none '
          + '(the door search\'s refusal stands), and one along it beside one off it is the pin',
          JSON.stringify([[pz.at, pz.why], [tc.at, tc.why], dl.at && [dl.at.lat, dl.at.lon]]),
-         JSON.stringify([[null, 'none'], [null, 'none'], [33.9603, -84.548]]));
+         JSON.stringify([[null, 'none'], [null, 'none'], [33.9603, -44.548]]));
       n0 = fake.asked.length;
-      got = await nbxN.place('212 Wrenley Pkwy, Marietta', ddDisc,
+      got = await nbxN.place('212 Wrenley Pkwy, Harrowen', ddDisc,
                              { streets: true, store: 'Lark Owl Grill' });
       sent = ofSent(n0);
       eq('[store] where the index knows ONE street by the tail, the door is asked by its full '
@@ -3058,7 +3059,7 @@ async function nucbox() {
          JSON.stringify([got.at && [got.at.lat, got.at.lon], got.asked, got.by || null,
                          sent.indexOf('street 212 Ossian W Wrenley Parkway Northwest') >= 0,
                          sent.filter(function (u) { return /^q /.test(u); })]),
-         JSON.stringify([[33.9601, -84.535], '212 Ossian W Wrenley Parkway Northwest', null,
+         JSON.stringify([[33.9601, -44.535], '212 Ossian W Wrenley Parkway Northwest', null,
                          true, []]));
       got = await nbxN.place(WR, MV.discFor(card({ lat: 33.92, miles: 1.0 })),
                              { streets: true, store: 'Lark Owl Grill' });
@@ -3079,7 +3080,7 @@ async function nucbox() {
       eq('[uber store] ...and none for a bare door, a name with no bracket, a bracket with no '
          + 'house number, a count, or a name under three letters',
          JSON.stringify([MV.bracketStore(WR), MV.bracketStore('Lark Owl Grill'),
-                         MV.bracketStore('Kroger (Shiloh Square)'),
+                         MV.bracketStore('Kroger (Merlah Square)'),
                          MV.bracketStore('Wasabi (2 orders)'),
                          MV.bracketStore('Ab (164 Wrenley Pkwy)'), MV.bracketStore(null)]),
          JSON.stringify([null, null, null, null, null, null]));
@@ -3116,7 +3117,7 @@ async function nucbox() {
          + 'the index, the door by the full name, then the one place of that name along the '
          + 'street, the pin by the store',
          JSON.stringify([got.at && [got.at.lat, got.at.lon], got.by, ofSent(n0)]),
-         JSON.stringify([[33.9612, -84.545], 'store',
+         JSON.stringify([[33.9612, -44.545], 'store',
                          ['tail Wrenley Pkwy', 'street 164 Ossian W Wrenley Parkway Northwest']]));
       n0 = fake.asked.length;
       var slips = [];
@@ -3129,7 +3130,7 @@ async function nucbox() {
       eq('[uber store] ...and its misreads "<B> l Pkwy" and "<B> Phy" are the same questions, the '
          + 'same pin, from the server\'s cache',
          JSON.stringify([slips, fake.asked.length - n0]),
-         JSON.stringify([[[33.9612, -84.545, 'store'], [33.9612, -84.545, 'store']], 0]));
+         JSON.stringify([[[33.9612, -44.545, 'store'], [33.9612, -44.545, 'store']], 0]));
       got = await nbxN.place('Fable Pizza (180 Wrenley Pkwy)', ubDisc,
                              { streets: true, store: MV.bracketStore('Fable Pizza (180 Wrenley Pkwy)') });
       eq('[uber store] ...two places of that name along the street are none, as DoorDash\'s',
@@ -3138,7 +3139,7 @@ async function nucbox() {
       // The owner's DoorDash snap of 24 Oct, invented, through the server: a
       // door NOTHING answered, its street asked alone of the index.
       n0 = fake.asked.length;
-      got = await nbxN.place('10495 Pellmore Street, Marietta', d50t, { streets: true });
+      got = await nbxN.place('10495 Pellmore Street, Harrowen', d50t, { streets: true });
       sent = fake.asked.slice(n0).map(decodeURIComponent);
       eq('[area more] through the server: nothing for the door, its short street\'s rough '
          + 'area beside "none", asked as /whole by the name less the number ('
@@ -3149,16 +3150,16 @@ async function nucbox() {
                          }).length]),
          JSON.stringify([null, 'none', true, 1]));
       n0 = fake.asked.length;
-      got = await nbxN.place('10497 Dunmere Parkway, Marietta', d50t, { streets: true });
+      got = await nbxN.place('10497 Dunmere Parkway, Harrowen', d50t, { streets: true });
       eq('[area more] ...a long street: "none", no area', JSON.stringify([got.at, got.why, got.area]),
          JSON.stringify([null, 'none', undefined]));
       n0 = fake.asked.length;
-      got = await nbxN.place('10495 Pellmore Street, Marietta', d50t);
+      got = await nbxN.place('10495 Pellmore Street, Harrowen', d50t);
       eq('[area more] ...and without the street index set, the street is never asked',
          JSON.stringify([got.why, got.area, fake.asked.slice(n0).filter(function (u) {
            return /whole/.test(u);
          }).length]), JSON.stringify(['none', undefined, 0]));
-      got = await nbxN.place('10800 Vessington Hwy, Marietta', d50t, { streets: true });
+      got = await nbxN.place('10800 Vessington Hwy, Harrowen', d50t, { streets: true });
       eq('[area more] ...and a cut list that is one area: "capped", the area marked cut',
          JSON.stringify([got.at, got.why, !!(got.area && got.area.cut)]),
          JSON.stringify([null, 'capped', true]));
@@ -3171,74 +3172,74 @@ async function nucbox() {
        the Square; its Juniper Circle meets Northgate Drive twice. */
     var ST = { streets: true, car: SQ };
     var nbxS = new MV.NbxSearch({ base: on.base + '/api/nbx' });
-    got = await nbxS.place('Foxglove Trl & Northgate Dr, Marietta', d3, ST);
+    got = await nbxS.place('Foxglove Trl & Northgate Dr, Harrowen', d3, ST);
     eq('a corner the card names is pinned where its two streets meet',
        got.at && [got.at.lat, got.at.lon, got.at.name].join(','),
-       '33.96,-84.55,Foxglove Trail & Northgate Drive');
+       '33.96,-44.55,Foxglove Trail & Northgate Drive');
     eq('...as the card\'s reader misread it too ("Foxglove Tri")',
-       ((await nbxS.place('Foxglove Tri & Northgate Dr, Marietta', d3, ST)).at || {}).lat, 33.96);
+       ((await nbxS.place('Foxglove Tri & Northgate Dr, Harrowen', d3, ST)).at || {}).lat, 33.96);
     var askedS = Object.keys(nbxS.cache).join(' ');
     ok_('...asked as its two streets inside the disc\'s box, the town left at home ('
         + askedS.slice(0, 90) + ')',
-        /\/cross\?a=Foxglove%20Trl&b=Northgate%20Dr&box=/.test(askedS) && !/Marietta/.test(askedS));
-    got = await nbxS.place('Wren Rd & Kestrel Pkwy SE, Marietta', d3, ST);
+        /\/cross\?a=Foxglove%20Trl&b=Northgate%20Dr&box=/.test(askedS) && !/Harrowen/.test(askedS));
+    got = await nbxS.place('Wren Rd & Kestrel Pkwy SE, Harrowen', d3, ST);
     eq('a road across a dual carriageway is one corner, between the two',
-       got.at && [got.at.lat, got.at.lon].join(','), '33.9451,-84.5455');
-    got = await nbxS.place('Juniper Cir & Northgate Dr, Marietta', d3, ST);
+       got.at && [got.at.lat, got.at.lon].join(','), '33.9451,-44.5455');
+    got = await nbxS.place('Juniper Cir & Northgate Dr, Harrowen', d3, ST);
     eq('two streets that meet in two places inside the card are refused, not pinned '
        + 'at one', JSON.stringify([got.at, got.why, got.n]), JSON.stringify([null, 'corners', 2]));
     eq('...their middle kept as the general area, never a pin (cornerArea; the owner, 29 Oct): '
        + 'the run may route there, the refusal stands',
        JSON.stringify([got.at, !!(got.area && got.area.approx), got.area && got.area.n,
                        got.area && got.area.miles <= 1.0]), JSON.stringify([null, true, 2, true]));
-    got = await nbxS.place('Juniper Cir & Northgate Dr, Marietta',
+    got = await nbxS.place('Juniper Cir & Northgate Dr, Harrowen',
                            MV.discFor(card({ miles: 0.2 })), ST);
     eq('...and where neither is inside the card, none, with the nearest',
        [got.why, got.nearest && got.nearest.toFixed(1), got.area].join(','), 'nomeet,0.9,');
-    got = await nbxS.place('Church St SE & Northgate Dr, Marietta', d3, ST);
+    got = await nbxS.place('Church St SE & Northgate Dr, Harrowen', d3, ST);
     eq('two streets that do not meet at all are said not to meet',
        [got.why, got.nearest].join(','), 'nomeet,');
-    got = await nbxS.place('Larkspur Pkwy SE & Old Mill Rd, Atlanta', d3, ST);
+    got = await nbxS.place('Larkspur Pkwy SE & Old Mill Rd, Solvane', d3, ST);
     eq('two names of one road meet along all of it: refused as no one corner',
        got.why, 'together');
-    got = await nbxS.place('Pine St & Wren Rd, Marietta', d3, ST);
+    got = await nbxS.place('Pine St & Wren Rd, Harrowen', d3, ST);
     eq('a street name the index does not hold is said, not matched to Pine Court',
        got.why, 'nostreet');
-    got = await nbxS.place('Larkspur Pkwy SE, Atlanta', d3, ST);
+    got = await nbxS.place('Larkspur Pkwy SE, Solvane', d3, ST);
     eq('a numberless street is its stretch inside the card, pinned nearest the car',
        got.at && [got.at.lat, got.at.lon, got.at.nearestOf, got.at.stretch.length].join(','),
-       '33.948,-84.552,true,1');
+       '33.948,-44.552,true,1');
     ok_('...every point of the stretch inside the disc',
         got.at && got.at.stretch[0].every(function (p) {
           return MV.crowMiles(SQ, { lat: p[0], lon: p[1] }) <= d3.miles;
         }));
-    got = await nbxS.place('Larkspur Pkwy SE, Atlanta', d94, ST);
+    got = await nbxS.place('Larkspur Pkwy SE, Solvane', d94, ST);
     eq('...and its two stretches 6.4 mi apart inside a 9.4 mi card are refused',
        [got.why, got.n].join(','), 'several,2');
-    got = await nbxS.place('Shadowood Pkwy SE, Atlanta', d94, ST);
+    got = await nbxS.place('Gloamwood Pkwy SE, Solvane', d94, ST);
     ok_('a street the index does not hold is asked of the search as before, and '
         + 'pinned by it (' + (got.at && got.at.name) + ')',
-        got.at && /Cumberland/.test(got.at.name) && !got.at.nearestOf
+        got.at && /Hollowmere/.test(got.at.name) && !got.at.nearestOf
         && Object.keys(nbxS.cache).some(function (u) {
-          return /^\/stretch\?name=Shadowood/.test(u);
+          return /^\/stretch\?name=Gloamwood/.test(u);
         }) && Object.keys(nbxS.cache).some(function (u) {
-          return /^\/search\?street=Shadowood/.test(u);
+          return /^\/search\?street=Gloamwood/.test(u);
         }));
     got = await new MV.NbxSearch({ base: onShort.base + '/api/nbx' })
-      .place('Larkspur Pkwy SE, Atlanta', d3, ST);
+      .place('Larkspur Pkwy SE, Solvane', d3, ST);
     eq('a stretch the NucBox would not send whole is refused as too long',
        [got.why, got.n].join(','), 'long,5');
     got = await new MV.NbxSearch({ base: down.base + '/api/nbx' })
-      .place('Foxglove Trl & Northgate Dr, Marietta', d3, ST);
+      .place('Foxglove Trl & Northgate Dr, Harrowen', d3, ST);
     eq('a street index that does not answer is unreachable, the page\'s cue for the '
        + 'public map', got.why, 'unreachable');
     var none0 = Object.keys(nbxS.cache).length;
-    got = await nbxS.place('Atami Grill & Sushi Atwater Dr & Kolora Chase, Smyrna', d3, ST);
+    got = await nbxS.place('Atami Grill & Sushi Elmwhit Dr & Mevora Chase, Pyrnel', d3, ST);
     eq('three names before the comma are not a corner, and nobody is asked',
        [got.why, Object.keys(nbxS.cache).length - none0].join(','), 'notwo,0');
 
     /* The road. */
-    var A = { lat: 33.983, lon: -84.5499 }, S = { lat: 33.8779, lon: -84.46 };
+    var A = { lat: 33.983, lon: -44.5499 }, S = { lat: 33.8779, lon: -44.46 };
     var road = await nbx.detour(SQ, A, S);
     var by = await nbx.road([SQ, A, S]), direct = await nbx.road([SQ, S]);
     eq('the road detour is road(car, pickup, held end) less road(car, held end), in miles',
@@ -3256,7 +3257,7 @@ async function nucbox() {
        JSON.stringify([[SQ.lat, SQ.lon], [SQ.lat, A.lon], [A.lat, A.lon],
                        [A.lat, S.lon], [S.lat, S.lon]]));
     /* The held order's run, along the roads, in pieces the relay will take. */
-    var B = { lat: 33.96, lon: -84.52 };
+    var B = { lat: 33.96, lon: -44.52 };
     var before4 = fake.asked.length;
     var run4 = await nbx.runLine([SQ, A, B, S]);
     var asked4 = fake.asked.slice(before4).filter(function (u) { return /^\/route/.test(u); });
@@ -3273,9 +3274,9 @@ async function nucbox() {
          .sort().join(','), '2,3');
     eq('a run with a piece the router has no road for is not drawn along roads: '
        + 'the straight run stands',
-       await nbx.runLine([SQ, { lat: 34.0010, lon: -84.5560 }, S]), null);
+       await nbx.runLine([SQ, { lat: 34.0010, lon: -44.5560 }, S]), null);
     eq('...nor one the router refuses outright (router down)',
-       await nbx.runLine([SQ, { lat: 34.1, lon: -84.6 }]), null);
+       await nbx.runLine([SQ, { lat: 34.1, lon: -44.6 }]), null);
     eq('...nor a run of one point', await nbx.runLine([SQ]), null);
     /* The held order's run between offers (owner, 19 Oct: a straight
        pickup -> dropoff with the router set): one question per leg, from
@@ -3293,9 +3294,9 @@ async function nucbox() {
     ok_('...and the router was never asked about any fourth point (' + asked.length + ' routes)',
         asked.every(function (u) { return u.split('?')[0].split(';').length <= 3; }));
     eq('a route the router says has no road is said as no road, not as a figure',
-       (await nbx.detour(SQ, { lat: 34.0010, lon: -84.5560 }, S)).why, 'noroute');
+       (await nbx.detour(SQ, { lat: 34.0010, lon: -44.5560 }, S)).why, 'noroute');
     eq('...and one it refuses with any other code is the router down, not "no road"',
-       (await nbx.detour(SQ, { lat: 34.1, lon: -84.6 }, S)).why, 'unreachable');
+       (await nbx.detour(SQ, { lat: 34.1, lon: -44.6 }, S)).why, 'unreachable');
     var W = { lat: Number(FAKE.WAFFLE[0].lat), lon: Number(FAKE.WAFFLE[0].lon) };
     eq('through the server, a pickup the road by is 400 m shorter than the road '
        + 'direct is no figure: the router took different roads',
@@ -3308,7 +3309,7 @@ async function nucbox() {
        it, by road. Worked out here from the router's own legs, each asked
        alone through the same relay, as the definition says: the best run
        with the pickup less the run without it. */
-    var R = { lat: 33.97, lon: -84.53 };
+    var R = { lat: 33.97, lon: -44.53 };
     var beforeR = fake.asked.length;
     var thru = await nbx.detour(SQ, A, S, [R]);
     var askedR = fake.asked.slice(beforeR).filter(function (u) { return /^\/route/.test(u); });
@@ -3333,7 +3334,7 @@ async function nucbox() {
         defR.before && Math.abs(thru.miles - defR.miles) < 1e-9);
     // A restaurant west of the car, a little south: the pickup is better
     // collected after it.
-    var R2 = { lat: 33.96, lon: -84.56 };
+    var R2 = { lat: 33.96, lon: -44.56 };
     var defR2 = await byDefinition(R2);
     var thru2 = await nbx.detour(SQ, A, S, [R2]);
     ok_('...and here after it (' + (thru2.miles || 0).toFixed(3) + ', ' + defR2.miles.toFixed(3) + ')',
@@ -3352,9 +3353,9 @@ async function nucbox() {
     // before the restaurant answers, the gap after it does not.
     eq('a gap the router has no road for refuses the whole figure, though the other '
        + 'answered: the best of the gaps that answered may not be the best',
-       (await nbx.detour(SQ, A, { lat: 34.0010, lon: -84.5560 }, [R])).why, 'noroute');
-    eq('the real install\'s own route, Marietta Square to Five Points: 31307.4 m',
-       (await nbx.road([SQ, { lat: 33.7490, lon: -84.3880 }])).metres, 31307.4);
+       (await nbx.detour(SQ, A, { lat: 34.0010, lon: -44.5560 }, [R])).why, 'noroute');
+    eq('the real install\'s own route, Harrowen Square to Nine Rivers: 31307.4 m',
+       (await nbx.road([SQ, { lat: 33.7490, lon: -44.3880 }])).metres, 31307.4);
 
     /* A NucBox that is not there is said, and is the page's cue for the
        public geocoder — never "nothing there". */
@@ -3428,7 +3429,7 @@ async function nucbox() {
          .map(function (m) { return m.tip.split(' · this one ')[1]; }).join(' | '),
        "10.6 mi from the card's fix, outside the 9.9 mi searched | 21.8 mi from the "
        + "card's fix, outside the 9.9 mi searched");
-    var lnone = MV.located(far, MV.discFor(card({ lat: 33.97, lon: -84.565, miles: 0.6 })),
+    var lnone = MV.located(far, MV.discFor(card({ lat: 33.97, lon: -44.565, miles: 0.6 })),
                            "McDonald's", 'new');
     eq('none inside: nothing drawn for an answer with no list behind it',
        lnone.marks.length + lnone.lines.length, 0);
@@ -3440,7 +3441,7 @@ async function nucbox() {
        stubAsked, 3);
 
     // Through the real server.js and the fake NucBox.
-    var door = MV.located(await nbx.place('4821 Kestrel Dr, Marietta', d94), d94, 'Jimmy', 'new');
+    var door = MV.located(await nbx.place('4821 Kestrel Dr, Harrowen', d94), d94, 'Jimmy', 'new');
     // (...and, since the owner's 24 Oct, that the run goes to the street's
     // general area: the street's one answer is inside the disc, withArea.)
     ok_('a door answered by its street: the street drawn, no pin, saying not that door ('
@@ -3451,12 +3452,12 @@ async function nucbox() {
         }));
     // ...and the owner's 24 Oct snap, invented: two doors of one number a few
     // hundred metres apart are no pin, and their area rides on the refusal.
-    var twoDoors = await nbx.place('3150 Thornbury Mill Rd SE, Marietta', d94);
+    var twoDoors = await nbx.place('3150 Gorsebury Mill Rd SE, Harrowen', d94);
     eq('[area] through the server: two doors 0.33 mi apart, no pin, the area beside it',
        JSON.stringify([twoDoors.at, twoDoors.why, !!(twoDoors.area && twoDoors.area.approx)]),
        JSON.stringify([null, 'several', true]));
     // ...and a street's area outlives the place asked after it (pickPlace).
-    var noPlace = await nbx.place('4821 Kestrel Dr, Marietta', d94, { place: 'Nowhere Hall' });
+    var noPlace = await nbx.place('4821 Kestrel Dr, Harrowen', d94, { place: 'Nowhere Hall' });
     eq('[area] ...a street found, the place asked after it not: the street\'s area kept',
        JSON.stringify([noPlace.at, noPlace.why, !!(noPlace.area && noPlace.area.approx)]),
        JSON.stringify([null, 'noplace', true]));
@@ -3466,7 +3467,7 @@ async function nucbox() {
        [cut.marks.length, cut.marks.filter(function (m) { return m.kind === 'candidate'; }).length,
         cut.marks.every(function (m) { return m.tip.indexOf(MV.nbxRefusal(cutRes, d30, 'Starbucks', 'new')) === 0; })]
          .join(','), '10,1,true');
-    var two2 = await nbxS.place('Juniper Cir & Northgate Dr, Marietta', d3, ST);
+    var two2 = await nbxS.place('Juniper Cir & Northgate Dr, Harrowen', d3, ST);
     var corners = MV.located(two2, d3, 'Juniper', 'held');
     // (29 Oct: the two meetings lie within AREA_MI, so the refusal now
     // carries their general area, cornerArea, and each tip says so.)
@@ -3477,12 +3478,12 @@ async function nucbox() {
            + ' · ≈ routed to the area, not a door';
        }), two2.at, !!(two2.area && two2.area.approx), two2.area && two2.area.n].join(','),
        '2,true,,true,2');
-    var fox = await nbxS.place('Foxglove Trl & Northgate Dr, Marietta', d3, ST);
+    var fox = await nbxS.place('Foxglove Trl & Northgate Dr, Harrowen', d3, ST);
     var foxL = MV.located(fox, d3, 'Foxglove', 'held');
     eq('...and a corner pinned: its meeting drawn under the pin, saying so',
        foxL.marks.map(function (m) { return [m.lat, m.lon, m.tip].join(' '); }).join(' | '),
-       '33.96 -84.55 Foxglove — the one inside the 3.5 mi searched, pinned');
-    var lark3 = await nbxS.place('Larkspur Pkwy SE, Atlanta', d3, ST);
+       '33.96 -44.55 Foxglove — the one inside the 3.5 mi searched, pinned');
+    var lark3 = await nbxS.place('Larkspur Pkwy SE, Solvane', d3, ST);
     var larkL = MV.located(lark3, d3, 'Larkspur', 'held');
     eq('a numberless street pinned: its stretch inside the disc drawn as the chosen line, '
        + 'the very runs the pin carries, and no marks',
@@ -3490,7 +3491,7 @@ async function nucbox() {
         JSON.stringify((larkL.lines[0] || {}).pts) === JSON.stringify(lark3.at.stretch[0]),
         larkL.marks.length].join(','),
        '1,chosen,true,0');
-    var lark94 = await nbxS.place('Larkspur Pkwy SE, Atlanta', d94, ST);
+    var lark94 = await nbxS.place('Larkspur Pkwy SE, Solvane', d94, ST);
     var lark94L = MV.located(lark94, d94, 'Larkspur', 'held');
     eq('...refused as two streets: both stretches drawn grey, with the refusal',
        [lark94L.lines.length, lark94L.lines.every(function (l) {
@@ -3499,8 +3500,8 @@ async function nucbox() {
     // A street through a 1.0 mi disc with its ends five miles out, refused:
     // only the part inside is drawn.
     var crossing = MV.located({ at: null, why: 'several', n: 2,
-                                seen: { lines: [[[SQ.lat, -84.60], [SQ.lat, -84.50]],
-                                                [[SQ.lat + 0.1, -84.6], [SQ.lat + 0.1, -84.5]]] } },
+                                seen: { lines: [[[SQ.lat, -44.60], [SQ.lat, -44.50]],
+                                                [[SQ.lat + 0.1, -44.6], [SQ.lat + 0.1, -44.5]]] } },
                               d1, 'X', 'new');
     ok_('...and of a street running out of the disc, only the part inside it is drawn',
         crossing.lines.length === 1 && crossing.lines[0].pts.every(function (p) {
@@ -3532,9 +3533,9 @@ async function nucbox() {
 }
 
 (async function () {
-  var A = fakeGeo({ 'one': { lat: 33.9, lon: -84.5 },
-                    'two': { lat: 33.91, lon: -84.51 },
-                    'three': { lat: 33.92, lon: -84.52 } });
+  var A = fakeGeo({ 'one': { lat: 33.9, lon: -44.5 },
+                    'two': { lat: 33.91, lon: -44.51 },
+                    'three': { lat: 33.92, lon: -44.52 } });
   var into = {};
   await A.geo.walk(['one', 'two', 'three'], function () { return null; }, into);
   eq('three places, three questions', A.sent.length, 3);
@@ -3556,7 +3557,7 @@ async function nucbox() {
   /* A place already remembered costs nothing and delays nothing. The waiting
    * lives around the REQUEST, not around the loop, so a cached place in the
    * middle of a walk does not buy a second of silence that was never owed. */
-  var B = fakeGeo({ 'a': { lat: 33.9, lon: -84.5 }, 'b': { lat: 33.91, lon: -84.51 } });
+  var B = fakeGeo({ 'a': { lat: 33.9, lon: -44.5 }, 'b': { lat: 33.91, lon: -44.51 } });
   await B.geo.walk(['a'], function () { return null; }, {});
   var t0 = B.clock.t;
   await B.geo.walk(['a', 'a', 'a'], function () { return null; }, {});
@@ -3567,13 +3568,13 @@ async function nucbox() {
    * without one are two different questions with two different right answers,
    * and storing the second under the first's key is how a good answer gets
    * overwritten by a worse one. */
-  var C = fakeGeo({ 'Duval Ct': { lat: 33.9, lon: -84.5 } });
-  var aBox = MV.boxAround({ lat: 33.9, lon: -84.5 });
-  await C.geo.lookup('Duval Ct', aBox);
+  var C = fakeGeo({ 'Toval Ct': { lat: 33.9, lon: -44.5 } });
+  var aBox = MV.boxAround({ lat: 33.9, lon: -44.5 });
+  await C.geo.lookup('Toval Ct', aBox);
   no_('a place answered inside a box is not thereby known without one',
-      C.geo.knows('Duval Ct', null));
-  ok_('...but is known inside that box', C.geo.knows('Duval Ct', aBox));
-  await C.geo.lookup('Duval Ct', null);
+      C.geo.knows('Toval Ct', null));
+  ok_('...but is known inside that box', C.geo.knows('Toval Ct', aBox));
+  await C.geo.lookup('Toval Ct', null);
   eq('...so asking it wide is a second question', C.sent.length, 2);
   ok_('...and the boxed question carried the box',
       C.sent[0].url.indexOf('viewbox=') !== -1 && C.sent[0].url.indexOf('bounded=1') !== -1);
@@ -3594,27 +3595,27 @@ async function nucbox() {
   var typed = 'Georgia';
   var hinted = fakeGeo({}, { hint: function () { return typed; } });
   var plain = fakeGeo({});
-  var someBox = MV.boxAround({ lat: 33.9, lon: -84.5 });
+  var someBox = MV.boxAround({ lat: 33.9, lon: -44.5 });
   eq('a boxed place is asked the same way whether or not a town was typed',
-     hinted.geo.keyFor('Duval Ct', someBox), plain.geo.keyFor('Duval Ct', someBox));
+     hinted.geo.keyFor('Toval Ct', someBox), plain.geo.keyFor('Toval Ct', someBox));
   // ...and the hint still does its job where there is no box, which is the
   // only case it was ever for.
   no_('an unboxed place still takes the hint',
-      hinted.geo.keyFor('Duval Ct', null) === plain.geo.keyFor('Duval Ct', null));
+      hinted.geo.keyFor('Toval Ct', null) === plain.geo.keyFor('Toval Ct', null));
   ok_('...and the hint is what makes the difference',
-      hinted.geo.keyFor('Duval Ct', null).indexOf('Georgia') !== -1);
+      hinted.geo.keyFor('Toval Ct', null).indexOf('Georgia') !== -1);
 
   /* The hint is part of the question, so it has to be part of the key too. A
    * driver who types a town after a blank run must not get the answers from
    * the blank run handed back. */
   var hint = '';
-  var D = fakeGeo({ 'Duval Ct': { lat: 33.9, lon: -84.5 },
-                    'Duval Ct, Georgia': { lat: 33.91, lon: -84.51 } },
+  var D = fakeGeo({ 'Toval Ct': { lat: 33.9, lon: -44.5 },
+                    'Toval Ct, Georgia': { lat: 33.91, lon: -44.51 } },
                   { hint: function () { return hint; } });
-  await D.geo.lookup('Duval Ct', null);
+  await D.geo.lookup('Toval Ct', null);
   hint = 'Georgia';
-  no_('typing a hint makes it a different question', D.geo.knows('Duval Ct', null));
-  await D.geo.lookup('Duval Ct', null);
+  no_('typing a hint makes it a different question', D.geo.knows('Toval Ct', null));
+  await D.geo.lookup('Toval Ct', null);
   eq('...which is asked', D.sent.length, 2);
   ok_('...with the hint in it', D.sent[1].url.indexOf('Georgia') !== -1);
 
@@ -3638,8 +3639,8 @@ async function nucbox() {
   var shared = { get: function () { return device.blob; },
                  set: function (v) { device.blob = v; },
                  clear: function () { device.blob = '{}'; } };
-  var P1 = fakeGeo({ 'Kroger': { lat: 33.9, lon: -84.5 } }, { store: shared });
-  var P2 = fakeGeo({ 'Zaxbys': { lat: 33.8, lon: -84.4 } }, { store: shared });
+  var P1 = fakeGeo({ 'Kroger': { lat: 33.9, lon: -44.5 } }, { store: shared });
+  var P2 = fakeGeo({ 'Zaxbys': { lat: 33.8, lon: -44.4 } }, { store: shared });
   await P1.geo.lookup('Kroger', null);
   await P2.geo.lookup('Zaxbys', null);
   var onDevice = JSON.parse(device.blob);
@@ -3665,8 +3666,8 @@ async function nucbox() {
    * Staged in that order deliberately: the panel is built and fills up first,
    * the desk page presses Forget after, and then the panel answers one more
    * place, because that is the sequence a driver produces. */
-  var P3 = fakeGeo({ 'Chipotle': { lat: 33.7, lon: -84.3 },
-                     'Wingstop': { lat: 33.6, lon: -84.2 } }, { store: shared });
+  var P3 = fakeGeo({ 'Chipotle': { lat: 33.7, lon: -44.3 },
+                     'Wingstop': { lat: 33.6, lon: -44.2 } }, { store: shared });
   await P3.geo.lookup('Chipotle', null);
   // P3 was built after the other two answered, so it holds their places in
   // memory as well as its own — which is exactly the page that did the damage.
@@ -3750,7 +3751,7 @@ async function nucbox() {
       flaky++;
       if (flaky === 2) return Promise.reject(new Error('offline'));
       return Promise.resolve({ ok: true, json: function () {
-        return Promise.resolve([{ lat: '33.9', lon: '-84.5', display_name: 'x', type: 'road' }]);
+        return Promise.resolve([{ lat: '33.9', lon: '-44.5', display_name: 'x', type: 'road' }]);
       } });
     }
   });
@@ -3768,15 +3769,15 @@ async function nucbox() {
    * was, and losing a genuinely distant pin to a feature meant to gain pins is
    * the wrong trade. */
   var OFFERS = [
-    { pickup: 'Chipotle', dropoff: 'Duval Ct', miles: 12,
-      lat: 33.90, lon: -84.50, gpsOk: true },
+    { pickup: 'Chipotle', dropoff: 'Toval Ct', miles: 12,
+      lat: 33.90, lon: -44.50, gpsOk: true },
     { pickup: 'Chipotle', dropoff: 'Far Away Rd', miles: 12,
-      lat: 33.92, lon: -84.52, gpsOk: true }
+      lat: 33.92, lon: -44.52, gpsOk: true }
   ];
   // "Far Away Rd" is answered only when asked without a box, which is exactly
   // the shape of a genuinely distant dropoff.
-  var answered = { 'Chipotle': { lat: 33.90, lon: -84.50 },
-                   'Duval Ct': { lat: 33.95, lon: -84.55 },
+  var answered = { 'Chipotle': { lat: 33.90, lon: -44.50 },
+                   'Toval Ct': { lat: 33.95, lon: -44.55 },
                    'Far Away Rd': { lat: 41.88, lon: -87.63 } };
   var E = fakeGeo(answered);
   var boxedAway = 0;
@@ -3829,10 +3830,10 @@ async function nucbox() {
      JSON.stringify({ outside: false, line: 'found inside the box searched round where the car '
                       + 'was, 137 mi north–south by 134 east–west' }));
   eq('...one asked wide and answered inside its box after all is not called outside',
-     MV.howFound({ lat: 33.90, lon: -84.50 },
+     MV.howFound({ lat: 33.90, lon: -44.50 },
                  { box: run.asked['Chipotle'].box, wide: true }).outside, false);
   eq('...one with no box says it had none, and why',
-     MV.howFound({ lat: 33.9, lon: -84.5 }, { box: null, wide: false }).line,
+     MV.howFound({ lat: 33.9, lon: -44.5 }, { box: null, wide: false }).line,
      'asked with no box — no row naming it knows where the car was');
   eq('...and one the walk never asked, or never placed, has nothing to say',
      [MV.howFound(null, run.asked['Chipotle']), MV.howFound({ lat: 1, lon: 1 }, undefined)]
@@ -3862,9 +3863,9 @@ async function nucbox() {
    * The offers page's own detail SHEET already drew [pickup, dropoff], so one
    * page answered this two ways a few hundred lines apart. */
   eq('the two ends come back in journey order, not arrival order',
-     MV.ends({ pickup: 'Happy Hawg BBQ (Hiram)', dropoff: 'Tibbitts Rd, Dallas',
-               places: ['Tibbitts Rd, Dallas', 'Happy Hawg BBQ (Hiram)'] }).join(' -> '),
-     'Happy Hawg BBQ (Hiram) -> Tibbitts Rd, Dallas');
+     MV.ends({ pickup: 'Happy Hawg BBQ (Telby)', dropoff: 'Wobbetts Rd, Dorvan',
+               places: ['Wobbetts Rd, Dorvan', 'Happy Hawg BBQ (Telby)'] }).join(' -> '),
+     'Happy Hawg BBQ (Telby) -> Wobbetts Rd, Dorvan');
   eq('...and a union of four readings is still a job with two ends',
      MV.ends({ pickup: 'A', dropoff: 'B', places: ['B', 'A', 'B ', 'A,'] }).length, 2);
   /* It REORDERS what the card printed and never adds to it. A dropoff the
@@ -3906,9 +3907,9 @@ async function nucbox() {
    * pickup: the line under the map used to say both were drawn end to end
    * while one of them was on screen in red, dashed, saying it cannot be
    * right. */
-  var strayed = [{ from: { lat: 34, lon: -84 }, to: { lat: 34.1, lon: -84.1 },
+  var strayed = [{ from: { lat: 34, lon: -84 }, to: { lat: 34.1, lon: -44.1 },
                    impossible: false, fromStray: true },
-                 { from: { lat: 34, lon: -84 }, to: { lat: 34.1, lon: -84.1 },
+                 { from: { lat: 34, lon: -84 }, to: { lat: 34.1, lon: -44.1 },
                    impossible: false }];
   eq('the count under the map leaves the accusations out',
      strayed.filter(function (p) { return p.from && p.to && !MV.accused(p); }).length, 1);
@@ -3920,12 +3921,12 @@ async function nucbox() {
    * however far the pin lands. A stray end is then the ONLY thing saying the
    * pair is wrong, and the status line's count was the one reader not asking.
    * 15 of the owner's 579 both-ended pairs sit in exactly this state. */
-  var G = fakeGeo({ 'Chipotle': { lat: 33.90, lon: -84.50 },
-                    'Duval Ct': { lat: 33.93, lon: -84.55 },
+  var G = fakeGeo({ 'Chipotle': { lat: 33.90, lon: -44.50 },
+                    'Toval Ct': { lat: 33.93, lon: -44.55 },
                     'Chicago Ave': { lat: 41.88, lon: -87.63 } });
   var noYardstick = await MV.placeAll(
-    [{ pickup: 'Chipotle', dropoff: 'Duval Ct', lat: 33.90, lon: -84.50 },
-     { pickup: 'Chipotle', dropoff: 'Chicago Ave', lat: 33.92, lon: -84.52 }],
+    [{ pickup: 'Chipotle', dropoff: 'Toval Ct', lat: 33.90, lon: -44.50 },
+     { pickup: 'Chipotle', dropoff: 'Chicago Ave', lat: 33.92, lon: -44.52 }],
     G.geo, function () {});
   eq('a pin in another state is still a stray without a distance to check it',
      Object.keys(noYardstick.strays).length, 1);
@@ -3959,9 +3960,9 @@ async function nucbox() {
    *
    * Checked here because rpi/test_map.py's fixture carries every ranked town
    * on the PICKUP, so the page can prove the silence and not the sentence. */
-  var byEnd = { pickup: 'Zaxbys', dropoff: 'Peachtree St NE, Atlanta' };
+  var byEnd = { pickup: 'Zaxbys', dropoff: 'Plumleigh St NE, Solvane' };
   eq('a job whose dropoff names a town is ranked under that town',
-     MV.townFor(byEnd, ADV.area), 'Atlanta');
+     MV.townFor(byEnd, ADV.area), 'Solvane');
   eq('...and says the dropoff is where it came from',
      MV.townEndFor(byEnd, ADV.area), 'dropoff');
   // THE DROPOFF WINS when both ends name one, which is the whole reason the
@@ -3969,9 +3970,9 @@ async function nucbox() {
   // statement about where jobs END. Without this the order can be swapped and
   // every other case here still passes, because no other fixture has a town
   // at both ends — measured, by swapping it.
-  var both = { pickup: 'Barrett Pkwy, Kennesaw', dropoff: 'Oak Ln, Acworth' };
+  var both = { pickup: 'Tallett Pkwy, Tellmoor', dropoff: 'Oak Ln, Ivyhame' };
   eq('with a town at both ends the dropoff is the one ranked',
-     MV.townFor(both, ADV.area), 'Acworth');
+     MV.townFor(both, ADV.area), 'Ivyhame');
   eq('...and is named as the end it came from', MV.townEndFor(both, ADV.area), 'dropoff');
 
   // ONE RULE, HANDED IN. map-view used to carry its own idea of what a town
@@ -3984,14 +3985,14 @@ async function nucbox() {
   // Every disagreement went map-view's way and map-view was wrong on all of
   // them — 69 towns it could not see through OCR damage or a ZIP tail, 7 junk
   // strings it accepted, and 5 where it kept the damage IN the name. Those
-  // five mattered most: "F Marietta" and "Marietta" ranked as two towns.
+  // five mattered most: "F Harrowen" and "Harrowen" ranked as two towns.
   eq('a town damaged by OCR is still read',
-     MV.townOf('Bob Cox Rd NW & Granville Dr NW, I Marietta', ADV.area),
-     'Marietta');
+     MV.townOf('Tom Hix Rd NW & Pemberley Dr NW, I Harrowen', ADV.area),
+     'Harrowen');
   eq('...and one behind a ZIP tail, which is what a scanned address ends in',
-     MV.townOf('322 Thompson Dr, Dallas, GA 30132-3289', ADV.area), 'Dallas');
+     MV.townOf('322 Thompson Dr, Dorvan, GA 90732-3289', ADV.area), 'Dorvan');
   eq('...and a two-word one keeps both words',
-     MV.townOf('Waterway Cir, - R Lithia Springs', ADV.area), 'Lithia Springs');
+     MV.townOf('Waterway Cir, - R Vestia Springs', ADV.area), 'Vestia Springs');
   // The one piece of the old judgement that is still map-view's, and the case
   // it was written for: an all-capitals tail is an abbreviation or a fragment
   // of a road name, not a place anybody lives. The rule reads "LAS" as a town
@@ -4000,16 +4001,16 @@ async function nucbox() {
   // Title case, because this is what the ranking prints and the rule
   // lowercases in order to compare.
   eq('a town comes back as it is printed, not as it is compared',
-     MV.townOf('Oak Ln, Powder Springs', ADV.area), 'Powder Springs');
+     MV.townOf('Oak Ln, Gorrel Springs', ADV.area), 'Gorrel Springs');
   // WITHOUT the rule there is no answer, rather than a second opinion. That is
   // the whole point: map-view is not allowed to decide this on its own any
   // more, and a quiet fallback would be the duplication growing back.
-  eq('with no rule handed in there is no town', MV.townOf('Peachtree, Atlanta'), null);
-  eq('...and no end either', MV.townEndFor({ dropoff: 'Peachtree, Atlanta' }), null);
+  eq('with no rule handed in there is no town', MV.townOf('Plumleigh, Solvane'), null);
+  eq('...and no end either', MV.townEndFor({ dropoff: 'Plumleigh, Solvane' }), null);
 
-  var byPickup = { pickup: 'Canton Rd, Marietta', dropoff: 'Zaxbys' };
+  var byPickup = { pickup: 'Belvan Rd, Harrowen', dropoff: 'Zaxbys' };
   eq('a job whose dropoff names nowhere falls back to the pickup',
-     MV.townFor(byPickup, ADV.area), 'Marietta');
+     MV.townFor(byPickup, ADV.area), 'Harrowen');
   eq('...and says so', MV.townEndFor(byPickup, ADV.area), 'pickup');
   var neither = { pickup: 'Zaxbys', dropoff: 'Wendys' };
   eq('a job naming no town is under none', MV.townFor(neither, ADV.area), null);
@@ -4018,8 +4019,8 @@ async function nucbox() {
   // The derivation, not a restatement of it: whatever end is named, the town
   // is the town OF that end. A precedence that drifted would break this
   // without breaking any single case above.
-  [byEnd, byPickup, neither, { pickup: 'Barrett Pkwy, Kennesaw',
-                               dropoff: 'Oak Ln, Acworth' }]
+  [byEnd, byPickup, neither, { pickup: 'Tallett Pkwy, Tellmoor',
+                               dropoff: 'Oak Ln, Ivyhame' }]
     .forEach(function (o, i) {
       var end = MV.townEndFor(o, ADV.area);
       eq('the town is read off the end that named it (' + i + ')',
@@ -4035,7 +4036,7 @@ async function nucbox() {
   // "+$NaN/hr" — a confidently wrong number arriving through a comparison
   // operator, on the page's most quotable figure.
   eq('a ranking that is not held still leads with what the town paid',
-     MV.rankLead({ name: 'Acworth', median: 14.01, matched: null }, false).text,
+     MV.rankLead({ name: 'Ivyhame', median: 14.01, matched: null }, false).text,
      '$14.01');
   eq('...with a unit, being a rate',
      MV.rankLead({ median: 14.01 }, false).unit, true);
@@ -4068,27 +4069,27 @@ async function nucbox() {
   //
   // The popup quoted the POSITION from the hour-held order beside the RAW
   // median, and the two orders are not the same list. These four are the
-  // owner's week, "any time", in the order Advice.areas returns them: Kennesaw
-  // is 3rd and paid $15.32, Woodstock 4th and paid $15.80. Tapping the two pins
+  // owner's week, "any time", in the order Advice.areas returns them: Tellmoor
+  // is 3rd and paid $15.32, Marrowick 4th and paid $15.80. Tapping the two pins
   // read "3 of 9, median $15.32" against "4 of 9, median $15.80" — the better
   // position with the worse number, and nothing saying the hour was held.
   var held = { real: true, matched: true, groups: [
-    { name: 'Atlanta', median: 19.95, matched: 3.28 },
-    { name: 'Mableton', median: 15.94, matched: 0.13 },
-    { name: 'Kennesaw', median: 15.32, matched: 0.13 },
-    { name: 'Woodstock', median: 15.8, matched: -0.13 },
+    { name: 'Solvane', median: 19.95, matched: 3.28 },
+    { name: 'Gablemor', median: 15.94, matched: 0.13 },
+    { name: 'Tellmoor', median: 15.32, matched: 0.13 },
+    { name: 'Marrowick', median: 15.8, matched: -0.13 },
   ] };
   var stood = MV.standings(held);
   eq('a pin quotes its town\'s position with the figure it was ranked by',
-     stood.Kennesaw, 'Kennesaw is 3 of 4 towns here at +$0.13/hr once the hour '
+     stood.Tellmoor, 'Tellmoor is 3 of 4 towns here at +$0.13/hr once the hour '
        + 'is held still; $15.32 median');
   // ...and it is the sidebar's own lead, not a second formatting of it, so the
   // popup and the row it quotes cannot come apart.
   ok_('...the same figure the sidebar\'s row leads with',
-      stood.Woodstock.indexOf(MV.rankLead(held.groups[3], true).text + '/hr') >= 0);
+      stood.Marrowick.indexOf(MV.rankLead(held.groups[3], true).text + '/hr') >= 0);
   // The whole claim, as a property: down the order, the figure beside the
-  // ordinal never goes UP. With the raw median beside it, Woodstock's $15.80
-  // under Kennesaw's $15.32 breaks exactly this.
+  // ordinal never goes UP. With the raw median beside it, Marrowick's $15.80
+  // under Tellmoor's $15.32 breaks exactly this.
   var quoted = held.groups.map(function (g) {
     var m = /at ([+−])\$([\d.]+)\/hr/.exec(stood[g.name] || '');
     return m ? (m[1] === '−' ? -1 : 1) * Number(m[2]) : NaN;
@@ -4103,7 +4104,7 @@ async function nucbox() {
   ok_('a town with nothing to be compared against is given no position (' + lonely.Lonely + ')',
       !/ is \d+ of /.test(lonely.Lonely) && lonely.Lonely.indexOf('$22.10 median') >= 0);
   ok_('...and is not counted among the towns that have one',
-      lonely.Atlanta.indexOf('1 of 4 towns') >= 0);
+      lonely.Solvane.indexOf('1 of 4 towns') >= 0);
   // Not held still, the median IS the figure the order was sorted by, and the
   // plain line is right.
   eq('a ranking not held still quotes the median it was ranked by',
@@ -4120,63 +4121,65 @@ async function nucbox() {
 
   /* ---- dusk and dawn at the fix (civilTwilight, nightFor) -----------------
    *
-   * Against published civil twilight times for Atlanta (33.749, -84.388),
-   * looked up for this check on 14 Oct 2026 and quoted to the minute the
-   * tables give. Two tables disagree by a minute on the same evening, so a
-   * figure within two minutes of the published one is the same answer; a
-   * wrong day, a wrong sign on the longitude or the sun's zenith at 90.833
-   * (sunset, not civil dusk) is half an hour or more out.
+   * At an invented point in open ocean (33.749, -44.388), against NOAA's solar
+   * calculator equations (the spreadsheet's: declination, equation of time,
+   * the sun's zenith at 96 degrees) worked separately from this file, in UTC.
+   * That working was held first against published civil twilight tables for
+   * a real city on this latitude and gave all three of its figures to the
+   * minute; this check quoted those tables until the suites stopped naming
+   * real places (20 Nov 2026). Within two minutes is the same answer; a wrong
+   * day, a wrong sign on the longitude or the zenith at 90.833 (sunset, not
+   * civil dusk) is half an hour or more out.
    *
-   *   21 Jun 2026  civil dusk 21:20 EDT  thetimeandplace.info/us/atlanta-ga
-   *                                      (sunset 20:51, dusk 21:20; MyWild,
-   *                                      mywild.report/daylight-georgia, 21:21)
-   *   13 Jun 2026  civil dawn 05:58 EDT  timeanddate.com/sun/usa/atlanta?month=6
-   *    1 Dec 2026  civil dusk 17:56 EST  surf-life.blue/us/sunrisesunset/atlanta-ga/202612
+   *   21 Jun 2026  civil dusk 22:40 UTC
+   *   13 Jun 2026  civil dawn 07:17 UTC
+   *    1 Dec 2026  civil dusk 20:16 UTC
    */
-  var ATL = { lat: 33.749, lon: -84.388 };
-  var atNY = function (iso) { return Date.parse(iso); };
+  var FIX = { lat: 33.749, lon: -44.388 };
+  var atUtc = function (iso) { return Date.parse(iso); };
   var offBy = function (ms, iso) { return Math.abs(ms - Date.parse(iso)) / 60000; };
-  var jun21 = MV.civilTwilight(ATL.lat, ATL.lon, atNY('2026-06-21T12:00:00-04:00'));
-  ok_('Atlanta, 21 Jun 2026: civil dusk at 21:20 EDT, as published (' +
+  var jun21 = MV.civilTwilight(FIX.lat, FIX.lon, atUtc('2026-06-21T15:00:00Z'));
+  ok_('21 Jun 2026 at the fix: civil dusk at 22:40 UTC, as worked (' +
       new Date(jun21.dusk).toISOString() + ')',
-      offBy(jun21.dusk, '2026-06-21T21:20:00-04:00') <= 2);
-  var jun13 = MV.civilTwilight(ATL.lat, ATL.lon, atNY('2026-06-13T12:00:00-04:00'));
-  ok_('Atlanta, 13 Jun 2026: civil dawn at 05:58 EDT, as published (' +
+      offBy(jun21.dusk, '2026-06-21T22:40:00Z') <= 2);
+  var jun13 = MV.civilTwilight(FIX.lat, FIX.lon, atUtc('2026-06-13T15:00:00Z'));
+  ok_('13 Jun 2026 at the fix: civil dawn at 07:17 UTC, as worked (' +
       new Date(jun13.dawn).toISOString() + ')',
-      offBy(jun13.dawn, '2026-06-13T05:58:00-04:00') <= 2);
-  var dec1 = MV.civilTwilight(ATL.lat, ATL.lon, atNY('2026-12-01T12:00:00-05:00'));
-  ok_('Atlanta, 1 Dec 2026: civil dusk at 17:56 EST, as published (' +
+      offBy(jun13.dawn, '2026-06-13T07:17:00Z') <= 2);
+  var dec1 = MV.civilTwilight(FIX.lat, FIX.lon, atUtc('2026-12-01T15:00:00Z'));
+  ok_('1 Dec 2026 at the fix: civil dusk at 20:16 UTC, as worked (' +
       new Date(dec1.dusk).toISOString() + ')',
-      offBy(dec1.dusk, '2026-12-01T17:56:00-05:00') <= 2);
-  // The day is the solar day at the fix, not the UTC date. 20:30 EDT on 21
-  // Jun is 00:30 UTC on the 22nd, before that evening's dusk: still day.
-  var late = MV.civilTwilight(ATL.lat, ATL.lon, atNY('2026-06-21T20:30:00-04:00'));
-  ok_('...20:30 EDT is weighed against that evening\'s dusk, not the next UTC day\'s',
-      offBy(late.dusk, '2026-06-21T21:20:00-04:00') <= 2);
+      offBy(dec1.dusk, '2026-12-01T20:16:00Z') <= 2);
+  // The day is the solar day at the fix, not the UTC date. The fix's clock is
+  // about three hours behind UTC, so 01:00 UTC on 22 Jun is still the evening
+  // of the 21st there: weighed against that evening's dusk.
+  var late = MV.civilTwilight(FIX.lat, FIX.lon, atUtc('2026-06-22T01:00:00Z'));
+  ok_('...01:00 UTC on the 22nd is weighed against the 21st\'s dusk, not the UTC day\'s',
+      offBy(late.dusk, '2026-06-21T22:40:00Z') <= 2);
   var CLOCK = 1735689600000;
-  eq('night at the fix after civil dusk (21:30 EDT, 21 Jun)',
-     MV.nightFor([ATL], atNY('2026-06-21T21:30:00-04:00'), CLOCK), true);
-  eq('...day before it (21:10 EDT)',
-     MV.nightFor([ATL], atNY('2026-06-21T21:10:00-04:00'), CLOCK), false);
-  eq('...night before civil dawn (05:50 EDT, 13 Jun)',
-     MV.nightFor([ATL], atNY('2026-06-13T05:50:00-04:00'), CLOCK), true);
-  eq('...and day after it (06:05 EDT)',
-     MV.nightFor([ATL], atNY('2026-06-13T06:05:00-04:00'), CLOCK), false);
-  eq('...and at 20:30 EDT, still day',
-     MV.nightFor([ATL], atNY('2026-06-21T20:30:00-04:00'), CLOCK), false);
+  eq('night at the fix after civil dusk (22:50 UTC, 21 Jun)',
+     MV.nightFor([FIX], atUtc('2026-06-21T22:50:00Z'), CLOCK), true);
+  eq('...day before it (22:30 UTC)',
+     MV.nightFor([FIX], atUtc('2026-06-21T22:30:00Z'), CLOCK), false);
+  eq('...night before civil dawn (07:10 UTC, 13 Jun)',
+     MV.nightFor([FIX], atUtc('2026-06-13T07:10:00Z'), CLOCK), true);
+  eq('...and day after it (07:25 UTC)',
+     MV.nightFor([FIX], atUtc('2026-06-13T07:25:00Z'), CLOCK), false);
+  eq('...and at 21:50 UTC, still day',
+     MV.nightFor([FIX], atUtc('2026-06-21T21:50:00Z'), CLOCK), false);
   // No fix this beat: the last known one decides, in the order given.
   eq('with no fix now, the last known fix decides',
-     MV.nightFor([null, ATL], atNY('2026-12-01T18:30:00-05:00'), CLOCK), true);
-  // A fix half a world away: 18:30 EST is 23:30 UTC, mid-morning in Sydney.
+     MV.nightFor([null, FIX], atUtc('2026-12-01T23:30:00Z'), CLOCK), true);
+  // A fix half a world away: 23:30 UTC is mid-morning in Sydney.
   eq('...the newest fix ahead of the last known one',
-     MV.nightFor([{ lat: -33.87, lon: 151.21 }, ATL], atNY('2026-12-01T18:30:00-05:00'), CLOCK),
+     MV.nightFor([{ lat: -33.87, lon: 151.21 }, FIX], atUtc('2026-12-01T23:30:00Z'), CLOCK),
      false);
-  eq('no fix at all is day', MV.nightFor([null, null], atNY('2026-12-01T23:00:00-05:00'), CLOCK),
+  eq('no fix at all is day', MV.nightFor([null, null], atUtc('2026-12-02T04:00:00Z'), CLOCK),
      false);
   eq('...and so is a clock still in 1970, whatever the fix',
-     MV.nightFor([ATL], 3 * 3600000, CLOCK), false);
+     MV.nightFor([FIX], 3 * 3600000, CLOCK), false);
   eq('a position that is not one is no fix (lat 120)',
-     MV.civilTwilight(120, -84.388, atNY('2026-06-21T12:00:00-04:00')), null);
+     MV.civilTwilight(120, -44.388, atUtc('2026-06-21T15:00:00Z')), null);
   // Where the sun does not cross six below that day.
   eq('midsummer in Svalbard (78N) has no civil dusk: day all day',
      JSON.stringify(MV.civilTwilight(78, 15, Date.UTC(2026, 5, 21, 12))), '{"always":"day"}');
@@ -4186,21 +4189,21 @@ async function nucbox() {
   /* ---- a run drawn to whatever can be drawn (routeLadder; the owner, 21 Oct)
    *
    * 15:00, one Uber order held: its end the card's corner "<A> Flat Ct & <B>
-   * Rd, Marietta", the planner's pickup "Kennesaw" alone, and nothing was
+   * Rd, Harrowen", the planner's pickup "Tellmoor" alone, and nothing was
    * routed. Door, then a street's point, then the corner (or either of its
    * streets), then the car to the pickups — each rung below the door said
    * after the caption. Invented streets throughout. */
-  var CAR = { lat: 33.95, lon: -84.55 }, PK = { lat: 33.96, lon: -84.54 };
-  var END = { lat: 33.97, lon: -84.53 };
-  var HUB = { lat: 33.9526, lon: -84.5499 }, DISC3 = { at: HUB, miles: 3.0 };
+  var CAR = { lat: 33.95, lon: -44.55 }, PK = { lat: 33.96, lon: -44.54 };
+  var END = { lat: 33.97, lon: -44.53 };
+  var HUB = { lat: 33.9526, lon: -44.5499 }, DISC3 = { at: HUB, miles: 3.0 };
   eq('[ladder] the rungs: a door, a street\'s stretch, a short street the server pinned, a '
      + 'corner\'s meeting, a corner\'s street, nothing',
-     JSON.stringify([MV.routeRung('3259 Wrenfield Oaks Dr, Marietta', END),
-      MV.routeRung('Wrenfield Oaks Dr, Marietta', Object.assign({ stretch: [[1, 2]] }, END)),
-      MV.routeRung('3259 Wrenfield Oaks Dr, Marietta', END, 'street'),
-      MV.routeRung('Wren Flat Ct & Oriel Rd, Marietta', END),
-      MV.routeRung('Wren Flat Ct & Oriel Rd, Marietta', Object.assign({ street: true }, END)),
-      MV.routeRung('Wren Flat Ct & Oriel Rd, Marietta', null)]),
+     JSON.stringify([MV.routeRung('3259 Wrenfield Oaks Dr, Harrowen', END),
+      MV.routeRung('Wrenfield Oaks Dr, Harrowen', Object.assign({ stretch: [[1, 2]] }, END)),
+      MV.routeRung('3259 Wrenfield Oaks Dr, Harrowen', END, 'street'),
+      MV.routeRung('Wren Flat Ct & Oriel Rd, Harrowen', END),
+      MV.routeRung('Wren Flat Ct & Oriel Rd, Harrowen', Object.assign({ street: true }, END)),
+      MV.routeRung('Wren Flat Ct & Oriel Rd, Harrowen', null)]),
      JSON.stringify(['door', 'street', 'street', 'corner', 'street', null]));
   eq('[ladder] the door: car -> pickup -> end, and nothing said',
      JSON.stringify(MV.routeLadder(CAR, [PK], END, 'door')),
@@ -4242,16 +4245,16 @@ async function nucbox() {
     return Promise.resolve({ ok: true, status: 200,
                              json: function () { return Promise.resolve(body); } });
   } });
-  var side = await sides.cornerStreet(MV.searchPlan('Wren Flat Ct & Oriel Rd, Marietta'),
+  var side = await sides.cornerStreet(MV.searchPlan('Wren Flat Ct & Oriel Rd, Harrowen'),
                                       DISC3, HUB);
   eq('[ladder] a corner with no meeting: either street, the second\'s point, marked a street',
      JSON.stringify([stretchAsked, !!side.at, side.at && side.at.street,
-                     MV.routeRung('Wren Flat Ct & Oriel Rd, Marietta', side.at)]),
+                     MV.routeRung('Wren Flat Ct & Oriel Rd, Harrowen', side.at)]),
      JSON.stringify([['Wren Flat Ct', 'Oriel Rd'], true, true, 'street']));
   eq('[ladder] ...and no corner is asked as one: a door, or no disc',
      JSON.stringify([
-       (await sides.cornerStreet(MV.searchPlan('3259 Wrenfield Oaks Dr, Marietta'), DISC3, HUB)).why,
-       (await sides.cornerStreet(MV.searchPlan('Wren Flat Ct & Oriel Rd, Marietta'), null,
+       (await sides.cornerStreet(MV.searchPlan('3259 Wrenfield Oaks Dr, Harrowen'), DISC3, HUB)).why,
+       (await sides.cornerStreet(MV.searchPlan('Wren Flat Ct & Oriel Rd, Harrowen'), null,
                                  HUB)).why,
        stretchAsked.length]), JSON.stringify(['notwo', 'notwo', 2]));
 
@@ -4267,41 +4270,41 @@ async function nucbox() {
              city: city || null, state: null, zip: null,
              line: street ? (city ? street + ', ' + city : street) : null };
   }
-  var BP = pstop('pickup', 'oe Example Grill', null, '250 Example Road', 'Kennesaw');
-  var BA = pstop('dropoff', 'Pat Q.', 203, '4821 Kestrel Dr', 'Kennesaw');
-  var BB = pstop('dropoff', 'Lee R.', 216, '1985 Cobb Parkway', 'Kennesaw');
-  var BC = pstop('dropoff', 'Kim T.', 230, '3150 Thornbury Mill Rd SE', null);
+  var BP = pstop('pickup', 'oe Example Grill', null, '250 Example Road', 'Tellmoor');
+  var BA = pstop('dropoff', 'Pat Q.', 203, '4821 Kestrel Dr', 'Tellmoor');
+  var BB = pstop('dropoff', 'Lee R.', 216, '1985 Vosk Parkway', 'Tellmoor');
+  var BC = pstop('dropoff', 'Kim T.', 230, '3150 Gorsebury Mill Rd SE', null);
   eq('[batch run] the snap: the dropoff before the end, in the planner\'s order, as D1',
-     JSON.stringify(MV.heldDrops([BP, BA, BB], '1985 Cobb Parkway, Kennesaw, GA 30144')),
-     JSON.stringify([{ q: '4821 Kestrel Dr, Kennesaw', name: 'Pat Q.', n: 1 }]));
+     JSON.stringify(MV.heldDrops([BP, BA, BB], '1985 Vosk Parkway, Tellmoor, GA 90744')),
+     JSON.stringify([{ q: '4821 Kestrel Dr, Tellmoor', name: 'Pat Q.', n: 1 }]));
   eq('[batch run] ...two before it, D1 then D2, a street with no town ending in its comma',
-     JSON.stringify(MV.heldDrops([BP, BC, BA, BB], '1985 Cobb Parkway, Kennesaw')),
-     JSON.stringify([{ q: '3150 Thornbury Mill Rd SE,', name: 'Kim T.', n: 1 },
-                         { q: '4821 Kestrel Dr, Kennesaw', name: 'Pat Q.', n: 2 }]));
+     JSON.stringify(MV.heldDrops([BP, BC, BA, BB], '1985 Vosk Parkway, Tellmoor')),
+     JSON.stringify([{ q: '3150 Gorsebury Mill Rd SE,', name: 'Kim T.', n: 1 },
+                         { q: '4821 Kestrel Dr, Tellmoor', name: 'Pat Q.', n: 2 }]));
   eq('[batch run] ...none: one dropoff, an end on no dropoff\'s street, an end on two, no end, '
      + 'the end listed first (what comes after the end is not on its run)',
-     JSON.stringify([MV.heldDrops([BP, BB], '1985 Cobb Parkway, Kennesaw'),
-                     MV.heldDrops([BP, BA, BB], 'Wren Flat Ct & Oriel Rd, Marietta'),
-                     MV.heldDrops([BA, BB, pstop('dropoff', 'Ann V.', 240, '1985 Cobb Parkway',
-                                                 'Kennesaw')], '1985 Cobb Parkway'),
+     JSON.stringify([MV.heldDrops([BP, BB], '1985 Vosk Parkway, Tellmoor'),
+                     MV.heldDrops([BP, BA, BB], 'Wren Flat Ct & Oriel Rd, Harrowen'),
+                     MV.heldDrops([BA, BB, pstop('dropoff', 'Ann V.', 240, '1985 Vosk Parkway',
+                                                 'Tellmoor')], '1985 Vosk Parkway'),
                      MV.heldDrops([BA, BB], null),
-                     MV.heldDrops([BB, BA], '1985 Cobb Parkway, Kennesaw')]),
+                     MV.heldDrops([BB, BA], '1985 Vosk Parkway, Tellmoor')]),
      JSON.stringify([[], [], [], [], []]));
   eq('[batch run] ...a dropoff before the end with no street is on the run with no place to '
      + 'search (q null): never its name',
      JSON.stringify(MV.heldDrops([BP, pstop('dropoff', 'Pat Q.', 203, null, null), BB],
-                                 '1985 Cobb Parkway')),
+                                 '1985 Vosk Parkway')),
      JSON.stringify([{ q: null, name: 'Pat Q.', n: 1 }]));
   // heldDrops' street rule is restated here (the page does not load
   // assemble.js): held to Assemble.sameStreet's answers over invented lines,
   // so the two cannot drift (review, 27 Oct). A stop is on the end's street
   // for heldDrops exactly when it is for Assemble.
   var Asm = require('../assemble.js');
-  var SLINES = ['4821 Kestrel Dr, Kennesaw', '4821 KESTREL DR', '4821  Kestrel   Dr., Kennesaw',
-                '4821 Kestrel Dr.', ' 4821 Kestrel Dr , Kennesaw, GA', '4821 Kestrel Drive',
+  var SLINES = ['4821 Kestrel Dr, Tellmoor', '4821 KESTREL DR', '4821  Kestrel   Dr., Tellmoor',
+                '4821 Kestrel Dr.', ' 4821 Kestrel Dr , Tellmoor, GA', '4821 Kestrel Drive',
                 '4822 Kestrel Dr', 'Kestrel Dr', '4821 Kestrel Dr NW', '4821, Kestrel Dr',
-                '12 St. Ann St', '12 St Ann St, Roswell', '12 St.Ann St', '', ',', ' , Kennesaw',
-                '1985 Cobb Pkwy.', '1985 cobb pkwy', 'Wren Flat Ct & Oriel Rd', 'wren flat ct & oriel rd.'];
+                '12 St. Ann St', '12 St Ann St, Ruswold', '12 St.Ann St', '', ',', ' , Tellmoor',
+                '1985 Vosk Pkwy.', '1985 vosk pkwy', 'Wren Flat Ct & Oriel Rd', 'wren flat ct & oriel rd.'];
   var streetDrift = [];
   SLINES.forEach(function (a) {
     SLINES.forEach(function (b) {
@@ -4312,7 +4315,7 @@ async function nucbox() {
   });
   eq('[batch run] heldDrops\' street rule gives Assemble.sameStreet\'s answer over ' + SLINES.length
      + ' x ' + SLINES.length + ' invented street lines', JSON.stringify(streetDrift), '[]');
-  var D1 = { lat: 33.965, lon: -84.535 }, D2 = { lat: 33.968, lon: -84.532 };
+  var D1 = { lat: 33.965, lon: -44.535 }, D2 = { lat: 33.968, lon: -44.532 };
   eq('[batch run] the run: car -> pickup -> D1 -> D2 -> the end, nothing said at the door',
      JSON.stringify(MV.routeLadder(CAR, [PK], END, 'door', [D1, D2])),
      JSON.stringify({ pts: [CAR, PK, D1, D2, END], note: null }));
@@ -4330,11 +4333,11 @@ async function nucbox() {
      JSON.stringify({ pts: [CAR, PK], note: 'route to pickup only' }));
   eq('[batch run] a dropoff\'s point: its door, else its answers\' general area (approximate), '
      + 'else none',
-     JSON.stringify([MV.dropPoint({ at: { lat: 33.97, lon: -84.53, n: 1 } }),
+     JSON.stringify([MV.dropPoint({ at: { lat: 33.97, lon: -44.53, n: 1 } }),
                      MV.dropPoint({ at: null, why: 'nodoor',
-                                    area: { lat: 33.97, lon: -84.53, approx: true, n: 1 } }),
+                                    area: { lat: 33.97, lon: -44.53, approx: true, n: 1 } }),
                      MV.dropPoint({ at: null, why: 'none' }), MV.dropPoint(null)]),
-     JSON.stringify([{ lat: 33.97, lon: -84.53 }, { lat: 33.97, lon: -84.53, approx: true },
+     JSON.stringify([{ lat: 33.97, lon: -44.53 }, { lat: 33.97, lon: -44.53, approx: true },
                      null, null]));
   eq('[batch run] the skip rides after the caption\'s sentence and its chip, as a rung does',
      JSON.stringify([MV.routeSaid('+1.2 mi out of your way', ['route skips 1 dropoff, not found']),
@@ -4353,11 +4356,11 @@ async function nucbox() {
     return Promise.resolve({ ok: true, status: 200,
                              json: function () { return Promise.resolve(body); } });
   } });
-  var dropGot = await dropNbx.place('4821 Kestrel Dr, Kennesaw', DISC3, {});
+  var dropGot = await dropNbx.place('4821 Kestrel Dr, Tellmoor', DISC3, {});
   eq('[batch run] a dropoff searched on the NucBox as the end is: by its street inside the held '
      + 'card\'s disc, its street alone found, routed to the street\'s area',
      JSON.stringify([dropAsked.length >= 1, /street=4821/.test(decodeURIComponent(dropAsked[0])),
-                     /Kennesaw/.test(decodeURIComponent(dropAsked[0])),
+                     /Tellmoor/.test(decodeURIComponent(dropAsked[0])),
                      MV.dropPoint(dropGot) && MV.dropPoint(dropGot).approx]),
      JSON.stringify([true, true, false, true]));
 
@@ -4365,7 +4368,7 @@ async function nucbox() {
    * 24 Oct). Drawing only: the figure is detourThrough's, to the end, as it
    * was; a door the car has been to and left is off the run. Invented
    * points, the metro's as above. */
-  var NEW = { lat: 33.967, lon: -84.536 };
+  var NEW = { lat: 33.967, lon: -44.536 };
   var thru = MV.detourThrough(CAR, NEW, [PK], END);
   eq('[detour via drops] the figure after the held pickup rejoins at the end — measured to '
      + 'the end, no dropoff in it',
@@ -4482,8 +4485,8 @@ async function nucbox() {
 
     // A GPS STOP at a door (doorStopStep): the server's arrival rule, not a
     // drive-past. Fixes at the door every 10 s; 0.0009° of latitude is ~100 m.
-    var door = { lat: 34.0, lon: -84.5 };
-    var fx = function (dLat, err) { return { lat: 34.0 + dLat, lon: -84.5, err: err || 10 }; };
+    var door = { lat: 34.0, lon: -44.5 };
+    var fx = function (dLat, err) { return { lat: 34.0 + dLat, lon: -44.5, err: err || 10 }; };
     var walkStop = function (fixes, t0) {
       var st;
       fixes.forEach(function (f, i) { st = MV.doorStopStep(st, door, f, (t0 || 0) + i * 10000); });
@@ -4508,9 +4511,9 @@ async function nucbox() {
        ['passed', { lastAt: 40000 }, { lastAt: 60000 }, false, false]);
     eqJ('[planner doors] ...and never off an area, a refused or grey fix; passed stays passed',
        [walkStop(at.concat(away).map(function (f) { return f; }), 0) === 'passed',
-        MV.doorStopStep(undefined, { lat: 34.0, lon: -84.5, approx: true }, fx(0), 0),
+        MV.doorStopStep(undefined, { lat: 34.0, lon: -44.5, approx: true }, fx(0), 0),
         MV.doorStopStep(undefined, door, { line: 'GPS fix refused' }, 0),
-        MV.doorStopStep(undefined, door, { lat: 34.0, lon: -84.5, err: 10, grey: true }, 0),
+        MV.doorStopStep(undefined, door, { lat: 34.0, lon: -44.5, err: 10, grey: true }, 0),
         MV.doorStopStep('passed', door, fx(0), 0)],
        [true, undefined, undefined, undefined, 'passed']);
 
@@ -4570,11 +4573,11 @@ async function nucbox() {
        ['0,1,2,3,4,5,6,7,8,9', true, true, 8]);
     eqJ('[fastest order] straight-line metres between points, and a key to keep an answer by '
        + '(the car to about 100 m, each stop to about a metre)',
-       [Math.round(MV.crowMatrix([{ lat: 34, lon: -84.5 }, { lat: 34.01, lon: -84.5 }])[0][1]),
-        MV.orderKey({ lat: 34.00012, lon: -84.50049 }, [{ lat: 34.1, lon: -84.2 }]),
-        MV.orderKey({ lat: 34.00049, lon: -84.50012 }, [{ lat: 34.1, lon: -84.2 }])
-          === MV.orderKey({ lat: 34.00012, lon: -84.50049 }, [{ lat: 34.1, lon: -84.2 }])],
-       [1112, '34.000,-84.500>34.10000,-84.20000', true]);
+       [Math.round(MV.crowMatrix([{ lat: 34, lon: -44.5 }, { lat: 34.01, lon: -44.5 }])[0][1]),
+        MV.orderKey({ lat: 34.00012, lon: -44.50049 }, [{ lat: 34.1, lon: -44.2 }]),
+        MV.orderKey({ lat: 34.00049, lon: -44.50012 }, [{ lat: 34.1, lon: -44.2 }])
+          === MV.orderKey({ lat: 34.00012, lon: -44.50049 }, [{ lat: 34.1, lon: -44.2 }])],
+       [1112, '34.000,-44.500>34.10000,-44.20000', true]);
   })();
   // The router's table through the relay, as the walk asks it.
   var tableAsked = [];
@@ -4586,15 +4589,15 @@ async function nucbox() {
                                   : { ok: true, seconds: [[0, 60], [60, 0]] });
     } });
   } });
-  var tA = await tabled.table([{ lat: 34, lon: -84.5 }, { lat: 34.01, lon: -84.5 }]);
-  var tB = await tabled.table([{ lat: 34, lon: -84.5 }, { lat: 34.01, lon: -84.5 }]);
-  var tDown = await tabled.table([{ lat: 34.1, lon: -84.5 }, { lat: 34.01, lon: -84.5 }]);
+  var tA = await tabled.table([{ lat: 34, lon: -44.5 }, { lat: 34.01, lon: -44.5 }]);
+  var tB = await tabled.table([{ lat: 34, lon: -44.5 }, { lat: 34.01, lon: -44.5 }]);
+  var tDown = await tabled.table([{ lat: 34.1, lon: -44.5 }, { lat: 34.01, lon: -44.5 }]);
   eqJ('[fastest order] the table asked of the relay with lon,lat points, kept, and a NucBox '
      + 'down said as unreachable (the walk then goes by straight lines)',
      [tA, tB === tA || JSON.stringify(tB) === JSON.stringify(tA), tableAsked.length,
       tableAsked[0].replace(/^.*\/table/, '/table'), tDown.why],
      [{ seconds: [[0, 60], [60, 0]] }, true, 2,
-      '/table?points=-84.50000,34.00000;-84.50000,34.01000', 'unreachable']);
+      '/table?points=-44.50000,34.00000;-44.50000,34.01000', 'unreachable']);
 
   /* ---- Leaflet that will not load (needLeaflet) ----------------------------
    *

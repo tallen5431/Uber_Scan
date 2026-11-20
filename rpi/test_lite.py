@@ -462,10 +462,10 @@ try:
         eq('[lite] the NucBox reads as not set, whatever the environment names',
            {k: v for k, v in (as_json(raw(_lb, '/api/nbx')[1]) or {}).items() if k != 'ok'},
            {'search': False, 'route': False, 'streets': False})
-        _s, _body, _h = raw(_lb, "/api/nbx/search?q=McDonald%27s&viewbox=-84.65,34.04,-84.45,33.87")
+        _s, _body, _h = raw(_lb, "/api/nbx/search?q=McDonald%27s&viewbox=-44.65,34.04,-44.45,33.87")
         ok_('[lite] a search asked of the relay is answered "not set", not relayed (%d)' % _s,
             _s != 200 or not (as_json(_body) or {}).get('hits'))
-        _s = raw(_lb, '/api/nbx/route?points=-84.5499,33.9526;-84.3880,33.7490')[0]
+        _s = raw(_lb, '/api/nbx/route?points=-44.5499,33.9526;-44.3880,33.7490')[0]
         ok_('[lite] ...and a route (%d)' % _s, _s != 200)
         # The verdict, carried as ever: the scanner decided it, the server keeps
         # it, /api/status serves it to the card.
@@ -513,7 +513,7 @@ try:
         eq('[full] the NucBox reads as set',
            {k: v for k, v in (as_json(raw(_fb, '/api/nbx')[1]) or {}).items() if k != 'ok'},
            {'search': True, 'route': True, 'streets': True})
-        raw(_fb, "/api/nbx/search?q=McDonald%27s&viewbox=-84.65,34.04,-84.45,33.87")
+        raw(_fb, "/api/nbx/search?q=McDonald%27s&viewbox=-44.65,34.04,-44.45,33.87")
         time.sleep(2.0)
         ok_('[full] ...and is asked, through the relay (%d)' % len(asked()[_before:]),
             len(asked()[_before:]) >= 1)

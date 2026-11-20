@@ -493,7 +493,7 @@
      two payouts, a span, a verdict chip and where both jobs end — so its places
      get a line of their own rather than the sliver `.meta` has left after the
      chips and the clock. Measured on the 3.5" hat before this: 98px, showing
-     "Powder Sprin". */
+     "Gorrel Sprin". */
   #pairs { container-type: inline-size; }
   .offer.pair > summary { flex-wrap: wrap; align-content: center; row-gap: 2px; }
   /* Shrinks instead of wrapping. Flexbox breaks lines on an item's *base* size
@@ -2693,8 +2693,8 @@
 
   function termMatches(r, term) {
     var m = term.match(/^([$]?)\s*(-?[\d.]+)\s*(\/hr|hr|min|mins|mi|miles|m)?$/);
-    // Anything that is not a figure is a place. "papa john", "chattanooga",
-    // "camp jordan" — the way a driver actually remembers a job, and the
+    // Anything that is not a figure is a place. "papa john", "wennamocket",
+    // "camp harlan" — the way a driver actually remembers a job, and the
     // reason the addresses are stored at all.
     if (!m) {
       var where = (r.places || []).join(' ').toLowerCase();
@@ -3404,7 +3404,7 @@
   // figures.
   //
   // The full lines are what the arithmetic uses and they do not fit here:
-  // "1234 Daffodil Ln, Powder Springs, GA 30127 → Chastain Rd NW, Kennesaw" is
+  // "1234 Daffodil Ln, Gorrel Springs, GA 90727 → Morvaine Rd NW, Tellmoor" is
   // 69 characters, and measured on the 3.5" hat the row showed "1234 Daffo" —
   // a house number, with the arrow and the whole destination cut off. The half
   // that was lost is the half that matters: where the NEW job goes.
@@ -3535,7 +3535,7 @@
       // A row of its own rather than tucked inside `.meta`, which is where it
       // started. `.meta` is what gives way when the chips and the clock have
       // taken their width, and on the 3.5" hat that left it 98px: the row said
-      // "Powder Sprin" and the destination — the half a driver is actually
+      // "Gorrel Sprin" and the destination — the half a driver is actually
       // looking for — was gone. Wrapped onto its own line it has the width of
       // the whole row at every size.
       + ((held.dropoff || offer.dropoff)
@@ -5431,7 +5431,7 @@
 
   /* What the search found, and what it was worth.
    *
-   * "Do the Chattanooga runs pay?" is the question somebody types a place into
+   * "Do the Wennamocket runs pay?" is the question somebody types a place into
    * that box to ask, and until now the answer was a filtered list and nothing
    * else — every figure on this page is the whole window's and none of them
    * move when the filter does. So the driver was left to read twelve rows and
@@ -6491,7 +6491,7 @@
       return;
     }
     if (!sheetMap) {
-      sheetMap = L.map(el.sheetMap, { zoomControl: true }).setView([33.94, -84.58], 10);
+      sheetMap = L.map(el.sheetMap, { zoomControl: true }).setView([33.94, -44.58], 10);
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19, attribution: '© OpenStreetMap'
       }).addTo(sheetMap);
@@ -6548,7 +6548,7 @@
          The geocoder keeps them apart on purpose — an empty answer is stored
          as null, a lookup that could not be made is not stored at all so the
          next press asks again. This page used to call both "usually a misread
-         address", which told a driver in a dead spot on I-75 that the rig had
+         address", which told a driver in a dead spot on I-98 that the rig had
          misread a street it never got to ask about. The map page was split for
          exactly this and this one was left behind; one question, answered two
          ways, on the page the driver actually reads while working.

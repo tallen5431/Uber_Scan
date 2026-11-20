@@ -627,13 +627,13 @@ FRAG = '$16.05 20 min (7.3 mi) trip'
 # only the destination, and the parser then reported that one address as
 # BOTH ends of the journey — the fault find_dropoff was corrected for. A
 # fixture that depends on a bug keeps the bug alive.
-WHOLE = ('$16.05 3 min (1.1 mi) away Cobb Pkwy NW, Kennesaw '
-         '20 min (7.3 mi) trip 123 Main St, Acworth, GA 30101')
+WHOLE = ('$16.05 3 min (1.1 mi) away Vosk Pkwy NW, Tellmoor '
+         '20 min (7.3 mi) trip 123 Main St, Ivyhame, GA 90701')
 # The decimal point lost: a payout that cannot be true, on a card that is
 # already on disk. (A plausible near miss — $16.06 for $16.05 — is a card
 # the journal itself would file as a different offer, and is still counted.)
-LOST_DECIMAL = ('$1605 3 min (1.1 mi) away Cobb Pkwy NW, Kennesaw '
-                '20 min (7.3 mi) trip 123 Main St, Acworth, GA 30101')
+LOST_DECIMAL = ('$1605 3 min (1.1 mi) away Vosk Pkwy NW, Tellmoor '
+                '20 min (7.3 mi) trip 123 Main St, Ivyhame, GA 90701')
 
 # --- a fuller reading of the same card is told again ------------------------
 # The first read returns a fragment on both frames of the pair, so it locks;
@@ -650,7 +650,7 @@ ok_('the driving screen was told the card once as a fragment (%r)' % (told[:1],)
     told and told[0][1] == 20 and told[0][3] is None)
 ok_('...and told it again as the whole card, same id',
     len(told) >= 2 and told[-1][0] == told[0][0] and told[-1][1] == 23
-    and 'Acworth' in (told[-1][3] or ''))
+    and 'Ivyhame' in (told[-1][3] or ''))
 eq('...and not again for a reading that says nothing new',
    len(told), 2)
 ok_('the startup line counts rows, not offers (%r)'
@@ -715,9 +715,9 @@ eq('...and an Uber card is not', r['labels'], [])
 # too: on the snap the card was read every 1-6 s, and with the stubbed reader
 # under a loaded machine the beat's backoff (VERIFY_MAX) left two reads in
 # seven seconds, too few to tell the rules apart.
-_DD_ONE = (('Lark Owl Tacos', '1761 Fernhill Road Northwest, Atla...'),)
+_DD_ONE = (('Lark Owl Tacos', '1761 Fernhill Road Northwest, Solv...'),)
 _DD_ONE_TEXT = ('$7.10\n2 stops (4.8 mi) - 42 min\nLark Owl Tacos\n'
-                '1761 Fernhill Road Northwest, Atla...\nCustomer dropoff')
+                '1761 Fernhill Road Northwest, Solv...\nCustomer dropoff')
 
 
 def _dd_one(view, label='286 Wrenfield Dr NW'):
@@ -844,8 +844,8 @@ ok_('...and says so at startup', any('map bands off' in l for l in r['logs']))
 # the three: it adds the shopping allowance to the BILLED minutes. At 90s an
 # item and 30c a mile that takes this card from go to PASS, and the headline
 # said PASS while the offer on record still said go.
-WHOLE_ITEMS = ('$16.05 3 min (1.1 mi) away Cobb Pkwy NW, Kennesaw 20 items '
-               '20 min (7.3 mi) trip 123 Main St, Acworth, GA 30101')
+WHOLE_ITEMS = ('$16.05 3 min (1.1 mi) away Vosk Pkwy NW, Tellmoor 20 items '
+               '20 min (7.3 mi) trip 123 Main St, Ivyhame, GA 90701')
 r = run(lambda n, k: WHOLE if n <= 1 else WHOLE_ITEMS, seconds=25.0,
         config_extra={'settings': {'target': 25, 'band': 15, 'costPerMile': 0.30,
                                    'secondsPerItem': 90}},
@@ -877,7 +877,7 @@ ok_('...and told again, same id and same journey, when its verdict moved (%r)'
 # 4b6e148; it now holds the street alone first, and the whole door told again.
 _DD = ('$7.70 incl. tips\n2 stops (2.4 mi) - 18 min\n& Lark Owl Grill\n'
        '2530 Kestrel Plains Road, %s\n& Customer dropoff\nAccept')
-r = run(lambda n, k: _DD % ('Sm...' if n <= 1 else 'Marietta, 30066 GA'), seconds=25.0,
+r = run(lambda n, k: _DD % ('Sm...' if n <= 1 else 'Harrowen, 90666 GA'), seconds=25.0,
         until=lambda rows, ann, calls: any((a[1].get('pickupLine') for a in ann))
         and calls >= 4)
 told = [(a[0], a[1].get('pickup'), a[1].get('pickupLine'), a[1].get('dropoff'))
@@ -886,7 +886,7 @@ ok_('a stops card was told first with the street its cut line gives (%r)' % (tol
     told and told[0][1] == 'Lark Owl Grill' and told[0][2] == '2530 Kestrel Plains Road')
 ok_('...and told again, same id and same store, when its door read (%r)' % (told[-1:],),
     len(told) >= 2 and told[-1][0] == told[0][0] and told[-1][1] == 'Lark Owl Grill'
-    and told[-1][2] == '2530 Kestrel Plains Road, Marietta, GA 30066'
+    and told[-1][2] == '2530 Kestrel Plains Road, Harrowen, GA 90666'
     and told[-1][3] is None)
 
 # --- one misread frame is not a card the rig failed to record ----------------
@@ -985,8 +985,8 @@ eq('...so the page is told nothing went missing',
 # The control that keeps the gate honest: a genuinely different card still
 # opens a new count. A fix that simply stopped re-arming would pass everything
 # above and silently merge every card in a shift into one.
-SECOND = ('$9.40 4 min (1.4 mi) away Barrett Pkwy, Kennesaw '
-          '15 min (5.2 mi) trip 900 Oak Ln, Marietta, GA 30060')
+SECOND = ('$9.40 4 min (1.4 mi) away Tallett Pkwy, Tellmoor '
+          '15 min (5.2 mi) trip 900 Oak Ln, Harrowen, GA 90660')
 r2 = run(lambda n, k: WHOLE if n < 4 else SECOND, extra_argv=['--no-parallel'],
          seconds=24.0, health_every=3.0,
          until=lambda rows, ann, calls: sum(1 for x in rows if x.get('kind') == 'seen') >= 2
@@ -1012,13 +1012,13 @@ eq('...and two recorded', sum(x['kept'] for x in seen2), 2)
 # $5.00 on the panel for a read. Read in pairs, as the rig reads — not
 # --no-parallel, which reads one frame at a time and so has no pair to agree.
 EXCL_RIGHT = ("| Uber Eats\n$4. 2 1\nGuaranteed (incl. tip)\n23 min (5.2 mi) total\n"
-              "McDonald's (2500 Cobb Pkwy)\nOak Rd, Marietta")
+              "McDonald's (2500 Vosk Pkwy)\nOak Rd, Harrowen")
 EXCL_BANDED = ("Uber Eats Exclusive\n$4:21\nGuaranteed (incl: tip)\n23 min (5.2 mi) total\n"
-               "McDonald's (2500. Cobb Pkwy)\nOak.Rd,.Marietta")
+               "McDonald's (2500. Vosk Pkwy)\nOak.Rd,.Harrowen")
 EXCL_DEGREE = ("Uber Eats Exclusive\n$4°21\nGuaranteed (incl. tip)\n23 min (5.2 mi) total\n"
-               "McDonald's (2500 Cobb Pkwy)\nOak.Rd,.Marieita")
+               "McDonald's (2500 Vosk Pkwy)\nOak.Rd,.Harrowan")
 EXCL_DARK = ("$4. io 1\nGuaranteed (incl. tip)\n23 min (5.2 mi) total\n"
-             "McDonald's (2500 Cobb Pkwy)\nOak Rd, Marietta")
+             "McDonald's (2500 Vosk Pkwy)\nOak Rd, Harrowen")
 # The UberX glare frames, cut to the lines that carry anything: the $5.00 frame,
 # a frame that read no payout, and a frame that read the card right.
 UBERX_GLARE5 = ('$ 5 eee at MRCS RE IN 8\n4.95 fied a\n3 min (1.1 mi) a : as\n'
@@ -2000,7 +2000,7 @@ ok_('...and the beat says lost, not off',
 # that answers differently on every call — a car moving, a thread storing a
 # newer sentence between two asks — is what tells one call from two: with two,
 # the row and the line put one card in two places. Each answer is judged the
-# way gps.Phone judges, so `ok`/`why` travel as they do on the rig. Marietta
+# way gps.Phone judges, so `ok`/`why` travel as they do on the rig. Harrowen
 # Square and points north of it, not anywhere the rig has been.
 class _MovingPhone(object):
     host, port = 'gpsd', 2947
@@ -2016,14 +2016,14 @@ class _MovingPhone(object):
 
     def fix(self):
         self.asked += 1
-        return {'lat': 33.9526 + self.asked * 0.001, 'lon': -84.5499,
+        return {'lat': 33.9526 + self.asked * 0.001, 'lon': -44.5499,
                 'ageSeconds': 0.4, 'mode': 3, 'err': 12.0, 'ok': True,
                 'why': None, 'source': 'gpsd'}
 
     def latest(self):
         # The beat's fix, kept apart from the rows' so a check can tell which
         # one reached the beat.
-        return {'lat': 34.0001, 'lon': -84.5499, 'ageSeconds': 0.4, 'mode': 3,
+        return {'lat': 34.0001, 'lon': -44.5499, 'ageSeconds': 0.4, 'mode': 3,
                 'err': 12.0, 'ok': True, 'why': None, 'freshFor': 19.6,
                 'source': 'gpsd'}
 
@@ -2137,32 +2137,32 @@ ok_('the empty dropoff answer waits for a read that could still answer it',
 # of that shift's seven orders ended unpinned. A navigation screen with no
 # payout, its door printed with no town, state or ZIP, read over and over: the
 # log quotes it with the reason, and at most once per STREET_SAY_EVERY.
-_NAV_DOOR = 'Dropoff 3100 Esquire Dr N 14 min Start'
+_NAV_DOOR = 'Dropoff 3100 Elquine Dr N 14 min Start'
 r = run(lambda n, k: _NAV_DOOR, extra_argv=['--no-parallel'], seconds=6.0,
         until=lambda rows, ann, calls: calls >= 3)
 _street = [l for l in r['logs'] if 'no address the rig would accept' in l]
 ok_('a screen with a street and no address it would accept is quoted in the log with '
     'its line and the reason (%r)' % (_street[:1],),
-    _street and "'Dropoff 3100 Esquire Dr N 14 min Start' a door, no \", ST ZIP\" after it"
+    _street and "'Dropoff 3100 Elquine Dr N 14 min Start' a door, no \", ST ZIP\" after it"
     in _street[0] and '(1 since start)' in _street[0])
 eq('...once, over %d reads inside STREET_SAY_EVERY' % r['calls'], len(_street), 1)
 # ...and each reason, asked directly, on invented screens.
 for _text, _want in (
         ('Trip Planner\nDropoff • 1 order\nLee R.\nExpected by 7:45 PM\nAddress\n'
-         '283 Quillon St NW\nSmyrna, GA\nView details\nWaybill',
+         '283 Quillon St NW\nPyrnel, GA\nView details\nWaybill',
          "uber.planner: a Trip Planner, 1 stop read with a door (on the sighting); "
-         "'283 Quillon St NW' a door, no \", ST ZIP\" after it; 'Smyrna, GA' a town, no street or ZIP"),
+         "'283 Quillon St NW' a door, no \", ST ZIP\" after it; 'Pyrnel, GA' a town, no street or ZIP"),
         ("Finding offers\nYou're in a good place to wait for offers\nZone offer wait 2-15 min",
          "dd.finding: the app's idle screen; \"You're in a good place to wait for offer\" "
          "no house number"),
         ('4 min 0.6 mi\nOak St & Elm Ave', "uber.nav: 'Oak St & Elm Ave' a cross-street, no door"),
-        ('2080 Lantern Ave NW\nAtlanta, GX 30318',
+        ('2080 Lantern Ave NW\nSolvane, GX 90818',
          "unknown: '2080 Lantern Ave NW' a door, no \", ST ZIP\" after it; "
-         "'Atlanta, GX 30318' the state reads \"GX\""),
-        ('Lantern Ave NW\nAtlanta, GA 00012', "unknown: 'Lantern Ave NW' no house number; "
-         "'Atlanta, GA 00012' the ZIP reads \"00012\""),
-        ('12 Lantern Ave NW Atlanta GA 30318',
-         "unknown: '12 Lantern Ave NW Atlanta GA 30318' a ZIP, no \"Town, ST\" before it")):
+         "'Solvane, GX 90818' the state reads \"GX\""),
+        ('Lantern Ave NW\nSolvane, GA 00012', "unknown: 'Lantern Ave NW' no house number; "
+         "'Solvane, GA 00012' the ZIP reads \"00012\""),
+        ('12 Lantern Ave NW Solvane GA 90818',
+         "unknown: '12 Lantern Ave NW Solvane GA 90818' a ZIP, no \"Town, ST\" before it")):
     eq('...%s' % _want.split(': ', 1)[1][:60],
        SP.why_no_address(_text, OP.find_planner(_text), OP.sheet_dropoff(_text)), _want)
 
@@ -2229,7 +2229,7 @@ eq('...said once, over %d reads' % r5['calls'], len(_said), 1)
 # first, on the screen the driver is reading in a moving car. Any address
 # closes the press now.
 _ho2 = tempfile.mkdtemp()
-NAV_ADDR = 'Dropoff 123 Main St, Acworth, GA 30101 12 min Start'
+NAV_ADDR = 'Dropoff 123 Main St, Ivyhame, GA 90701 12 min Start'
 # ...and past the one-second window's end, where the "found nothing" this
 # checks against was said: the answer is found inside the window.
 r7 = run(_press_on_first_read(_ho2, NAV_ADDR), extra_argv=['--no-parallel'], seconds=6.0,
@@ -2278,7 +2278,7 @@ eq('...and the panel is told a read began for the card reads only',
 _ho4 = tempfile.mkdtemp()
 r9 = run(_press_on_first_read(_ho4, WHOLE), extra_argv=['--no-parallel'], seconds=6.0,
          handoff=_ho4, dropoff_window=1.0,
-         whole_text='$99.00 20 min (5.0 mi) trip Dropoff 9 Elm St, Acworth, GA 30101',
+         whole_text='$99.00 20 min (5.0 mi) trip Dropoff 9 Elm St, Ivyhame, GA 90701',
          until=after(lambda rows, ann, calls, seen: _asked(seen) and _back_on_box(seen), 1.0))
 ok_('a press with a payout in the whole screen box was read whole', any(r9['wholes']))
 _pays = sorted(set((v[0][1] or {}).get('pay') for v in r9['verdicts']
@@ -2372,7 +2372,7 @@ def _held(card=None):
     """An order in the car since long before any of these reads, with the
     card's own corner as its end."""
     return {'id': 'o-held', 'acceptedAt': 0, 'minutes': 30,
-            'dropoff': 'Oak Dr & Elm Dr, Acworth', 'dropoffScanned': False,
+            'dropoff': 'Oak Dr & Elm Dr, Ivyhame', 'dropoffScanned': False,
             'card': card or {'legs': 1, 'multiOrder': True}}
 
 _hp1, _pl1 = tempfile.mkdtemp(), []
@@ -2385,7 +2385,7 @@ eq('⌖ over a Trip Planner is answered with the planner, once (%d reads)' % rp1
 if rp1['planners']:
     eq('...its stops as the screen listed them',
        [[s['kind'], s['expectedBy'], s['line']] for s in rp1['planners'][0][0]],
-       [['dropoff', 978, '4821 Kestrel Dr, Marietta']])
+       [['dropoff', 978, '4821 Kestrel Dr, Harrowen']])
     # The journal may hold them: this run keeps a journal, and keepPlaces is
     # not off. See the two runs further down for the other two answers.
     eq('...saying none was left unfiled, and that the journal may keep them',
@@ -2397,7 +2397,7 @@ if rp1['planners']:
 eq('...and its one dropoff, on a list seen whole, is the address the press gets, '
    'off its sighting', [(d['line'], d['asked'])
                         for d in assembled(rp1['sightings'])['dropoffs']],
-   [('4821 Kestrel Dr, Marietta', True)])
+   [('4821 Kestrel Dr, Harrowen', True)])
 eq('...and the scanner sends no dropoff line of its own off a planner',
    rp1['dropoffs'], [])
 eq('...off the first whole-screen read, then back to the card box (%r)' % rp1['wholes'],
@@ -2460,7 +2460,7 @@ ok_('a header at the foot of a page is kept, partial (%r)'
                         _cut[-1]['line']) == ('dropoff', 'dropoff', 'bottom', None))
 eq('...and the address above the first header is kept, of no kind, partial',
    [(s['kind'], s['label'], s['partial'], s['line']) for s in _cut[:1]],
-   [(None, None, 'top', '1650 Fable Ridge Blvd NW, Kennesaw')])
+   [(None, None, 'top', '1650 Fable Ridge Blvd NW, Tellmoor')])
 eq('...and the planner line is given the headed stop alone, unmarked, as before',
    [[sorted(s) for s in p[0]] for p in rpc['planners']],
    [[sorted(_PLANNER_FIELDS)]])
@@ -2483,14 +2483,14 @@ eq('one dropoff on a list the rig could not see the end of is answered with the 
    'stop and the reason, once',
    [([s['line'] for s in p[0]], _as1b['byAt'].get(str(p[1].get('at'))))
     for p in rp1b['planners']],
-   [(['4821 Kestrel Dr, Marietta'], 'list')])
+   [(['4821 Kestrel Dr, Harrowen'], 'list')])
 eq('...and is not filed as the order\'s end, nor told "not read" over the stop',
    (rp1b['dropoffs'], _as1b['dropoffs']), ([], []))
 
 # Two dropoffs, the second with a ZIP — so find_address, left to itself, would
 # have answered the press with that customer's door, chosen by layout.
 ok_('the premise: find_address alone would answer this planner with its last '
-    'dropoff', (OP.find_address(_TWO_DROPS) or {}).get('zip') == '30075')
+    'dropoff', (OP.find_address(_TWO_DROPS) or {}).get('zip') == '90675')
 _hp2 = tempfile.mkdtemp()
 rp2 = run(_press_on_first_read(_hp2, ''), extra_argv=['--no-parallel'], seconds=5.0,
           handoff=_hp2, whole_text=_TWO_DROPS)
@@ -2547,8 +2547,8 @@ eq('a planner nobody pressed for gives no address, not even the one find_address
 _DD_CARD = ('$7.75\n3 stops (7.8 mi) · 30 min\n@ Fable Bagel Co\n'
             '123 Lantern Grove Road Northwest, Sm...\n& Customer dropoff')
 _STORE_POPUP = ('<q Pickup from\nFable Bagel Co %\nGy 123 Lantern Grove Rd NW\n'
-                'Smyrna, GA 30080, USA\nDirections')
-_CUSTOMER_POPUP = ('Customer dropoff\n412 Wrenfield Ct NE\nMarietta, GA 30062, USA\n'
+                'Pyrnel, GA 90680, USA\nDirections')
+_CUSTOMER_POPUP = ('Customer dropoff\n412 Wrenfield Ct NE\nHarrowen, GA 90662, USA\n'
                    'Directions')
 _t0 = time.time() * 1000
 # Until the popup is said and read twice more, for "said once".
@@ -2561,7 +2561,7 @@ ok_('the premise: the card was announced and the popup read more than once (%d r
 eq('a store popup read off the card box is said once, on its own line, with its '
    'role, the store and the address',
    [(p['role'], p['name'], p['line']) for p, _ in rpop['popups']],
-   [('pickup', 'Fable Bagel Co', '123 Lantern Grove Rd NW, Smyrna, GA 30080')])
+   [('pickup', 'Fable Bagel Co', '123 Lantern Grove Rd NW, Pyrnel, GA 90680')])
 ok_("...stamped with its frame's own clock, inside the run (%r)"
     % [a for _, a in rpop['popups']],
     rpop['popups'] and all(isinstance(a, int) and _t0 <= a <= _t1 for _, a in rpop['popups']))
@@ -2574,14 +2574,14 @@ ok_('the premise: a customer popup is an address under a Dropoff label, which a 
     'dropoff line would carry', OP.address_under_dropoff(_CUSTOMER_POPUP))
 eq("a customer's popup goes out on its own line and never as a dropoff line",
    ([(p['role'], p['line']) for p, _ in rcus['popups']], rcus['dropoffs']),
-   ([('dropoff', '412 Wrenfield Ct NE, Marietta, GA 30062')], []))
+   ([('dropoff', '412 Wrenfield Ct NE, Harrowen, GA 90662')], []))
 
 # --- a pickup's address is never the order's destination ---------------------
 #
 # Off a shift: "✓ Took $28.08" pressed with the Trip Planner up — two pickups,
-# each "Address / <street> NW, / Kennesaw, GA <ZIP>", over a closed "Dropoff •
+# each "Address / <street> NW, / Tellmoor, GA <ZIP>", over a closed "Dropoff •
 # 1 order" naming nobody's door. Nobody pressed ⌖, and the order in the car
-# came out holding `dropoff: 'Kennesaw, GA 30144', dropoffScanned: true` — the
+# came out holding `dropoff: 'Tellmoor, GA 90744', dropoffScanned: true` — the
 # first restaurant's town. The card box had caught the list scrolling, its top
 # edge between that pickup's street and town lines, and no stop header in the
 # read matched PLANNER_STOP, so nothing called it a planner and find_address
@@ -2592,18 +2592,18 @@ eq("a customer's popup goes out on its own line and never as a dropoff line",
 # here they are simply gone — the crop as it cut the list with no header read
 # under it, and the pickup block with its header down to the word "Pickup",
 # the count lost, which PLANNER_STOP does not take for a stop.
-_PICKUP_CUT = ('Kennesaw, GA 30144\nView details\nFable Grill\n'
+_PICKUP_CUT = ('Tellmoor, GA 90744\nView details\nFable Grill\n'
                'Expected by 5:54 PM\nPat Q.\nExpected by 6:37 PM\n'
                'Waybill\nStop New Requests')
 _PICKUP_BLOCK = ('Pickup\nFable Grill\nExpected by 5:46 PM\nAddress\n'
-                 '4100 Fable Mill Pkwy NW,\nKennesaw, GA 30144\nView details\n'
+                 '4100 Fable Mill Pkwy NW,\nTellmoor, GA 90744\nView details\n'
                  'Stop New Requests')
 for _name, _t in (('the cut list', _PICKUP_CUT), ('the pickup block', _PICKUP_BLOCK)):
     ok_('the premise: %s is no planner to the reader, has no payout, and '
         'find_address takes the pickup\'s ZIP off it' % _name,
         OP.find_planner(_t) is None and OP.parse(_t)['pay'] is None
         and not OP.parse(_t)['places']
-        and (OP.find_address(_t) or {}).get('zip') == '30144')
+        and (OP.find_address(_t) or {}).get('zip') == '90744')
 # A card fragment first, so the resample window goes on reading every half
 # second over the planner that replaces it — a still screen otherwise gets one
 # read and the health line, which speaks only after reads, never comes round.
@@ -2651,7 +2651,7 @@ _pk_seen = [[(s['kind'], s['label'], s['line']) for s in x['stops']]
             for x in rpk3['sightings'] if x['whole']]
 ok_('a sighting types an address under a Pickup label as a pickup only (%r)' % _pk_seen,
     bool(_pk_seen) and all(
-        v == [('pickup', 'pickup', '4100 Fable Mill Pkwy NW, Kennesaw, GA 30144')]
+        v == [('pickup', 'pickup', '4100 Fable Mill Pkwy NW, Tellmoor, GA 90744')]
         for v in _pk_seen))
 # ...nor a planner whose headers did not read, pressed: the cut list again.
 _hpk4 = tempfile.mkdtemp()
@@ -2665,9 +2665,9 @@ eq('an unlabelled address on a screen with the planner\'s furniture answers a '
 # label with no planner furniture under a press, and an unlabelled address
 # with no furniture unprompted (refused) and pressed (answered, as it always
 # was — a press over a plain navigation screen needs no label).
-_PICKING = 'Picking up\n12 Fable St, Acworth, GA 30101\n4 min Start'
-_BARE_CUT = 'Kennesaw, GA 30144\nView details\nFable Grill'
-_BARE_NAV = '1234 Made Up Ln, Acworth, GA 30101 12 min Start'
+_PICKING = 'Picking up\n12 Fable St, Ivyhame, GA 90701\n4 min Start'
+_BARE_CUT = 'Tellmoor, GA 90744\nView details\nFable Grill'
+_BARE_NAV = '1234 Made Up Ln, Ivyhame, GA 90701 12 min Start'
 ok_('the premise: none of the three carries the planner\'s furniture, a stop '
     'header or a payout',
     not any(OP.planner_furniture(t) or OP.parse(t)['pay'] is not None
@@ -2690,7 +2690,7 @@ rpk8 = run(_press_on_first_read(_hpk8, ''), extra_argv=['--no-parallel'], second
            until=after(lambda rows, ann, calls, seen: _asked(seen), 1.0))
 eq('...while a press over an unlabelled navigation screen still gets its address',
    [((d[0] or {}).get('line'), d[1].get('asked')) for d in rpk8['dropoffs']],
-   [('1234 Made Up Ln, Acworth, GA 30101', True)])
+   [('1234 Made Up Ln, Ivyhame, GA 90701', True)])
 # The other side: the rule is the LABEL, not "a pickup is anywhere on the
 # screen". A screen with a Pickup label above the Dropoff one gives the
 # dropoff's address, unprompted — which is what a guard that refused every
@@ -2698,7 +2698,7 @@ eq('...while a press over an unlabelled navigation screen still gets its address
 # would make the screen an offer to the payout guard's second arm, which
 # refuses it for its own reason before this rule is asked.
 _BOTH_ENDS = ('Pickup - 5:46 PM\n'
-              'Dropoff\n34 Made Up Rd, Acworth, GA 30102\n12 min Start')
+              'Dropoff\n34 Made Up Rd, Ivyhame, GA 90702\n12 min Start')
 ok_('the premise: that screen names a pickup above the dropoff and is no offer '
     'and no planner',
     OP.parse(_BOTH_ENDS)['places'] == [] and OP.parse(_BOTH_ENDS)['pay'] is None
@@ -2709,7 +2709,7 @@ rpk5 = run(lambda n, k: _BOTH_ENDS, extra_argv=['--no-parallel'], seconds=4.0,
            until=after(lambda rows, ann, calls, seen: seen['dropoffs'], 1.5))
 eq('an address under a Dropoff label below a pickup is still the destination, '
    'unprompted', [((d[0] or {}).get('line'), d[1].get('asked'))
-                  for d in rpk5['dropoffs']], [('34 Made Up Rd, Acworth, GA 30102', False)])
+                  for d in rpk5['dropoffs']], [('34 Made Up Rd, Ivyhame, GA 90702', False)])
 eq('...and sent as label-proven, so the server may file it over the card\'s own end',
    [d[1].get('labelled') for d in rpk5['dropoffs']], [True])
 
@@ -2739,7 +2739,7 @@ def _hold(handoff, until_s):
             os.environ[HO.ENV_DIR] = was
 
 
-_AUTO_BOX = ('Address\n1625 Heron Blvd NW, Kennesaw, GA\n30152\nView details\n'
+_AUTO_BOX = ('Address\n1625 Heron Blvd NW, Tellmoor, GA\n90752\nView details\n'
              'Dropoff • 1 order\nStop New Requests')
 _AUTO_WHOLE = next(c['text'] for c in json.load(open(os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -2767,8 +2767,8 @@ eq('...and its stops go out as the planner, said to be unasked',
    [(['pickup', 'pickup', 'dropoff'], False)])
 eq('...with each pickup\'s own address and none for the dropoff',
    [[s['line'] for s in p[0]] for p in _pa1],
-   [['1200 Fable Mill Pkwy NW, Kennesaw, GA 30144',
-     '1625 Heron Blvd NW, Kennesaw, GA 30152', None]])
+   [['1200 Fable Mill Pkwy NW, Tellmoor, GA 90744',
+     '1625 Heron Blvd NW, Tellmoor, GA 90752', None]])
 eq('...and gives the order in the car no destination off it',
    ra1['dropoffs'], [])
 
@@ -2810,7 +2810,7 @@ eq('a whole screen with no "Trip Planner" title is not sent as the planner', _pa
 # screen is never filed down two roads. DoorDash's layout, typed 'unknown'.
 _ha5, _pa5 = tempfile.mkdtemp(), []
 _hold(_ha5, time.time() + 3600)
-_WHOLE_NAV = 'Dropoff\n77 Made Up Ct, Acworth, GA 30101\n12 min Start'
+_WHOLE_NAV = 'Dropoff\n77 Made Up Ct, Ivyhame, GA 90701\n12 min Start'
 ok_('the premise: that whole screen has a labelled address and no stop header',
     OP.find_planner(_WHOLE_NAV) is None and OP.address_stop(_WHOLE_NAV) == 'dropoff')
 ra5 = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
@@ -2822,13 +2822,13 @@ eq('an unpressed whole-screen read files an address under a Dropoff label off it
    'sighting, as a navigation destination',
    [(d['line'], d['asked'], d['labelled'], d['from'], d['kept'])
     for d in assembled([x for x in ra5['sightings'] if x['whole']], _held())['dropoffs']],
-   [('77 Made Up Ct, Acworth, GA 30101', False, True, 'nav', True)])
+   [('77 Made Up Ct, Ivyhame, GA 90701', False, True, 'nav', True)])
 eq('...and sends no dropoff line for it', ra5['dropoffs'], [])
 # ...and nothing off the same whole screen with no label over the address: the
 # label is what makes it the destination, not the whole-screen read.
 _ha5b = tempfile.mkdtemp()
 _hold(_ha5b, time.time() + 3600)
-_WHOLE_BARE = '77 Made Up Ct, Acworth, GA 30101\n12 min Start'
+_WHOLE_BARE = '77 Made Up Ct, Ivyhame, GA 90701\n12 min Start'
 ra5b = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
            seconds=4.0, handoff=_ha5b, whole_text=_WHOLE_BARE,
            until=after(lambda rows, ann, calls, seen:
@@ -2836,7 +2836,7 @@ ra5b = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-paralle
 ok_('the premise: it was read whole, and its sighting carries the address (%r)'
     % ra5b['wholes'], sum(ra5b['wholes']) == 1
     and [s['line'] for x in ra5b['sightings'] if x['whole'] for s in x['stops']]
-    == ['77 Made Up Ct, Acworth, GA 30101'])
+    == ['77 Made Up Ct, Ivyhame, GA 90701'])
 eq('an unpressed whole-screen read files no address under no label',
    (ra5b['dropoffs'],
     assembled([x for x in ra5b['sightings'] if x['whole']], _held())['dropoffs']), ([], []))
@@ -2849,8 +2849,8 @@ eq('an unpressed whole-screen read files no address under no label',
 # reaches it.
 _ha5c = tempfile.mkdtemp()
 _hold(_ha5c, time.time() + 3600)
-_WHOLE_SECOND = ('Dropoff\n34 Made Up Rd, Acworth, GA 30102\nView details\n'
-                 '56 Other Made Up Rd, Acworth, GA 30101\n12 min Start')
+_WHOLE_SECOND = ('Dropoff\n34 Made Up Rd, Ivyhame, GA 90702\nView details\n'
+                 '56 Other Made Up Rd, Ivyhame, GA 90701\n12 min Start')
 ok_('the premise: the last address on that screen is under a Dropoff label, and not '
     'in its block', OP.find_planner(_WHOLE_SECOND) is None
     and OP.address_stop(_WHOLE_SECOND) == 'dropoff'
@@ -2897,7 +2897,7 @@ eq('with an order held, a navigation screen in the card box gets one whole-scree
 eq('...and its address under "Deliver to" is the held order\'s destination with no press',
    [(d['line'], d['asked'], d['from'], d['kept'])
     for d in assembled([x for x in rn1['sightings'] if x['whole']], _held())['dropoffs']],
-   [('2950 Kestrel Dr, Woodstock, GA 30188', False, 'nav', True)])
+   [('2950 Kestrel Dr, Marrowick, GA 90788', False, 'nav', True)])
 eq('...off the sighting alone: no dropoff line for it', rn1['dropoffs'], [])
 _hn2 = tempfile.mkdtemp()
 rn2 = run(lambda n, k: FRAG if n == 1 else _NAV_BOX, extra_argv=['--no-parallel'],
@@ -2939,7 +2939,7 @@ eq('an opened navigation sheet\'s address over "Dropoff type" is the held order\
    'destination with no press',
    [(d['line'], d['asked'], d['from'], d['kept'])
     for d in assembled([x for x in rn4['sightings'] if x['whole']], _held())['dropoffs']],
-   [('4416 Wrenfield Dr NW, Kennesaw', False, 'nav', True)])
+   [('4416 Wrenfield Dr NW, Tellmoor', False, 'nav', True)])
 eq('...and no dropoff line is sent for it, off the card box or the whole screen',
    rn4['dropoffs'], [])
 
@@ -2966,12 +2966,12 @@ rc1 = run(_press_on_first_read(_hc1, ''), extra_argv=['--no-parallel'], seconds=
           until=after(lambda rows, ann, calls, seen: _asked(seen), 1.0))
 eq('⌖ over Uber\'s customer sheet is answered with its address, asked, once',
    [((d[0] or {}).get('line'), d[1].get('asked')) for d in rc1['dropoffs']],
-   [('283 Quillon St NW, Smyrna', True)])
+   [('283 Quillon St NW, Pyrnel', True)])
 eq('...and not with a planner read off its "Drop off 1 order"', _pc1, [])
 eq('...its sighting the sheet\'s one dropoff, its place and "Expected by" with it',
    [[(s['kind'], s['label'], s['line'], s['place'], s['expectedBy']) for s in x['stops']]
     for x in rc1['sightings'] if x['whole']][:1],
-   [[('dropoff', 'dropoff type', '283 Quillon St NW, Smyrna', 'Fable Parking Deck', 30)]])
+   [[('dropoff', 'dropoff type', '283 Quillon St NW, Pyrnel', 'Fable Parking Deck', 30)]])
 _hc2 = tempfile.mkdtemp()
 _hold(_hc2, time.time() + 3600)
 rc2 = run(lambda n, k: FRAG if n == 1 else _CSHEET_BOX, extra_argv=['--no-parallel'],
@@ -2983,7 +2983,7 @@ ok_('the premise: the customer sheet was read whole, unpressed (%r)' % rc2['whol
 eq('...and with an order held its address is the held order\'s destination with no press',
    [(d['line'], d['asked'], d['from'], d['kept'])
     for d in assembled([x for x in rc2['sightings'] if x['whole']], _held())['dropoffs']],
-   [('283 Quillon St NW, Smyrna', False, 'nav', True)])
+   [('283 Quillon St NW, Pyrnel', False, 'nav', True)])
 
 # ...and the planner's own one dropoff is sent, label-proven, on the list that
 # would give it to a press: both ends in view, one dropoff, its street and town
@@ -2995,18 +2995,18 @@ _ha6, _pa6 = tempfile.mkdtemp(), []
 _hold(_ha6, time.time() + 3600)
 ok_('the premise: under a press that planner gives its dropoff as the destination',
     [d['line'] for d in assembled(rp1['sightings'])['dropoffs']]
-    == ['4821 Kestrel Dr, Marietta'] and OP.planner_titled(_ONE_DROP_WHOLE))
+    == ['4821 Kestrel Dr, Harrowen'] and OP.planner_titled(_ONE_DROP_WHOLE))
 ra6 = run(lambda n, k: FRAG if n == 1 else _ONE_DROP, extra_argv=['--no-parallel'],
           seconds=4.0, handoff=_ha6, whole_text=_ONE_DROP_WHOLE, planners=_pa6,
           until=after(lambda rows, ann, calls, seen:
                       _whole_sighted(seen) and _back_on_box(seen), 0.3))
 eq('an unpressed planner read sends the stops, unasked',
    [([s['line'] for s in p[0]], p[1].get('asked')) for p in _pa6],
-   [(['4821 Kestrel Dr, Marietta'], False)])
+   [(['4821 Kestrel Dr, Harrowen'], False)])
 eq('...and its one dropoff as the order\'s destination, label-proven',
    [(d['line'], d['asked'], d['labelled'], d['from'], d['kept'])
     for d in assembled([x for x in ra6['sightings'] if x['whole']], _held())['dropoffs']],
-   [('4821 Kestrel Dr, Marietta', False, True, 'planner', True)])
+   [('4821 Kestrel Dr, Harrowen', False, True, 'planner', True)])
 eq('...off the sighting alone: the scanner sends no dropoff line for it',
    ra6['dropoffs'], [])
 
@@ -3037,7 +3037,7 @@ eq('a planner dropoff at a hotel, no ZIP, is filed as the held order\'s destinat
    'its street and town, label-proven',
    [(d['street'], d['city'], d['state'], d['zip'], d['asked'], d['labelled'])
     for d in _as7['dropoffs']],
-   [('1180 Wrenfield Rd NW', 'Kennesaw', 'GA', None, False, True)])
+   [('1180 Wrenfield Rd NW', 'Tellmoor', 'GA', None, False, True)])
 eq('...said as filed on any held card, the list being seen whole',
    [(d['singleCardOnly'], d['kept']) for d in _as7['dropoffs']], [(False, True)])
 # ...and the shift's own screen, "Waybill" under the bar: the lone dropoff still
@@ -3053,7 +3053,7 @@ eq('an unbounded planner\'s lone one-order dropoff is sent, unasked, label-prove
    'and marked single-card-only',
    [(d['line'], d['asked'], d['labelled'], d['singleCardOnly'], d['kept'])
     for d in assembled(_seen8, _held({'legs': 1, 'multiOrder': False}))['dropoffs']],
-   [('1180 Wrenfield Rd NW, Kennesaw', False, True, True, True)])
+   [('1180 Wrenfield Rd NW, Tellmoor', False, True, True, True)])
 eq('...and not filed onto a held card of two orders',
    [d['kept'] for d in assembled(_seen8, _held())['dropoffs']], [False])
 
@@ -3064,7 +3064,7 @@ eq('...and not filed onto a held card of two orders',
 # one, then another a few reads in, over one labelled navigation screen that
 # never moves. Invented address.
 _hds = tempfile.mkdtemp()
-_NAV_SAME = 'Dropoff\n61 Saddlebrook Ln, Acworth, GA 30101\n12 min Start'
+_NAV_SAME = 'Dropoff\n61 Haddlecombe Ln, Ivyhame, GA 90701\n12 min Start'
 
 
 def _note(holds):
@@ -3097,7 +3097,7 @@ ok_('the premise: the order changed part-way through (%r, %d reads)'
     % (_switched, rds['calls']), _switched and rds['calls'] > _switched[0] + 1)
 eq('an unprompted address is said once per order in the car: again for the next one',
    [((d[0] or {}).get('line'), d[1].get('asked')) for d in rds['dropoffs']],
-   [('61 Saddlebrook Ln, Acworth, GA 30101', False)] * 2)
+   [('61 Haddlecombe Ln, Ivyhame, GA 90701', False)] * 2)
 
 
 # ...and since server.js keeps the orders in the car as a list (Stage 4), the
@@ -3157,10 +3157,10 @@ eq('...and the press is told it found nothing, as for any offer card',
 # ...and a sighting off a frame with a payout on it carries no address, even
 # one printed under a Dropoff label: the refusal is the frame's, and stays in
 # the scanner with the frame.
-_PAID_NAV = 'Dropoff\n12 Fable St, Acworth, GA 30101\n$12.50\nAccept'
+_PAID_NAV = 'Dropoff\n12 Fable St, Ivyhame, GA 90701\n$12.50\nAccept'
 ok_('the premise: that screen has a payout, and an address under a Dropoff label',
     OP.parse(_PAID_NAV)['pay'] == 12.5
-    and (OP.find_address(_PAID_NAV) or {}).get('zip') == '30101'
+    and (OP.find_address(_PAID_NAV) or {}).get('zip') == '90701'
     and OP.address_under_dropoff(_PAID_NAV))
 _hp4b = tempfile.mkdtemp()
 rp4b = run(_press_on_first_read(_hp4b, ''), extra_argv=['--no-parallel'], seconds=4.0,
@@ -3220,7 +3220,7 @@ if _at is not None and _at < len(_locks):
 _hw2 = tempfile.mkdtemp()
 _texts, _seen = _press_on_card_read(_hw2, 3, lambda c: SECOND if c <= 3 else WHOLE)
 rw2 = run(_texts, extra_argv=['--no-parallel'], seconds=40.0, handoff=_hw2,
-          dropoff_window=1.0, whole_text=WHOLE + '\nKennesaw State Univ\nChastain Rd',
+          dropoff_window=1.0, whole_text=WHOLE + '\nTellmoor State Univ\nMorvaine Rd',
           until=lambda rows, ann, calls: _seen[0] >= 6)
 _at, _locks = _after_press(rw2)
 ok_('a card that arrived during a ⌖ press was read whole first (%r, %r)'
@@ -3246,8 +3246,8 @@ if _at is not None and _at + 1 < len(_locks):
 # names where the job goes the same way a card names the shop, so a guard that
 # refused a frame for naming one would throw away exactly the screens worth
 # collecting. What it named is written onto the row instead.
-NAV = ('3.2 mi\nI-75 S toward 14th St\n65 LIMIT\n8 min 4.8 mi\n'
-       'Deliver to Daria I.\nBCG Atlanta (1075 Peachtree St NE)')
+NAV = ('3.2 mi\nI-98 S toward 14th St\n65 LIMIT\n8 min 4.8 mi\n'
+       'Deliver to Daria I.\nBCG Solvane (1075 Plumleigh St NE)')
 
 # The card is read four times and lands on the second, so reads three and four
 # are an offer card with a landed card already on the slate. Anything less and
@@ -3306,7 +3306,7 @@ ok_('the health line says how many screens have been recorded (%r)'
 # recogniser it must not invent. The loop has to hand what the frame named down
 # to the row rather than dropping it on the floor.
 ok_('...carrying what the screen named (%r)' % (_screens[0].get('places'),),
-    any('BCG Atlanta' in p for p in (_screens[0].get('places') or [])))
+    any('BCG Solvane' in p for p in (_screens[0].get('places') or [])))
 # ...and it is a SCREEN, not the card. The two classes a recogniser has to
 # separate are "an offer card" and "the screen after one", so a corpus holding a
 # card's own text under `kind: screen` is a corpus that teaches the opposite of
@@ -3348,8 +3348,8 @@ if _glared:
 #
 # Before the fix this run wrote {kind: screen, after: <card A>} over a driver
 # who had just accepted card B.
-SECOND_CARD = ('$9.25 4 min (1.4 mi) away Barrett Pkwy NW, Kennesaw '
-               '18 min (5.2 mi) trip 44 Oak St, Acworth, GA 30101')
+SECOND_CARD = ('$9.25 4 min (1.4 mi) away Tallett Pkwy NW, Tellmoor '
+               '18 min (5.2 mi) trip 44 Oak St, Ivyhame, GA 90701')
 r4 = run(lambda n, k: WHOLE if n <= 3 else (SECOND_CARD if n == 4 else NAV),
          extra_argv=['--no-parallel'], seconds=20.0,
          until=lambda rows, ann, calls: calls >= 6)
@@ -3536,7 +3536,7 @@ _snfold3 = tempfile.mkdtemp()
 _sreq3 = [None]
 
 
-_SNAP_NAV = 'Dropoff 9 Elm St, Acworth, GA 30101 4 min Start'
+_SNAP_NAV = 'Dropoff 9 Elm St, Ivyhame, GA 90701 4 min Start'
 
 
 def _press_dropoff_in_read_1(n, k):
@@ -3623,8 +3623,8 @@ finally:
 # --- ...with the phone's GPS when it was asked to listen to one --------------
 #
 # A phone that answers: a socket here sending the RMC sentence test_gps.py reads
-# as 34.0117N 84.6105W. reader.json carries Phone.state() and fix() as given.
-RMC = '$GPRMC,182049.00,A,3400.7020,N,08436.6300,W,0.0,0.0,120926,,,A*4A'
+# as 34.0117N 44.6105W. reader.json carries Phone.state() and fix() as given.
+RMC = '$GPRMC,182049.00,A,3400.7020,N,04436.6300,W,0.0,0.0,120926,,,A*46'
 _gsock = _socket.socket()
 _gsock.bind(('127.0.0.1', 0))
 _gsock.listen(1)
@@ -3676,7 +3676,7 @@ eq('a rig listening to a phone says what the phone said: its state, and its fix 
    ((_gps.get('state') or {}).get('state'),
     round((_gps.get('fix') or {}).get('lat') or 0, 4),
     round((_gps.get('fix') or {}).get('lon') or 0, 4)),
-   ('fixed', 34.0117, -84.6105))
+   ('fixed', 34.0117, -44.6105))
 
 # --- the pieces, asked directly ------------------------------------------------
 # An age is two readings of one clock, and the Pi's jumps when the network sets
@@ -3702,7 +3702,7 @@ eq('a card on record that has not reached the journal is said as not landed',
 # rule about the journal. rpi/README.md says a snap keeps the fix and the
 # card's text whatever that setting says; this holds the code to that, so a
 # snap that started honouring keepPlaces would have to change what the README
-# tells the driver too. Marietta Square: a public place, an invented fix.
+# tells the driver too. Harrowen Square: a public place, an invented fix.
 class _KeepsNoPlaces(object):
     id, landed_id, keep_places = '1790000000000-1606', None, False
 
@@ -3712,19 +3712,19 @@ class _FixAt(object):
         return 'ok'
 
     def fix(self):
-        return {'lat': 33.9526, 'lon': -84.5499, 'ageSeconds': 0.6,
+        return {'lat': 33.9526, 'lon': -44.5499, 'ageSeconds': 0.6,
                 'mode': 3, 'err': 27.8, 'ok': True, 'why': None}
 
 
 _snap_read = {'at': 1790000000.0, 'wholeScreen': False, 'crop': None,
-              'text': '$4.21 Jimmy John\'s Marietta Sq', 'parsed': {}, 'rate': None}
+              'text': '$4.21 Jimmy John\'s Harrowen Sq', 'parsed': {}, 'rate': None}
 _snap_rec = SP.reader_record(_snap_read, 1790000001.0,
                              offer_log=_KeepsNoPlaces(), phone=_FixAt())
 eq('a snap keeps where the car was even under keepPlaces:false, as '
    'rpi/README.md says',
    ((_snap_rec.get('gps') or {}).get('fix') or {}).get('lat'), 33.9526)
 eq('...and the card\'s own text, places and all',
-   (_snap_rec.get('read') or {}).get('text'), '$4.21 Jimmy John\'s Marietta Sq')
+   (_snap_rec.get('read') or {}).get('text'), '$4.21 Jimmy John\'s Harrowen Sq')
 
 # The counters a snap reports are the ones the health line would, as they
 # stand, and asking for them does not start a new window.
@@ -3785,7 +3785,7 @@ ok_('...and one that cannot take reader.json is said in the log (%r)' % _said3[-
 # through main(): what the panel was sent, and what reached the file.
 #
 # Verbatim, row 565's stored frame.
-PROMPT = ('GA: Marietta North\nSwitch to this zone\nwith peak pay!\n'
+PROMPT = ('GA: Harrowen North\nSwitch to this zone\nwith peak pay!\n'
           '+$1.00/order until 8:20 PM\nAvg. offer wait\n1min\nDon\'t switch')
 rp1 = run(lambda n, k: PROMPT, extra_argv=['--no-parallel'], seconds=12.0,
           until=lambda rows, ann, calls: calls >= 3
@@ -3900,8 +3900,8 @@ for _name, _what in (('dd', 'the dash\'s earnings'), ('uber', 'the day\'s earnin
 # answering what the box saw ("Pit." for the payout, the journey whole) until
 # the finder has been asked, and the whole card after.
 _EARLY_BOX = ('Pit. FO\nIncludes expected tip\nEst. delivery 4:15 PM • 8.6 mi\n'
-              "Dave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\n"
-              'Foothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer')
+              "Dave's Hot Chicken (1985 Vosk\nParkway NW, STE 100)\n"
+              'Foothill Trl & Farrowdene Dr,\nHarrowen\nMatching may take longer')
 _EARLY_FOUND = ('Early look • Order in progress\nDelivery\n$14.48\n'
                 + _EARLY_BOX.split('\n', 1)[1])
 _EARLY_FRAME = TC.mount(TC.early_look_screen(), 720)
@@ -4462,7 +4462,7 @@ eq('...and the press is not answered by the card: no dropoff line while the wind
 # one card, one of them at $1.09. Invented card; the two frames of a read the
 # same, as a paired read of one picture is.
 _BOOST = ('Exclusive\n${pay}\nGuaranteed (incl. tip)\n$1.68 Boost+ included\n'
-          '© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta')
+          '© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Harrowen')
 _bmis = run(lambda n, k: _BOOST.format(pay='1.09' if n <= 2 else '9.09'),
             seconds=16.0, health_every=3.0,
             until=lambda rows, ann, calls: any(x.get('pay') == 9.09 for x in rows
@@ -4515,7 +4515,7 @@ eq('[re-read] reads with the boost alone write nothing; the headline\'s read is 
 # its 20 minutes. Before the label stretch took such a figure out of `where`,
 # every read of this card was "a payout but no journey" and nothing landed.
 _PRIO = ('$9.09\nGuaranteed (incl. tip)\n$2.40 Priority\n© 20 min (1.5 mi) total\n'
-         'Maple Grill (12 Fable Ct)\nOak Ln, Marietta')
+         'Maple Grill (12 Fable Ct)\nOak Ln, Harrowen')
 _prio = run(lambda n, k: _PRIO, seconds=10.0,
             until=lambda rows, ann, calls: any(not x.get('kind') for x in rows) and calls >= 3)
 _prio_offers = [x for x in _prio['rows'] if not x.get('kind')]
@@ -4528,7 +4528,7 @@ eq('[re-read] ...and no read of it was "a payout but no journey"',
 # Two reads of the same card that disagree about the pay with no label on either
 # are a doubt, not a choice: the panel says CHECK THE PAY over the second, every
 # figure kept. The card printed "$9.09" with its label below the box.
-_BARE = '${pay}\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta'
+_BARE = '${pay}\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Harrowen'
 _bare = run(lambda n, k: _BARE.format(pay='9.09' if n <= 3 else '1.09'), seconds=12.0,
             until=lambda rows, ann, calls: calls >= 7)
 _bare_v = [(v[0][0].get('state'), v[0][0].get('doubt'), (v[0][1] or {}).get('pay'))

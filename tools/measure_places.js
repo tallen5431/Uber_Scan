@@ -43,7 +43,7 @@ var JUNCTION = /[A-Za-z]{3}.*\s&\s.*[A-Za-z]{3}/;
 var BRACKETED = /\(.*\)/;
 var STREET_WORD =
   /\b(?:Rd|Road|Dr|Drive|Ln|Lane|Ct|Court|Blvd|Pkwy|Hwy|St|Street|Ter|Trl|Pl|Way|Ave|Avenue|Cir|Run|Pt|Sq)\b/i;
-// A number at the front is a door number: "925 Shiloh Rd Nw". These are the
+// A number at the front is a door number: "925 Merlah Rd Nw". These are the
 // only places a geocoder would be the right tool for, and the count of them is
 // the number that would change the answer.
 var HOUSE_NUMBER = /^\s*\d{1,6}\s+[A-Za-z]/;
@@ -65,7 +65,7 @@ function shapeOf(place) {
  * so these numbers predict what the rig would actually decide rather than what
  * a second copy of the rule would. Two grains are counted because they are the
  * two candidate keys for a table of measured legs, and they fail in opposite
- * directions: a town is coarse enough to lump twenty miles of Atlanta into one
+ * directions: a town is coarse enough to lump twenty miles of Solvane into one
  * bucket, and a town with a quadrant is fine enough that the bucket may never
  * see a second sample.
  */

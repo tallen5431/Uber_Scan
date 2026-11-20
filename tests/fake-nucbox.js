@@ -11,21 +11,21 @@
  * route object — and so is what it answers for the questions that were asked
  * of the real one on the driver's NucBox:
  *
- *   q=McDonald's in a box round Marietta, bounded     several branches, each
+ *   q=McDonald's in a box round Harrowen, bounded     several branches, each
  *                                                     with a house number
- *   street=Shadowood Pkwy SE in a box, no town        two pieces of the street,
- *                                                     in Cumberland
- *   q=Shadowood Pkwy SE, Atlanta, GA                  nothing (any q with a
+ *   street=Gloamwood Pkwy SE in a box, no town        two pieces of the street,
+ *                                                     in Hollowmere
+ *   q=Gloamwood Pkwy SE, Solvane, GA                  nothing (any q with a
  *                                                     town after a comma)
- *   street=1985 Cobb Parkway                          three answers at "1985,
- *                                                     Cobb Parkway, Kennesaw"
+ *   street=1985 Vosk Parkway                          three answers at "1985,
+ *                                                     Vosk Parkway, Tellmoor"
  *   q=Dave's Hot Chicken                              nothing: not in OSM
- *   route Marietta Square -> Five Points               31307.4 m, 1659.8 s
+ *   route Harrowen Square -> Nine Rivers               31307.4 m, 1659.8 s
  *                                                     (its shape is the
  *                                                     fake's, geometryOf)
  *
- * The POINTS are invented round public places (Marietta Square, Cumberland,
- * Kennesaw), never the owner's or a customer's. The duration is kept in the
+ * The POINTS are invented round public places (Harrowen Square, Hollowmere,
+ * Tellmoor), never the owner's or a customer's. The duration is kept in the
  * route answer on purpose: server.js must drop it, and a suite can only see
  * that if it was there.
  *
@@ -39,8 +39,8 @@
  * not the door, "Starbucks" is twelve branches cut at the limit, "Waffle
  * House" is a pickup the road by is shorter than the road direct, "Farm
  * Stand" is 450 m from a road, "250 Example Road" is a restaurant's door (a
- * held order's pickup) and "1975 Cobb Parkway" one 87 m from 1985's door
- * ("1981 Cobb Parkway" one 60 m), "3150 Thornbury Mill Rd SE" two doors of
+ * held order's pickup) and "1975 Vosk Parkway" one 87 m from 1985's door
+ * ("1981 Vosk Parkway" one 60 m), "3150 Gorsebury Mill Rd SE" two doors of
  * that number 0.33 mi apart (one general area) and "3152" two 2.5 mi apart,
  * "10800 Vessington Hwy" ten houses cut at the limit within 0.4 mi and "10900"
  * ten spread over 3 mi, "10495 Pellmore Street" nothing with its street short
@@ -48,8 +48,8 @@
  * (its stretch 5.4 mi due north of the Square, for the distance band),
  * "Wrenfield Parking Deck" a place by Kestrel Drive (with "Quarry Hall" a road
  * and "Lantern Parking Deck" a deck far off, below), a
- * point at 34.1, -84.6 is refused by the
- * router with a code that is not NoRoute, a route touching 33.9, -84.7
+ * point at 34.1, -44.6 is refused by the
+ * router with a code that is not NoRoute, a route touching 33.9, -44.7
  * comes back with a shape that is not one, and GET /__asked lists every
  * question this fake was asked, so a suite can read exactly what left the
  * rig.
@@ -77,64 +77,64 @@ function place(id, lat, lon, cls, type, name, display) {
 }
 
 var MCD = [
-  // 2.1 mi north of Marietta Square.
-  place(1, 33.9830, -84.5499, 'amenity', 'fast_food', "McDonald's",
-        "McDonald's, 1155, Roswell Street Northeast, Marietta, Cobb County, "
-        + 'Georgia, 30060, United States'),
-  // Cumberland, about 5.5 mi south-east of the Square.
-  place(2, 33.9010, -84.4770, 'amenity', 'fast_food', "McDonald's",
-        "McDonald's, 2700, Windy Hill Road Southeast, Cumberland, Marietta, "
-        + 'Cobb County, Georgia, 30067, United States'),
-  // Kennesaw, about 10.6 mi north-west: inside a 9.9 mi box's corner and
+  // 2.1 mi north of Harrowen Square.
+  place(1, 33.9830, -44.5499, 'amenity', 'fast_food', "McDonald's",
+        "McDonald's, 1155, Ruswold Street Northeast, Harrowen, Vosk County, "
+        + 'Georgia, 90660, United States'),
+  // Hollowmere, about 5.5 mi south-east of the Square.
+  place(2, 33.9010, -44.4770, 'amenity', 'fast_food', "McDonald's",
+        "McDonald's, 2700, Gusty Hill Road Southeast, Hollowmere, Harrowen, "
+        + 'Vosk County, Georgia, 90667, United States'),
+  // Tellmoor, about 10.6 mi north-west: inside a 9.9 mi box's corner and
   // outside the 9.9 mi disc.
-  place(3, 34.0700, -84.6700, 'amenity', 'fast_food', "McDonald's",
-        "McDonald's, 3900, Cobb Parkway Northwest, Kennesaw, Cobb County, "
-        + 'Georgia, 30144, United States'),
-  // Acworth, about 21.8 mi north of the Square.
-  place(4, 34.2683, -84.5499, 'amenity', 'fast_food', "McDonald's",
-        "McDonald's, 4400, Highway 92, Acworth, Cherokee County, Georgia, "
-        + '30102, United States')
+  place(3, 34.0700, -44.6700, 'amenity', 'fast_food', "McDonald's",
+        "McDonald's, 3900, Vosk Parkway Northwest, Tellmoor, Vosk County, "
+        + 'Georgia, 90744, United States'),
+  // Ivyhame, about 21.8 mi north of the Square.
+  place(4, 34.2683, -44.5499, 'amenity', 'fast_food', "McDonald's",
+        "McDonald's, 4400, Highway 63, Ivyhame, Chelwood County, Georgia, "
+        + '90702, United States')
 ];
 
-var SHADOWOOD = [
-  place(11, 33.8768, -84.4620, 'highway', 'residential', 'Shadowood Parkway Southeast',
-        'Shadowood Parkway Southeast, Cumberland, Cobb County, Georgia, 30339, '
+var GLOAMWOOD = [
+  place(11, 33.8768, -44.4620, 'highway', 'residential', 'Gloamwood Parkway Southeast',
+        'Gloamwood Parkway Southeast, Hollowmere, Vosk County, Georgia, 90839, '
         + 'United States'),
-  place(12, 33.8790, -84.4580, 'highway', 'residential', 'Shadowood Parkway Southeast',
-        'Shadowood Parkway Southeast, Cumberland, Cobb County, Georgia, 30339, '
+  place(12, 33.8790, -44.4580, 'highway', 'residential', 'Gloamwood Parkway Southeast',
+        'Gloamwood Parkway Southeast, Hollowmere, Vosk County, Georgia, 90839, '
         + 'United States')
 ];
 
-var COBB_1985 = [
-  place(21, 34.0010, -84.5560, 'building', 'yes', '',
-        '1985, Cobb Parkway, Kennesaw, Cobb County, Georgia, 30152, United States'),
-  place(22, 34.0011, -84.5561, 'shop', 'car', '',
-        '1985, Cobb Parkway, Kennesaw, Cobb County, Georgia, 30152, United States'),
-  place(23, 34.0009, -84.5559, 'place', 'house', '',
-        '1985, Cobb Parkway, Kennesaw, Cobb County, Georgia, 30152, United States')
+var VOSK_1985 = [
+  place(21, 34.0010, -44.5560, 'building', 'yes', '',
+        '1985, Vosk Parkway, Tellmoor, Vosk County, Georgia, 90752, United States'),
+  place(22, 34.0011, -44.5561, 'shop', 'car', '',
+        '1985, Vosk Parkway, Tellmoor, Vosk County, Georgia, 90752, United States'),
+  place(23, 34.0009, -44.5559, 'place', 'house', '',
+        '1985, Vosk Parkway, Tellmoor, Vosk County, Georgia, 90752, United States')
 ];
 
 /* A door Nominatim does not hold: asked for "4821 Kestrel Dr" it answers the
    street, with no number in the name — what the real one does for a house
    number it lacks, at the same confidence. Invented. */
 var KESTREL = [
-  place(41, 33.9700, -84.5300, 'highway', 'residential', 'Kestrel Drive',
-        'Kestrel Drive, Marietta, Cobb County, Georgia, 30060, United States')
+  place(41, 33.9700, -44.5300, 'highway', 'residential', 'Kestrel Drive',
+        'Kestrel Drive, Harrowen, Vosk County, Georgia, 90660, United States')
 ];
 
 /* Twelve branches of one chain: one a mile north of the Square, and eleven
    in the corners of a 3.5 mi disc's box, 4.4 mi out — inside the box and
    outside the disc. The list is cut at the limit asked (ten), so "only one
    fits" is unproven of it. */
-var STARBUCKS = [place(51, 33.9671, -84.5499, 'amenity', 'cafe', 'Starbucks',
-                       'Starbucks, 100, North Park Square, Marietta, Cobb County, '
-                       + 'Georgia, 30060, United States')];
+var STARBUCKS = [place(51, 33.9671, -44.5499, 'amenity', 'cafe', 'Starbucks',
+                       'Starbucks, 100, North Park Square, Harrowen, Vosk County, '
+                       + 'Georgia, 90660, United States')];
 [[1, 1], [1, -1], [-1, 1], [-1, -1]].forEach(function (c, k) {
   for (var i = 0; i < 3 && STARBUCKS.length < 12; i++) {
-    var lat = 33.9526 + c[0] * (0.045 - i * 0.001), lon = -84.5499 + c[1] * (0.055 - i * 0.001);
+    var lat = 33.9526 + c[0] * (0.045 - i * 0.001), lon = -44.5499 + c[1] * (0.055 - i * 0.001);
     STARBUCKS.push(place(52 + k * 3 + i, lat, lon, 'amenity', 'cafe', 'Starbucks',
-                         'Starbucks, ' + (200 + k * 3 + i) + ', Corner Road, Marietta, '
-                         + 'Cobb County, Georgia, 30060, United States'));
+                         'Starbucks, ' + (200 + k * 3 + i) + ', Corner Road, Harrowen, '
+                         + 'Vosk County, Georgia, 90660, United States'));
   }
 });
 
@@ -143,33 +143,33 @@ var STARBUCKS = [place(51, 33.9671, -84.5499, 'amenity', 'cafe', 'Starbucks',
    routing the fastest road direct and a shorter, slower one by the pickup —
    and Farm Stand sits 450 m from the nearest road, so OSRM moves it that
    far before routing. Each one branch, invented, inside a 3.0 mi card. */
-var WAFFLE = [place(71, 33.9300, -84.5100, 'amenity', 'restaurant', 'Waffle House',
-                    'Waffle House, 300, Example Road, Marietta, Cobb County, Georgia, '
-                    + '30060, United States')];
-var FARM = [place(72, 33.9650, -84.5350, 'shop', 'farm', 'Farm Stand',
-                  'Farm Stand, Marietta, Cobb County, Georgia, 30060, United States')];
+var WAFFLE = [place(71, 33.9300, -44.5100, 'amenity', 'restaurant', 'Waffle House',
+                    'Waffle House, 300, Example Road, Harrowen, Vosk County, Georgia, '
+                    + '90660, United States')];
+var FARM = [place(72, 33.9650, -44.5350, 'shop', 'farm', 'Farm Stand',
+                  'Farm Stand, Harrowen, Vosk County, Georgia, 90660, United States')];
 
 /* A restaurant's door the router routes like any other point: the held
    order's Trip Planner pickup in the suites (street=250 Example Road), 1.7 mi
    north-east of the Square, inside a 9.4 mi card's disc. Invented. */
-var GRILL = [place(81, 33.9700, -84.5300, 'amenity', 'restaurant', 'Example Grill',
-                   'Example Grill, 250, Example Road, Marietta, Cobb County, Georgia, '
-                   + '30060, United States')];
+var GRILL = [place(81, 33.9700, -44.5300, 'amenity', 'restaurant', 'Example Grill',
+                   'Example Grill, 250, Example Road, Harrowen, Vosk County, Georgia, '
+                   + '90660, United States')];
 
-/* ...and one 87 m from the door at 1985 Cobb Parkway (street=1975 Cobb
+/* ...and one 87 m from the door at 1985 Vosk Parkway (street=1975 Vosk
    Parkway): a restaurant next to a customer's door, which the GPS drop's
    restaurant guard exists for. Invented. */
-var DINER = [place(82, 34.0004, -84.5554, 'amenity', 'restaurant', 'Example Diner',
-                   'Example Diner, 1975, Cobb Parkway, Kennesaw, Cobb County, Georgia, '
-                   + '30152, United States')];
+var DINER = [place(82, 34.0004, -44.5554, 'amenity', 'restaurant', 'Example Diner',
+                   'Example Diner, 1975, Vosk Parkway, Tellmoor, Vosk County, Georgia, '
+                   + '90752, United States')];
 
-/* ...and one 60 m east of that same door (street=1981 Cobb Parkway): the
+/* ...and one 60 m east of that same door (street=1981 Vosk Parkway): the
    restaurant the SERVER pins for the guard from the held card's own words
    (server.js pickupAsks, the owner's decision of 18 Oct) — DoorDash's printed
-   door under the store's name, or an Uber "Store (1981 Cobb Pkwy)". Invented. */
-var TAQUERIA = [place(83, 34.0010, -84.55535, 'amenity', 'restaurant', 'Example Taqueria',
-                      'Example Taqueria, 1981, Cobb Parkway, Kennesaw, Cobb County, Georgia, '
-                      + '30152, United States')];
+   door under the store's name, or an Uber "Store (1981 Vosk Pkwy)". Invented. */
+var TAQUERIA = [place(83, 34.0010, -44.55535, 'amenity', 'restaurant', 'Example Taqueria',
+                      'Example Taqueria, 1981, Vosk Parkway, Tellmoor, Vosk County, Georgia, '
+                      + '90752, United States')];
 
 /* The held end by its PLACE (map-view.js pickPlace; the owner, 17 Oct): a
    parking deck beside Kestrel Drive, whose house 4821 this fake does not hold,
@@ -182,13 +182,13 @@ var TAQUERIA = [place(83, 34.0010, -84.55535, 'amenity', 'restaurant', 'Example 
    Square: inside the box round a 5.0 mi card's 5.5 mi disc, and outside the
    disc.
    Invented, every one. */
-var DECK = [place(91, 33.9712, -84.5288, 'amenity', 'parking', 'Wrenfield Parking Deck',
-                  'Wrenfield Parking Deck, Kestrel Drive, Marietta, Cobb County, Georgia, '
-                  + '30060, United States')];
-var QUARRY = [place(92, 33.9690, -84.5310, 'highway', 'residential', 'Quarry Hall',
-                    'Quarry Hall, Marietta, Cobb County, Georgia, 30060, United States')];
-var LANTERN = [place(93, 34.0226, -84.4649, 'amenity', 'parking', 'Lantern Parking Deck',
-                     'Lantern Parking Deck, Marietta, Cobb County, Georgia, 30062, '
+var DECK = [place(91, 33.9712, -44.5288, 'amenity', 'parking', 'Wrenfield Parking Deck',
+                  'Wrenfield Parking Deck, Kestrel Drive, Harrowen, Vosk County, Georgia, '
+                  + '90660, United States')];
+var QUARRY = [place(92, 33.9690, -44.5310, 'highway', 'residential', 'Quarry Hall',
+                    'Quarry Hall, Harrowen, Vosk County, Georgia, 90660, United States')];
+var LANTERN = [place(93, 34.0226, -44.4649, 'amenity', 'parking', 'Lantern Parking Deck',
+                     'Lantern Parking Deck, Harrowen, Vosk County, Georgia, 90662, '
                      + 'United States')];
 
 /* A door the NucBox holds under its street's other type word (map-view.js
@@ -201,16 +201,16 @@ var LANTERN = [place(93, 34.0226, -84.4649, 'amenity', 'parking', 'Lantern Parki
    street, which must never be the door. "2040 Tansy Creek Cts SW" is the same
    and holds only the Drive's 2040. Invented, every one. */
 var TANSY_1830 = [
-  place(101, 33.9800, -84.5700, 'place', 'house', '',
-        '1830, Tansy Creek Court Southwest, Marietta, Cobb County, Georgia, 30064, '
+  place(101, 33.9800, -44.5700, 'place', 'house', '',
+        '1830, Tansy Creek Court Southwest, Harrowen, Vosk County, Georgia, 90664, '
         + 'United States'),
-  place(102, 33.9400, -84.5820, 'place', 'house', '',
-        '1830, Tansy Creek Drive Southwest, Marietta, Cobb County, Georgia, 30064, '
+  place(102, 33.9400, -44.5820, 'place', 'house', '',
+        '1830, Tansy Creek Drive Southwest, Harrowen, Vosk County, Georgia, 90664, '
         + 'United States')
 ];
 var TANSY_2040 = [
-  place(103, 33.9410, -84.5830, 'place', 'house', '',
-        '2040, Tansy Creek Drive Southwest, Marietta, Cobb County, Georgia, 30064, '
+  place(103, 33.9410, -44.5830, 'place', 'house', '',
+        '2040, Tansy Creek Drive Southwest, Harrowen, Vosk County, Georgia, 90664, '
         + 'United States')
 ];
 
@@ -224,41 +224,41 @@ var TANSY_2040 = [
    same road, and its W-spelt question holds only a house 812 on Ardley W
    Corwin Circle — a different street, which must never be the door.
    Invented, every one. */
-var ARDLEY_ROAD = [place(131, 33.9600, -84.5550, 'highway', 'primary',
+var ARDLEY_ROAD = [place(131, 33.9600, -44.5550, 'highway', 'primary',
                          'Ardley W Corwin Parkway Northwest',
-                         'Ardley W Corwin Parkway Northwest, Marietta, Cobb County, Georgia, '
-                         + '30064, United States')];
-var ARDLEY_810 = [place(132, 33.9900, -84.5800, 'place', 'house', '',
-                        '810, Ardley W Corwin Parkway Northwest, Kennesaw, Cobb County, '
-                        + 'Georgia, 30144, United States')];
-var ARDLEY_812 = [place(133, 33.9880, -84.5790, 'place', 'house', '',
-                        '812, Ardley W Corwin Circle Northwest, Kennesaw, Cobb County, '
-                        + 'Georgia, 30144, United States')];
+                         'Ardley W Corwin Parkway Northwest, Harrowen, Vosk County, Georgia, '
+                         + '90664, United States')];
+var ARDLEY_810 = [place(132, 33.9900, -44.5800, 'place', 'house', '',
+                        '810, Ardley W Corwin Parkway Northwest, Tellmoor, Vosk County, '
+                        + 'Georgia, 90744, United States')];
+var ARDLEY_812 = [place(133, 33.9880, -44.5790, 'place', 'house', '',
+                        '812, Ardley W Corwin Circle Northwest, Tellmoor, Vosk County, '
+                        + 'Georgia, 90744, United States')];
 
 /* A door filed under a name read short (map-view.js nameRetry; the owner's 19
-   Oct night fault): "1106 Tamaror" is "1106 Tamarons Ln" read off a dark
+   Oct night fault): "1106 Pelaror" is "1106 Pelarons Ln" read off a dark
    frame with its type lost and its last word cut, and this fake's search, as
    the real install did for the owner's, answers it with nothing. Its street
-   index (NAMED_INDEX below) knows Tamarons Lane 1.7 mi north-west of the
+   index (NAMED_INDEX below) knows Pelarons Lane 1.7 mi north-west of the
    Square, and asked by that name the search answers the door. "Brindler" is
    a read two near streets can be — Brindlewood Way and Brindleton Court,
    both by the Square — whose doors the search holds too, so a suite can see
    neither is ever asked. Invented, every one. */
-var TAMARONS_1106 = [
-  place(111, 33.9752, -84.5601, 'place', 'house', '',
-        '1106, Tamarons Lane, Marietta, Cobb County, Georgia, 30064, United States')];
+var PELARONS_1106 = [
+  place(111, 33.9752, -44.5601, 'place', 'house', '',
+        '1106, Pelarons Lane, Harrowen, Vosk County, Georgia, 90664, United States')];
 var BRINDLE_1106 = [
-  place(112, 33.9650, -84.5400, 'place', 'house', '',
-        '1106, Brindlewood Way, Marietta, Cobb County, Georgia, 30060, United States')];
+  place(112, 33.9650, -44.5400, 'place', 'house', '',
+        '1106, Brindlewood Way, Harrowen, Vosk County, Georgia, 90660, United States')];
 
 /* The owner's planner of 21 Oct, 13:57, invented: the dropoff "2282 <Name>s
    Dr" read "2282 <Name>" — its last letter and its type lost — and filed off
-   a planner whose title had scrolled away. "2282 Corbin" answers nothing
-   here; the index knows Corbins Drive 1.3 mi north-east of the Square, and
+   a planner whose title had scrolled away. "2282 Marbin" answers nothing
+   here; the index knows Marbins Drive 1.3 mi north-east of the Square, and
    asked by that name the search answers the door. */
-var CORBINS_2282 = [
-  place(113, 33.9701, -84.5340, 'place', 'house', '',
-        '2282, Corbins Drive, Marietta, Cobb County, Georgia, 30062, United States')];
+var MARBINS_2282 = [
+  place(113, 33.9701, -44.5340, 'place', 'house', '',
+        '2282, Marbins Drive, Harrowen, Vosk County, Georgia, 90662, United States')];
 
 /* The NucBox's street index for the questions above, answered by the real
    streets.js (named), so what the server is told is what the NucBox would
@@ -267,11 +267,11 @@ var CORBINS_2282 = [
 var Streets = require('../streets.js');
 var NAMED_INDEX = Streets.build({
   format: Streets.FORMAT, e: 6,
-  names: ['Tamarons Lane', 'Brindlewood Way', 'Brindleton Court',
+  names: ['Pelarons Lane', 'Brindlewood Way', 'Brindleton Court',
           'Larkmoor Court', 'Hollin Road', 'Fennick Court', 'Ellis Court', 'Quarrel Court',
-          'Pembury', 'Corbins Drive', 'Pellmore Street', 'Dunmere Parkway',
+          'Pembury', 'Marbins Drive', 'Pellmore Street', 'Dunmere Parkway',
           'Ossian W Wrenley Parkway Northwest'],
-  nodes: [-84561000, 33975000, 2000, 400,            // Tamarons Lane
+  nodes: [-44561000, 33975000, 2000, 400,            // Pelarons Lane
           21000, -10400, 2000, 0,                    // Brindlewood Way
           -6000, 3000, 0, 2000,                      // Brindleton Court
           2000, -10000, 2700, 0, 0, 1000,            // Larkmoor Court, two ways, 360 m
@@ -282,7 +282,7 @@ var NAMED_INDEX = Streets.build({
           -8500, 7000, 2000, 0,                      // Quarrel Court, 185 m by the Square...
           -10000, -57000, 27000, 0,                  // ...and a Quarrel Court of 2.5 km
           -20000, 56000, 1300, 0,                    // Pembury, no type word, 120 m
-          16700, 14000, 2000, 0,                     // Corbins Drive, 1.3 mi north-east
+          16700, 14000, 2000, 0,                     // Marbins Drive, 1.3 mi north-east
           -13000, -12000, 4000, 0,                   // Pellmore Street, 369 m by the Square
           -28000, -8000, 40000, 0,                   // Dunmere Parkway, 3.7 km
           -30000, 10000, 30000, 0],                  // Ossian W Wrenley Parkway NW, 2.8 km
@@ -295,7 +295,7 @@ var NAMED_INDEX = Streets.build({
    storeTail; the owner's snap of 2 Nov 16:31): DoorDash's card prints "164
    Wrenley Pkwy" under its store's name, and the road is "Ossian W Wrenley
    Parkway Northwest" in the index above, running east-west 0.5 mi north of
-   the Square (33.96, -84.56 to -84.53). This fake's search holds no house
+   the Square (33.96, -44.56 to -44.53). This fake's search holds no house
    on it by either name, and answers "164 Wrenley Pkwy" as the real install
    answered the owner's: two looser answers, houses 164 on a court of a like
    name in two places, which disagree. By NAME (q=, as Nominatim answers a
@@ -305,31 +305,31 @@ var NAMED_INDEX = Streets.build({
    and one 1 km north of it. "212 Ossian W Wrenley Parkway Northwest"
    (the full name) answers its door. Invented, every one. */
 var WRENLEY_164 = [
-  place(171, 33.9400, -84.5300, 'place', 'house', '',
-        '164, Wrenley Court, Marietta, Cobb County, Georgia, 30060, United States'),
-  place(172, 33.9800, -84.5800, 'place', 'house', '',
-        '164, Wrenley Court, Marietta, Cobb County, Georgia, 30064, United States')];
-var WRENLEY_212 = [place(173, 33.9601, -84.5350, 'place', 'house', '',
-                         '212, Ossian W Wrenley Parkway Northwest, Marietta, Cobb County, '
-                         + 'Georgia, 30066, United States')];
-var LARK_GRILL = [place(174, 33.9612, -84.5450, 'amenity', 'restaurant', 'Lark Owl Grill',
-                        'Lark Owl Grill, Ossian W Wrenley Parkway Northwest, Marietta, Cobb '
-                        + 'County, Georgia, 30066, United States')];
+  place(171, 33.9400, -44.5300, 'place', 'house', '',
+        '164, Wrenley Court, Harrowen, Vosk County, Georgia, 90660, United States'),
+  place(172, 33.9800, -44.5800, 'place', 'house', '',
+        '164, Wrenley Court, Harrowen, Vosk County, Georgia, 90664, United States')];
+var WRENLEY_212 = [place(173, 33.9601, -44.5350, 'place', 'house', '',
+                         '212, Ossian W Wrenley Parkway Northwest, Harrowen, Vosk County, '
+                         + 'Georgia, 90666, United States')];
+var LARK_GRILL = [place(174, 33.9612, -44.5450, 'amenity', 'restaurant', 'Lark Owl Grill',
+                        'Lark Owl Grill, Ossian W Wrenley Parkway Northwest, Harrowen, Vosk '
+                        + 'County, Georgia, 90666, United States')];
 var FABLE_PIZZA = [
-  place(175, 33.9605, -84.5400, 'amenity', 'fast_food', 'Fable Pizza',
-        'Fable Pizza, Ossian W Wrenley Parkway Northwest, Marietta, Cobb County, Georgia, '
-        + '30066, United States'),
-  place(176, 33.9590, -84.5550, 'amenity', 'fast_food', 'Fable Pizza',
-        'Fable Pizza, Ossian W Wrenley Parkway Northwest, Marietta, Cobb County, Georgia, '
-        + '30066, United States')];
-var KESTREL_TACOS = [place(177, 33.9660, -84.5450, 'amenity', 'fast_food', 'Kestrel Tacos',
-                           'Kestrel Tacos, Marietta, Cobb County, Georgia, 30066, United States')];
+  place(175, 33.9605, -44.5400, 'amenity', 'fast_food', 'Fable Pizza',
+        'Fable Pizza, Ossian W Wrenley Parkway Northwest, Harrowen, Vosk County, Georgia, '
+        + '90666, United States'),
+  place(176, 33.9590, -44.5550, 'amenity', 'fast_food', 'Fable Pizza',
+        'Fable Pizza, Ossian W Wrenley Parkway Northwest, Harrowen, Vosk County, Georgia, '
+        + '90666, United States')];
+var KESTREL_TACOS = [place(177, 33.9660, -44.5450, 'amenity', 'fast_food', 'Kestrel Tacos',
+                           'Kestrel Tacos, Harrowen, Vosk County, Georgia, 90666, United States')];
 var WREN_DELI = [
-  place(178, 33.9603, -84.5480, 'amenity', 'restaurant', 'Wren Hollow Deli',
-        'Wren Hollow Deli, Ossian W Wrenley Parkway Northwest, Marietta, Cobb County, '
-        + 'Georgia, 30066, United States'),
-  place(179, 33.9690, -84.5500, 'amenity', 'restaurant', 'Wren Hollow Deli',
-        'Wren Hollow Deli, Marietta, Cobb County, Georgia, 30066, United States')];
+  place(178, 33.9603, -44.5480, 'amenity', 'restaurant', 'Wren Hollow Deli',
+        'Wren Hollow Deli, Ossian W Wrenley Parkway Northwest, Harrowen, Vosk County, '
+        + 'Georgia, 90666, United States'),
+  place(179, 33.9690, -44.5500, 'amenity', 'restaurant', 'Wren Hollow Deli',
+        'Wren Hollow Deli, Harrowen, Vosk County, Georgia, 90666, United States')];
 
 /* Streets the NucBox's search holds without their house numbers, for the
    held end by its street (server.js searchHeldStreet; the owner's fault of 19
@@ -343,43 +343,43 @@ var WREN_DELI = [
    road of 2.5 km also carries, inside the same card's box (said by its length
    alone, past WHOLE_LINE_M), and "12 Pembury" a street the index holds with
    no type word. Invented, every one. */
-var LARKMOOR = [place(121, 33.9600, -84.5387, 'highway', 'residential', 'Larkmoor Court',
-                      'Larkmoor Court, Marietta, Cobb County, Georgia, 30060, United States')];
-var HOLLIN = [place(122, 33.9450, -84.5535, 'highway', 'residential', 'Hollin Road',
-                    'Hollin Road, Marietta, Cobb County, Georgia, 30060, United States')];
-var ELLIS = [place(125, 33.9500, -84.5442, 'highway', 'residential', 'Ellis Court',
-                   'Ellis Court, Marietta, Cobb County, Georgia, 30060, United States')];
-var QUARREL = [place(126, 33.9570, -84.5510, 'highway', 'residential', 'Quarrel Court',
-                     'Quarrel Court, Marietta, Cobb County, Georgia, 30060, United States')];
-var PEMBURY = [place(127, 33.9560, -84.5520, 'highway', 'residential', 'Pembury',
-                     'Pembury, Marietta, Cobb County, Georgia, 30060, United States')];
+var LARKMOOR = [place(121, 33.9600, -44.5387, 'highway', 'residential', 'Larkmoor Court',
+                      'Larkmoor Court, Harrowen, Vosk County, Georgia, 90660, United States')];
+var HOLLIN = [place(122, 33.9450, -44.5535, 'highway', 'residential', 'Hollin Road',
+                    'Hollin Road, Harrowen, Vosk County, Georgia, 90660, United States')];
+var ELLIS = [place(125, 33.9500, -44.5442, 'highway', 'residential', 'Ellis Court',
+                   'Ellis Court, Harrowen, Vosk County, Georgia, 90660, United States')];
+var QUARREL = [place(126, 33.9570, -44.5510, 'highway', 'residential', 'Quarrel Court',
+                     'Quarrel Court, Harrowen, Vosk County, Georgia, 90660, United States')];
+var PEMBURY = [place(127, 33.9560, -44.5520, 'highway', 'residential', 'Pembury',
+                     'Pembury, Harrowen, Vosk County, Georgia, 90660, United States')];
 var FENNICK = [
-  place(123, 33.9650, -84.5590, 'highway', 'residential', 'Fennick Court',
-        'Fennick Court, Marietta, Cobb County, Georgia, 30060, United States'),
-  place(124, 33.9400, -84.5290, 'highway', 'residential', 'Fennick Court',
-        'Fennick Court, Marietta, Cobb County, Georgia, 30060, United States')];
+  place(123, 33.9650, -44.5590, 'highway', 'residential', 'Fennick Court',
+        'Fennick Court, Harrowen, Vosk County, Georgia, 90660, United States'),
+  place(124, 33.9400, -44.5290, 'highway', 'residential', 'Fennick Court',
+        'Fennick Court, Harrowen, Vosk County, Georgia, 90660, United States')];
 
 /* Two doors of ONE number a few hundred metres apart, both inside the held
    card's disc (map-view.js withArea; the owner's snap of 24 Oct: "<number>
    <Name> Mill Rd SE", two door answers drawn as two circles almost touching,
-   refused as 'several' and nothing routed): "3150 Thornbury Mill Rd SE"
+   refused as 'several' and nothing routed): "3150 Gorsebury Mill Rd SE"
    answers two houses 0.33 mi apart, 0.6 and 0.9 mi north-east of the
    Square — one general area, routed to and never a pin — and "3152
-   Thornbury Mill Rd SE" two 2.5 mi apart, which are no area either.
+   Gorsebury Mill Rd SE" two 2.5 mi apart, which are no area either.
    Invented, every one. */
-var THORNBURY_3150 = [
-  place(141, 33.9600, -84.5450, 'place', 'house', '',
-        '3150, Thornbury Mill Road Southeast, Marietta, Cobb County, Georgia, 30067, '
+var GORSEBURY_3150 = [
+  place(141, 33.9600, -44.5450, 'place', 'house', '',
+        '3150, Gorsebury Mill Road Southeast, Harrowen, Vosk County, Georgia, 90667, '
         + 'United States'),
-  place(142, 33.9640, -84.5420, 'place', 'house', '',
-        '3150, Thornbury Mill Road Southeast, Marietta, Cobb County, Georgia, 30067, '
+  place(142, 33.9640, -44.5420, 'place', 'house', '',
+        '3150, Gorsebury Mill Road Southeast, Harrowen, Vosk County, Georgia, 90667, '
         + 'United States')];
-var THORNBURY_3152 = [
-  place(143, 33.9600, -84.5450, 'place', 'house', '',
-        '3152, Thornbury Mill Road Southeast, Marietta, Cobb County, Georgia, 30067, '
+var GORSEBURY_3152 = [
+  place(143, 33.9600, -44.5450, 'place', 'house', '',
+        '3152, Gorsebury Mill Road Southeast, Harrowen, Vosk County, Georgia, 90667, '
         + 'United States'),
-  place(144, 33.9900, -84.5200, 'place', 'house', '',
-        '3152, Thornbury Mill Road Southeast, Marietta, Cobb County, Georgia, 30067, '
+  place(144, 33.9900, -44.5200, 'place', 'house', '',
+        '3152, Gorsebury Mill Road Southeast, Harrowen, Vosk County, Georgia, 90667, '
         + 'United States')];
 
 /* The owner's DoorDash snap of 24 Oct, 19:23-19:25, invented (map-view.js
@@ -397,21 +397,21 @@ var THORNBURY_3152 = [
 var VESSINGTON_10800 = [];
 var VESSINGTON_10900 = [];
 for (var vi = 0; vi < 10; vi++) {
-  VESSINGTON_10800.push(place(150 + vi, 33.9570 + (vi % 5) * 0.0010, -84.5450 + Math.floor(vi / 5) * 0.0020,
+  VESSINGTON_10800.push(place(150 + vi, 33.9570 + (vi % 5) * 0.0010, -44.5450 + Math.floor(vi / 5) * 0.0020,
                               'place', 'house', '',
-                              (10802 + vi * 2) + ', Vessington Highway, Marietta, Cobb County, '
-                              + 'Georgia, 30060, United States'));
-  VESSINGTON_10900.push(place(160 + vi, 33.9300 + vi * 0.0050, -84.5600 + vi * 0.0030,
+                              (10802 + vi * 2) + ', Vessington Highway, Harrowen, Vosk County, '
+                              + 'Georgia, 90660, United States'));
+  VESSINGTON_10900.push(place(160 + vi, 33.9300 + vi * 0.0050, -44.5600 + vi * 0.0030,
                               'place', 'house', '',
-                              (10902 + vi * 2) + ', Vessington Highway, Marietta, Cobb County, '
-                              + 'Georgia, 30060, United States'));
+                              (10902 + vi * 2) + ', Vessington Highway, Harrowen, Vosk County, '
+                              + 'Georgia, 90660, United States'));
 }
 
 var CHURCH = [
-  place(31, 33.9580, -84.5520, 'highway', 'tertiary', 'Church Street',
-        'Church Street, Marietta, Cobb County, Georgia, 30060, United States'),
-  place(32, 33.8830, -84.5140, 'highway', 'residential', 'Church Street',
-        'Church Street, Smyrna, Cobb County, Georgia, 30080, United States')
+  place(31, 33.9580, -44.5520, 'highway', 'tertiary', 'Church Street',
+        'Church Street, Harrowen, Vosk County, Georgia, 90660, United States'),
+  place(32, 33.8830, -44.5140, 'highway', 'residential', 'Church Street',
+        'Church Street, Pyrnel, Vosk County, Georgia, 90680, United States')
 ];
 
 function inBox(p, box) {
@@ -447,18 +447,18 @@ function search(q) {
   } else if (q.street !== undefined) {
     if (term === '164 wrenley pkwy') all = WRENLEY_164;
     else if (term === '212 ossian w wrenley parkway northwest') all = WRENLEY_212;
-    else if (/^shadowood (pkwy|parkway)/.test(term)) all = SHADOWOOD;
-    else if (/^1985 cobb (pkwy|parkway)/.test(term)) all = COBB_1985;
+    else if (/^gloamwood (pkwy|parkway)/.test(term)) all = GLOAMWOOD;
+    else if (/^1985 vosk (pkwy|parkway)/.test(term)) all = VOSK_1985;
     else if (/^4821 kestrel (dr|drive)/.test(term)) all = KESTREL;
     else if (/^church st/.test(term)) all = CHURCH;
     else if (/^250 example (rd|road)/.test(term)) all = GRILL;
-    else if (/^1975 cobb (pkwy|parkway)/.test(term)) all = DINER;
-    else if (/^1981 cobb (pkwy|parkway)/.test(term)) all = TAQUERIA;
+    else if (/^1975 vosk (pkwy|parkway)/.test(term)) all = DINER;
+    else if (/^1981 vosk (pkwy|parkway)/.test(term)) all = TAQUERIA;
     else if (term === '1830 tansy creek sw') all = TANSY_1830;
     else if (term === '2040 tansy creek sw') all = TANSY_2040;
-    else if (term === '1106 tamarons lane') all = TAMARONS_1106;
+    else if (term === '1106 pelarons lane') all = PELARONS_1106;
     else if (term === '1106 brindlewood way') all = BRINDLE_1106;
-    else if (term === '2282 corbins drive') all = CORBINS_2282;
+    else if (term === '2282 marbins drive') all = MARBINS_2282;
     else if (/^81[02] ardley west corwin (pkwy|parkway)$/.test(term)) all = ARDLEY_ROAD;
     else if (/^810 ardley w corwin (pkwy|parkway)$/.test(term)) all = ARDLEY_810;
     else if (/^812 ardley w corwin (pkwy|parkway)$/.test(term)) all = ARDLEY_812;
@@ -468,8 +468,8 @@ function search(q) {
     else if (/^\d+ eliis (ct|court)$/.test(term)) all = ELLIS;
     else if (/^\d+ quarrel (ct|court)$/.test(term)) all = QUARREL;
     else if (/^\d+ pembury$/.test(term)) all = PEMBURY;
-    else if (/^3150 thornbury mill (rd|road)/.test(term)) all = THORNBURY_3150;
-    else if (/^3152 thornbury mill (rd|road)/.test(term)) all = THORNBURY_3152;
+    else if (/^3150 gorsebury mill (rd|road)/.test(term)) all = GORSEBURY_3150;
+    else if (/^3152 gorsebury mill (rd|road)/.test(term)) all = GORSEBURY_3152;
     else if (/^10800 vessington (hwy|highway)$/.test(term)) all = VESSINGTON_10800;
     else if (/^10900 vessington (hwy|highway)$/.test(term)) all = VESSINGTON_10900;
   }
@@ -487,25 +487,25 @@ function miles(a, b) {
 
 /* A road a quarter longer than the straight line, leg by leg — except the
    one route measured on the real install, which answers what it answered,
-   and any route touching 1985 Cobb Parkway, which answers OSRM's own
+   and any route touching 1985 Vosk Parkway, which answers OSRM's own
    "no road" (HTTP 400, code NoRoute) so a suite can see that said. */
 function route(coords) {
   var pts = coords.split(';').map(function (c) { return c.split(',').map(Number); });
   var near = function (p, lon, lat) {
     return Math.abs(p[0] - lon) < 1e-6 && Math.abs(p[1] - lat) < 1e-6;
   };
-  if (pts.some(function (p) { return Math.abs(p[0] + 84.5560) < 5e-4 && Math.abs(p[1] - 34.0010) < 5e-4; })) {
+  if (pts.some(function (p) { return Math.abs(p[0] + 44.5560) < 5e-4 && Math.abs(p[1] - 34.0010) < 5e-4; })) {
     return null;
   }
-  // Any point at 34.1, -84.6 is a question OSRM refuses with a code that is
+  // Any point at 34.1, -44.6 is a question OSRM refuses with a code that is
   // NOT NoRoute: the router failing, never "no road".
-  if (pts.some(function (p) { return near(p, -84.6, 34.1); })) return 'InvalidQuery';
-  if (pts.length === 2 && near(pts[0], -84.5499, 33.9526) && near(pts[1], -84.3880, 33.7490)) {
+  if (pts.some(function (p) { return near(p, -44.6, 34.1); })) return 'InvalidQuery';
+  if (pts.length === 2 && near(pts[0], -44.5499, 33.9526) && near(pts[1], -44.3880, 33.7490)) {
     return routeBody(pts, [31307.4], [1659.8]);
   }
-  // Any point at 33.9, -84.7 is a route whose shape is not one: a point of
+  // Any point at 33.9, -44.7 is a route whose shape is not one: a point of
   // it with no latitude (for the relay's all-or-nothing check on the line).
-  var badShape = pts.some(function (p) { return near(p, -84.7, 33.9); });
+  var badShape = pts.some(function (p) { return near(p, -44.7, 33.9); });
   var legs = [], secs = [];
   for (var i = 1; i < pts.length; i++) {
     var m = Math.round(miles(pts[i - 1], pts[i]) * 1.25 * 1609.344 * 10) / 10;
@@ -519,7 +519,7 @@ function route(coords) {
     legs[1] = Math.round((direct - 400 - legs[0]) * 10) / 10;
   }
   var body = routeBody(pts, legs, secs);
-  if (badShape) body.routes[0].geometry.coordinates[1] = [-84.7];
+  if (badShape) body.routes[0].geometry.coordinates[1] = [-44.7];
   return body;
 }
 
@@ -623,16 +623,16 @@ function start(done) {
       var body = cross
         ? { ok: true, a: { names: [String(u.query.a)], how: 'exact', ways: 1 },
             b: { names: [String(u.query.b)], how: 'exact', ways: 1 }, cutAt: null,
-            meets: [{ lat: 33.96, lon: -84.55, n: 1, spanM: 0, shared: true }] }
+            meets: [{ lat: 33.96, lon: -44.55, n: 1, spanM: 0, shared: true }] }
         : { ok: true, names: [String(u.query.name)], how: 'exact', points: 2, cutAt: null,
-            lines: [[[33.948, -84.56], [33.948, -84.552]]] };
+            lines: [[[33.948, -44.56], [33.948, -44.552]]] };
       // ...and "Dunmere Parkway" (the long street of NAMED_INDEX, which
       // `whole` sends by its length alone) as its stretch in a box, for the
       // distance band (map-view.js bandSamples, server.js bandHeldEnd): one
       // straight piece running 5.4 mi due north from the Square. Invented.
-      if (!cross && said === 'Dunmere Parkway') body.lines = [[[33.9526, -84.5499], [34.0300, -84.5499]]];
+      if (!cross && said === 'Dunmere Parkway') body.lines = [[[33.9526, -44.5499], [34.0300, -44.5499]]];
       if (said === 'Bad Street') {
-        if (cross) body.meets.push({ lat: 'north', lon: -84.55, n: 1, spanM: 0 });
+        if (cross) body.meets.push({ lat: 'north', lon: -44.55, n: 1, spanM: 0 });
         else body.lines[0].push([33.948]);
       }
       if (said === 'Slow Street') return setTimeout(function () { json(200, body); }, 2500);
@@ -647,12 +647,12 @@ function start(done) {
     /* OSRM's table service (server.js's /api/nbx/table relay, the planner's
        fastest order; 31 Oct): the drive seconds between every two points, at
        the same road a quarter longer than the straight line and the same
-       13.4 m/s as route() above. Any point at 34.1, -84.6 is refused with a
+       13.4 m/s as route() above. Any point at 34.1, -44.6 is refused with a
        code that is not Ok, as route() refuses it. */
     var tm = /^\/table\/v1\/driving\/([-0-9.,;]+)$/.exec(u.pathname);
     if (tm) {
       var tp = tm[1].split(';').map(function (c) { return c.split(',').map(Number); });
-      if (tp.some(function (p) { return Math.abs(p[0] + 84.6) < 1e-6 && Math.abs(p[1] - 34.1) < 1e-6; })) {
+      if (tp.some(function (p) { return Math.abs(p[0] + 44.6) < 1e-6 && Math.abs(p[1] - 34.1) < 1e-6; })) {
         return json(400, { code: 'InvalidQuery', message: 'Query string malformed' });
       }
       return json(200, { code: 'Ok', durations: tp.map(function (a) {
@@ -675,15 +675,15 @@ function start(done) {
   });
 }
 
-module.exports = { start: start, MCD: MCD, SHADOWOOD: SHADOWOOD,
-                   COBB_1985: COBB_1985, CHURCH: CHURCH, KESTREL: KESTREL,
+module.exports = { start: start, MCD: MCD, GLOAMWOOD: GLOAMWOOD,
+                   VOSK_1985: VOSK_1985, CHURCH: CHURCH, KESTREL: KESTREL,
                    STARBUCKS: STARBUCKS, WAFFLE: WAFFLE, FARM: FARM, GRILL: GRILL,
                    DINER: DINER, TAQUERIA: TAQUERIA, DECK: DECK, QUARRY: QUARRY, LANTERN: LANTERN,
                    TANSY_1830: TANSY_1830, TANSY_2040: TANSY_2040,
                    ARDLEY_ROAD: ARDLEY_ROAD, ARDLEY_810: ARDLEY_810, ARDLEY_812: ARDLEY_812,
-                   TAMARONS_1106: TAMARONS_1106, BRINDLE_1106: BRINDLE_1106,
-                   CORBINS_2282: CORBINS_2282,
-                   THORNBURY_3150: THORNBURY_3150, THORNBURY_3152: THORNBURY_3152,
+                   PELARONS_1106: PELARONS_1106, BRINDLE_1106: BRINDLE_1106,
+                   MARBINS_2282: MARBINS_2282,
+                   GORSEBURY_3150: GORSEBURY_3150, GORSEBURY_3152: GORSEBURY_3152,
                    VESSINGTON_10800: VESSINGTON_10800, VESSINGTON_10900: VESSINGTON_10900,
                    WRENLEY_164: WRENLEY_164, WRENLEY_212: WRENLEY_212, LARK_GRILL: LARK_GRILL,
                    FABLE_PIZZA: FABLE_PIZZA, KESTREL_TACOS: KESTREL_TACOS, WREN_DELI: WREN_DELI,

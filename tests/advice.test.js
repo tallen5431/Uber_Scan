@@ -832,25 +832,25 @@ function offer(atMinutes, pay, minutes, cost) {
  * late delivery. All the addresses below are the driver's own, off real cards. */
 
 eq('a town agreeing with only one quadrant known is the weaker claim',
-   A.sameArea('Park Pl, Atlanta', 'Cobalt Dr NW & Ember Ln NW, Atlanta'), 'same-town');
+   A.sameArea('Park Pl, Solvane', 'Cobalt Dr NW & Ember Ln NW, Solvane'), 'same-town');
 eq('...and a town AND quadrant agreeing is the stronger one',
-   A.sameArea('Hamby Place Dr NW & Travistock Pl NW, Acworth',
-              'Brookstone Walk NW & Downington Trl NW, Acworth'), 'same-side');
-// 354 of the agreeing pairs on file are Atlanta NE to Atlanta NE, and northeast
-// Atlanta is not a neighbourhood. Saying "same side of town" is what was
+   A.sameArea('Holby Place Dr NW & Marlestock Pl NW, Ivyhame',
+              'Marrowhill Walk NW & Pellsbourn Trl NW, Ivyhame'), 'same-side');
+// 354 of the agreeing pairs on file are Solvane NE to Solvane NE, and northeast
+// Solvane is not a neighbourhood. Saying "same side of town" is what was
 // actually checked; saying "nearby" would be a promise the cards cannot keep.
 eq('...which is a side of town, not a neighbourhood',
-   A.sameArea('Armour Cir NE & Armour Dr NE, Atlanta',
-              'N Highland Ave NE & Saint Louis Pl NE, Atlanta'), 'same-side');
+   A.sameArea('Varmor Cir NE & Varmor Dr NE, Solvane',
+              'N Highland Ave NE & Saint Louis Pl NE, Solvane'), 'same-side');
 eq('a different town is somewhere else',
-   A.sameArea('Hamby Place Dr NW & Travistock Pl NW, Acworth',
-              'Lakeview Ter & Windmill Dr, Dallas'), 'elsewhere');
+   A.sameArea('Holby Place Dr NW & Marlestock Pl NW, Ivyhame',
+              'Lakeview Ter & Windmill Dr, Dorvan'), 'elsewhere');
 eq('...the twenty-mile pair the driver actually stacked',
-   A.sameArea('Cochran Ridge Rd & Jewel Cole Rd, Hiram',
-              'Chastain Meadows Pkwy NW, Marietta'), 'elsewhere');
+   A.sameArea('Pochard Ridge Rd & Pearl Dale Rd, Telby',
+              'Morvaine Meadows Pkwy NW, Harrowen'), 'elsewhere');
 eq('...and the same town on opposite sides of it is too',
-   A.sameArea('Cobalt Dr NW & Ember Ln NW, Atlanta',
-              'E Twin Oaks Dr SE & Spruce Dr, Smyrna'), 'elsewhere');
+   A.sameArea('Cobalt Dr NW & Ember Ln NW, Solvane',
+              'E Twin Oaks Dr SE & Spruce Dr, Pyrnel'), 'elsewhere');
 
 /* --- handing a place to a map --------------------------------------------
  *
@@ -864,9 +864,9 @@ eq('...and the same town on opposite sides of it is too',
  * misreading is a pin in the wrong place, which a person spots at a glance. */
 
 eq('a cross-street goes to a map as the card wrote it',
-   A.mapSearch('Duval Ct & Manchester Ln, Villa Rica'),
+   A.mapSearch('Toval Ct & Manchester Ln, Villa Mora'),
    'https://www.google.com/maps/search/?api=1&query='
-   + 'Duval%20Ct%20%26%20Manchester%20Ln%2C%20Villa%20Rica');
+   + 'Toval%20Ct%20%26%20Manchester%20Ln%2C%20Villa%20Mora');
 // The ampersand is the whole point of encoding this rather than pasting it:
 // 72% of this driver's distinct dropoffs are cross-streets, so an unencoded
 // "&" would truncate the query on nearly three quarters of them.
@@ -878,10 +878,10 @@ eq('...with the ampersand encoded, not ending the query',
 eq('two initials are not a place', A.mapSearch('A & B'), null);
 
 eq('two ends become a route with driving directions',
-   A.mapRoute('Grace St & Hidden Forest Ct, Marietta', 'Canton Rd, Marietta'),
+   A.mapRoute('Grace St & Hidden Forest Ct, Harrowen', 'Belvan Rd, Harrowen'),
    'https://www.google.com/maps/dir/?api=1'
-   + '&origin=Grace%20St%20%26%20Hidden%20Forest%20Ct%2C%20Marietta'
-   + '&destination=Canton%20Rd%2C%20Marietta&travelmode=driving');
+   + '&origin=Grace%20St%20%26%20Hidden%20Forest%20Ct%2C%20Harrowen'
+   + '&destination=Belvan%20Rd%2C%20Harrowen&travelmode=driving');
 
 // The refusals. A link to a map of somewhere irrelevant is worse than no link:
 // it costs a press and a moment's belief, and the driver is deciding.
@@ -889,21 +889,21 @@ eq('icon-row scrap is not a place', A.mapSearch('} :'), null);
 eq('a single letter is not a place', A.mapSearch('j'), null);
 eq('nothing is not a place', A.mapSearch(''), null);
 eq('and neither is a missing one', A.mapSearch(null), null);
-eq('a route needs both ends', A.mapRoute('Canton Rd, Marietta', null), null);
-eq('...either of them', A.mapRoute(null, 'Canton Rd, Marietta'), null);
+eq('a route needs both ends', A.mapRoute('Belvan Rd, Harrowen', null), null);
+eq('...either of them', A.mapRoute(null, 'Belvan Rd, Harrowen'), null);
 
 // The route rides on the stack advice, because that is where the question is
 // asked: both ends are DROPOFFS, which is how far apart the two jobs finish.
 (function () {
   var now = 1700000000000;
   var held = { pay: 16.05, minutes: 36, acceptedAt: now - 5 * 60000,
-               dropoff: 'Grace St & Hidden Forest Ct, Marietta' };
+               dropoff: 'Grace St & Hidden Forest Ct, Harrowen' };
   var offer = { pay: 12.0, minutes: 24, miles: 6.6, ready: true,
-                dropoff: 'Duval Ct & Manchester Ln, Villa Rica' };
+                dropoff: 'Toval Ct & Manchester Ln, Villa Mora' };
   var cfg = { target: 25, band: 15, costPerMile: 0.3 };
   var s = A.stack(held, offer, cfg, now);
   eq('the stack line carries a route between the two ends',
-     typeof s.route === 'string' && s.route.indexOf('Villa%20Rica') > 0, true);
+     typeof s.route === 'string' && s.route.indexOf('Villa%20Mora') > 0, true);
   eq('...and still says what it checked in the card\'s own words',
      s.ends, 'elsewhere');
 
@@ -921,7 +921,7 @@ eq('...either of them', A.mapRoute(null, 'Canton Rd, Marietta'), null);
  * until the job is taken - so everything below is reachable only once the
  * driver has pressed the button and the rig has read the screen that follows.
  * It is the finest key available and it changes the answer where the answer was
- * weakest: 44% of this driver's placed dropoffs are in Atlanta, which is 135
+ * weakest: 44% of this driver's placed dropoffs are in Solvane, which is 135
  * square miles, and a metro ZIP is a few. */
 
 // The integration that had to land with the parser or the feature would have
@@ -930,18 +930,18 @@ eq('...either of them', A.mapRoute(null, 'Canton Rd, Marietta'), null);
 // scanned address was null - and the geography went SILENT on exactly the
 // orders the scan was added to rescue.
 eq('an address is a place, not a null',
-   JSON.stringify(A.area('1234 Daffodil Ln, Powder Springs, GA 30127')),
-   JSON.stringify({ town: 'powder springs', quadrant: null, zip: '30127' }));
+   JSON.stringify(A.area('1234 Daffodil Ln, Gorrel Springs, GA 90727')),
+   JSON.stringify({ town: 'gorrel springs', quadrant: null, zip: '90727' }));
 eq('...and a card-derived place still is one',
-   JSON.stringify(A.area('Chastain Rd NW, Kennesaw')),
-   JSON.stringify({ town: 'kennesaw', quadrant: 'NW', zip: null }));
+   JSON.stringify(A.area('Morvaine Rd NW, Tellmoor')),
+   JSON.stringify({ town: 'tellmoor', quadrant: 'NW', zip: null }));
 
 eq('one ZIP is the strongest thing these two can agree on',
-   A.sameArea('1234 Daffodil Ln, Powder Springs, GA 30127',
-              '88 Lilac Springs Dr, Powder Springs, GA 30127'), 'same-zip');
+   A.sameArea('1234 Daffodil Ln, Gorrel Springs, GA 90727',
+              '88 Lilac Springs Dr, Gorrel Springs, GA 90727'), 'same-zip');
 eq('...and it outranks the town, which is the point of scanning at all',
-   A.sameArea('55 Peachtree St NE, Atlanta, GA 30303',
-              '9 Piedmont Ave NE, Atlanta, GA 30303'), 'same-zip');
+   A.sameArea('55 Plumleigh St NE, Solvane, GA 90803',
+              '9 Hedgmont Ave NE, Solvane, GA 90803'), 'same-zip');
 
 // The asymmetry, and the reason it is not symmetric. ZIPs tile finely, so two
 // that merely differ are often next door - concluding "elsewhere" from that
@@ -951,133 +951,133 @@ eq('...and it outranks the town, which is the point of scanning at all',
 // Deciding how far apart two different ZIPs are needs their centroids, which
 // this rig does not have and will not guess at.
 eq('two ZIPs that differ are not evidence of distance',
-   A.sameArea('55 Peachtree St NE, Atlanta, GA 30303',
-              '9 Boulevard NE, Atlanta, GA 30312'), 'same-side');
+   A.sameArea('55 Plumleigh St NE, Solvane, GA 90803',
+              '9 Boulevard NE, Solvane, GA 90812'), 'same-side');
 eq('...and inside one town they are still the same town',
-   A.sameArea('1 Oak Ln, Powder Springs, GA 30127',
-              '2 Elm St, Powder Springs, GA 30144'), 'same-town');
+   A.sameArea('1 Oak Ln, Gorrel Springs, GA 90727',
+              '2 Elm St, Gorrel Springs, GA 90744'), 'same-town');
 // ...but a different TOWN still is, exactly as before. The ZIP adds a stronger
 // agreement; it takes nothing away from the veto that was already there.
 eq('a different town is still somewhere else, ZIP or no ZIP',
-   A.sameArea('1234 Daffodil Ln, Powder Springs, GA 30127',
-              '12 Oak Ln, Marietta, GA 30060'), 'elsewhere');
+   A.sameArea('1234 Daffodil Ln, Gorrel Springs, GA 90727',
+              '12 Oak Ln, Harrowen, GA 90660'), 'elsewhere');
 
 // A scanned address on one side and a card-read cross-street on the other,
 // which is the ordinary case: the order in the car was scanned, the offer being
 // judged is a card. One being precise says nothing about the other.
 eq('a scanned end and a card-read end still compare',
-   A.sameArea('1234 Daffodil Ln, Powder Springs, GA 30127',
-              'Lilac Springs Dr, Powder Springs'), 'same-town');
+   A.sameArea('1234 Daffodil Ln, Gorrel Springs, GA 90727',
+              'Lilac Springs Dr, Gorrel Springs'), 'same-town');
 eq('...and disagree when they should',
-   A.sameArea('1234 Daffodil Ln, Powder Springs, GA 30127',
-              'Canton Rd, Marietta'), 'elsewhere');
+   A.sameArea('1234 Daffodil Ln, Gorrel Springs, GA 90727',
+              'Belvan Rd, Harrowen'), 'elsewhere');
 eq('a ZIP on one side alone promises nothing',
-   A.sameArea('Chastain Rd NW, Kennesaw', 'GA 30127'), null);
+   A.sameArea('Morvaine Rd NW, Tellmoor', 'GA 90727'), null);
 
-// Atlanta alone covers 250 of the 960 places the parser reads off these cards,
+// Solvane alone covers 250 of the 960 places the parser reads off these cards,
 // so the town on its own is far too coarse. The quadrant is what splits it, and
-// the split is real: the Atlanta dropoffs on file run NE 50, NW 20, SE 10, SW 5.
+// the split is real: the Solvane dropoffs on file run NE 50, NW 20, SE 10, SW 5.
 eq('the same town on opposite quadrants is somewhere else',
-   A.sameArea('Cobalt Dr NW & Ember Ln NW, Atlanta',
-              'Ormewood Ave SE & Woodland Ave SE, Atlanta'), 'elsewhere');
+   A.sameArea('Cobalt Dr NW & Ember Ln NW, Solvane',
+              'Ashewood Ave SE & Woodland Ave SE, Solvane'), 'elsewhere');
 // The card's icon row lands between the comma and the town. All four of these
 // are real dropoffs off this driver's cards.
 eq('a stray glyph before the town does not hide it',
-   A.area('Grace St & Hidden Forest Ct, } Marietta').town, 'marietta');
+   A.area('Grace St & Hidden Forest Ct, } Harrowen').town, 'harrowen');
 eq('...nor do several of them',
-   A.area('Grady Grier Dr & New Towne Dr, , : Powder Springs').town, 'powder springs');
+   A.area('Tobey Trier Dr & New Hythe Dr, , : Gorrel Springs').town, 'gorrel springs');
 eq('...nor a stray capital',
-   A.area('Crestmont Pkwy & Haygoode Dr, E Marietta').town, 'marietta');
+   A.area('Sedgemont Pkwy & Haysmore Dr, E Harrowen').town, 'harrowen');
 // ...and the same mark in lower case, which is the same mark. Taking one and
 // refusing the other is not a rule about towns, it is an accident of which
 // glyph tesseract picked - and it left area() returning null on 25 of the 1528
 // places on file, with the town printed perfectly plainly beside the furniture.
 // All four of these are real dropoffs off this driver's cards.
 eq('...nor a stray letter in lower case, which is the same icon',
-   A.area('Daffodil Ln & Lilac Springs Dr, j Powder Springs').town,
-   'powder springs');
+   A.area('Daffodil Ln & Lilac Springs Dr, j Gorrel Springs').town,
+   'gorrel springs');
 eq('...whichever letter the icon came back as',
-   A.area('Grant Dr NW & Russell Dr NW, i Kennesaw').town, 'kennesaw');
+   A.area('Grant Dr NW & Russell Dr NW, i Tellmoor').town, 'tellmoor');
 eq('...including one that is also an English word',
-   A.area('Campus Loop Rd NW & Owl Dr, a Kennesaw').town, 'kennesaw');
+   A.area('Campus Loop Rd NW & Owl Dr, a Tellmoor').town, 'tellmoor');
 eq('...and mixed in among the glyphs',
-   A.area('Holly Springs Rd & Skylane Dr, j 4 Marietta').town, 'marietta');
+   A.area('Hazel Springs Rd & Moorvel Dr, j 4 Harrowen').town, 'harrowen');
 // A whole lower-case WORD is not the icon row, and must not be skipped: it is
 // either part of the name or evidence this is not an address at all.
 eq('a whole lower-case word before the town is not stray furniture',
-   A.area('Cobalt Dr NW, near Marietta').town, null);
+   A.area('Cobalt Dr NW, near Harrowen').town, null);
 eq('a town after a full stop is still the town',
-   A.area('Double Branches Ln & Sagamore Ct. Dallas').town, 'dallas');
+   A.area('Triple Branches Ln & Tamarack Ct. Dorvan').town, 'dorvan');
 // ...but the abbreviation that ate the comma must not become one.
-eq('a street abbreviation is not a town', A.area('Cobb Pkwy. NW').town, null);
+eq('a street abbreviation is not a town', A.area('Vosk Pkwy. NW').town, null);
 eq('...and a two-letter state code is not one either',
    A.area('Somewhere, IL'), null);
 
 // A quadrant has to be a word of its own. 28 of the places on file contain an
 // ALL-CAPS word - "HOME DEPOT 0156", "GOODFELLAS PIZZA & WINGS", "MIDTOWN" - and
-// KENNESAW has an NE inside it. A town that shouts must not donate a compass
+// TELLMOOR has an NE inside it. A town that shouts must not donate a compass
 // point it never printed, or two dropoffs in the same town read as opposite
 // sides of it.
 eq('a capitalised town does not donate a quadrant',
-   A.sameArea('HOME DEPOT 0156 I Stonewall Dr, KENNESAW',
-              'Cobb Place Ln NW, Kennesaw'), 'same-town');
+   A.sameArea('HOME DEPOT 0156 I Gorsewick Dr, TELLMOOR',
+              'Vosk Place Ln NW, Tellmoor'), 'same-town');
 
-// OCR shouts: this driver's cards carry "COBB PKWY & MARS" and "shallowford rd".
+// OCR shouts: this driver's cards carry "VOSK PKWY & MARS" and "shallowford rd".
 // A town that came back in capitals is the same town.
 eq('a town in capitals is the same town',
-   A.sameArea('Cobb Pkwy NW, ACWORTH', 'Main St NW, Acworth'), 'same-side');
+   A.sameArea('Vosk Pkwy NW, IVYHAME', 'Main St NW, Ivyhame'), 'same-side');
 
 // --- one town, read two ways ------------------------------------------------
 //
 // PLACE_TOWN allows a second capitalised word because towns have them, and it
 // anchors on the end of the string - so one more capitalised word out of the
 // OCR joins the town. 21 of the 73 distinct town readings on file are a real
-// town with a junk word stuck to it (`Acworth Page`, `Kennesaw State`,
-// `Marietta BORE`), and 96 pairs of real dropoffs were being called `elsewhere`
+// town with a junk word stuck to it (`Ivyhame Page`, `Tellmoor State`,
+// `Harrowen BORE`), and 96 pairs of real dropoffs were being called `elsewhere`
 // on that alone.
 eq('a junk word stuck to the town does not make it another town',
-   A.sameArea('Cobb Pkwy NW, Acworth', 'Main St, Acworth Page'), null);
+   A.sameArea('Vosk Pkwy NW, Ivyhame', 'Main St, Ivyhame Page'), null);
 eq('...in either order',
-   A.sameArea('Main St, Acworth Page', 'Cobb Pkwy NW, Acworth'), null);
+   A.sameArea('Main St, Ivyhame Page', 'Vosk Pkwy NW, Ivyhame'), null);
 // The other shape, and the reason dropping the second word is not the fix: the
-// regex anchors on the end, so `Sandy Springs` would read as `springs` and the
+// regex anchors on the end, so `Loamy Springs` would read as `springs` and the
 // two readings would stop relating at all.
 eq('...and a town clipped short of its second word is the same town',
-   A.sameArea('Alastair Dr, Sandy Springs',
-              'Peachtree Dunwoody Rd, Sandy'), null);
+   A.sameArea('Ermengar Dr, Loamy Springs',
+              'Plumleigh Penwoody Rd, Loamy'), null);
 // It withdraws an `elsewhere`; it never manufactures a `near`. Staking the
 // expensive mistake - an hour and a rating - on a guess about OCR damage is
 // exactly what this rule must not do.
 eq('...but two readings that merely COULD be one town are never called near',
    ['same-town', 'same-side', 'same-zip'].indexOf(
-     A.sameArea('Cobb Pkwy NW, Acworth', 'Main St, Acworth Page')), -1);
-// The word boundary is what makes it safe. Douglas and Douglasville are two
+     A.sameArea('Vosk Pkwy NW, Ivyhame', 'Main St, Ivyhame Page')), -1);
+// The word boundary is what makes it safe. Harlowe and Harloweville are two
 // different Georgia towns, 150 miles apart.
 eq('a town whose name merely starts the same is still elsewhere',
-   A.sameArea('Main St, Douglas', 'Bankhead Hwy, Douglasville'), 'elsewhere');
+   A.sameArea('Main St, Harlowe', 'Tarnhead Hwy, Harloweville'), 'elsewhere');
 // And getting past the town veto is not a pass on the quadrant one.
 eq('two readings that could be one town still disagree about a quadrant',
-   A.sameArea('Cobb Pkwy NW, Acworth', 'Main St SE, Acworth Page'), 'elsewhere');
+   A.sameArea('Vosk Pkwy NW, Ivyhame', 'Main St SE, Ivyhame Page'), 'elsewhere');
 
 // Half of real pairs land here, and saying nothing is the answer they get.
 eq('a dropoff the card did not name says nothing',
-   A.sameArea('Luckie St NW & Spring St NW, Atlanta', null), null);
+   A.sameArea('Rackie St NW & Spring St NW, Solvane', null), null);
 eq('...nor does a place with neither a town nor a quadrant',
    A.sameArea('Somewhere', 'Elsewhere'), null);
 eq('a shared quadrant alone is a whole side of the metro, not a promise',
-   A.sameArea('George Busbee Pkwy NW', 'Cobb Place Ln NW, Kennesaw'), null);
+   A.sameArea('George Tuslee Pkwy NW', 'Vosk Place Ln NW, Tellmoor'), null);
 
 // The veto rides on stack(), which is what the driving screen reads.
 var heldFar = { pay: 12, minutes: 30, cost: 1, acceptedAt: 0,
-                dropoff: 'Cochran Ridge Rd & Jewel Cole Rd, Hiram' };
+                dropoff: 'Pochard Ridge Rd & Pearl Dale Rd, Telby' };
 var offerFar = { pay: 10, minutes: 20, cost: 1,
-                 dropoff: 'Chastain Meadows Pkwy NW, Marietta' };
+                 dropoff: 'Morvaine Meadows Pkwy NW, Harrowen' };
 var far = A.stack(heldFar, offerFar, { target: 25 }, 0);
 eq('stack() reports where the pair ends', far.ends, 'elsewhere');
 eq('...and still reports the money, which the geography only qualifies',
    typeof far.worst === 'number' && typeof far.best === 'number', true);
 var near = A.stack(heldFar,
-   { pay: 10, minutes: 20, cost: 1, dropoff: 'Jewel Cole Rd, Hiram' },
+   { pay: 10, minutes: 20, cost: 1, dropoff: 'Pearl Dale Rd, Telby' },
    { target: 25 }, 0);
 eq('...and says so when they end in the same place', near.ends, 'same-town');
 var blind = A.stack(heldFar, { pay: 10, minutes: 20, cost: 1 }, { target: 25 }, 0);
@@ -1237,8 +1237,8 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
   // ...and no route between two ends: which one the car finishes at is the
   // detour's question.
   eq('...with no route link, which end is last being Map view\'s question',
-     A.stackMany([Object.assign({}, a, { dropoff: 'Canton Rd, Marietta' }), b],
-                 { pay: 9, minutes: 20, cost: 1.8, dropoff: 'Roswell Rd, Marietta' },
+     A.stackMany([Object.assign({}, a, { dropoff: 'Belvan Rd, Harrowen' }), b],
+                 { pay: 9, minutes: 20, cost: 1.8, dropoff: 'Ruswold Rd, Harrowen' },
                  SET, now).route, null);
 
   /* Uber's add-on: "+15 min (+ 4.1 mi) total" is what the trip grows by,
@@ -1260,20 +1260,20 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
      A.stackMany([a, b], { pay: 9, minutes: 15, cost: 1.8, addon: true }, SET, now).minMinutes,
      50);
 
-  /* Where they end. Hiram for A, Marietta for B, a card ending in Hiram: the
-     car goes to Marietta whatever A says, so the pair ends elsewhere. */
-  var hiram = 'Jewel Cole Rd, Hiram', marietta = 'Chastain Meadows Pkwy NW, Marietta';
-  var to = { pay: 9, minutes: 20, cost: 1.8, dropoff: 'Cochran Ridge Rd & Jewel Cole Rd, Hiram' };
+  /* Where they end. Telby for A, Harrowen for B, a card ending in Telby: the
+     car goes to Harrowen whatever A says, so the pair ends elsewhere. */
+  var telby = 'Pearl Dale Rd, Telby', harrowen = 'Morvaine Meadows Pkwy NW, Harrowen';
+  var to = { pay: 9, minutes: 20, cost: 1.8, dropoff: 'Pochard Ridge Rd & Pearl Dale Rd, Telby' };
   function endsOf(x, y) {
     return A.stackMany([Object.assign({}, a, { dropoff: x }), Object.assign({}, b, { dropoff: y })],
                        to, SET, now).ends;
   }
   eq('ends elsewhere if either held end is elsewhere',
-     JSON.stringify([endsOf(hiram, marietta), endsOf(marietta, hiram)]),
+     JSON.stringify([endsOf(telby, harrowen), endsOf(harrowen, telby)]),
      JSON.stringify(['elsewhere', 'elsewhere']));
   eq('...a same-* answer only when both held ends give it, and null otherwise',
-     JSON.stringify([endsOf(hiram, 'Jewel Cole Rd, Hiram'), endsOf(hiram, null),
-                     endsOf(null, hiram)]),
+     JSON.stringify([endsOf(telby, 'Pearl Dale Rd, Telby'), endsOf(telby, null),
+                     endsOf(null, telby)]),
      JSON.stringify(['same-town', null, null]));
 })();
 
@@ -2025,9 +2025,9 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
   //
   // The correction that makes this feature honest rather than flattering. A
   // town's rate is tangled with WHEN the driver is in it: on the 13-20 Sep
-  // week 12-3am paid $20.94 and 3-6pm paid $13.99, and 65 of Atlanta's 113
-  // offers are in the first while 43 of Marietta's 101 are in the second. Raw,
-  // Atlanta leads Marietta by $5.33; with the hours held still it is $4.26,
+  // week 12-3am paid $20.94 and 3-6pm paid $13.99, and 65 of Solvane's 113
+  // offers are in the first while 43 of Harrowen's 101 are in the second. Raw,
+  // Solvane leads Harrowen by $5.33; with the hours held still it is $4.26,
   // the best-to-worst gap drops from $6.33 to $4.98, and four towns change
   // places. How much of a lead is the hour changes from week to week (on an
   // earlier export it was more than half), which is why it is held still and
@@ -2060,7 +2060,7 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
    * out at 1am, so the 1am baseline was built from `Late`'s own offers and it
    * came out level with itself by construction — the comment further down this
    * file said as much in as many words. The answer happened to be the right one
-   * here; the same tautology shrank Atlanta's real lead on the owner's week
+   * here; the same tautology shrank Solvane's real lead on the owner's week
    * from $3.28 to $1.47, because a town that owns most of an hour has most of
    * its advantage subtracted from itself.
    *
@@ -2108,8 +2108,8 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
   // distinction is worth making on screen. `Flash` earns more per hour than
   // `Steady` — it is almost always out during the good hour — and `Steady` is
   // the better town to be in, because at any given hour it pays more. On the
-  // owner's own week this is Atlanta against Mableton: Atlanta leads by
-  // median and Mableton by what is left.
+  // owner's own week this is Solvane against Gablemor: Solvane leads by
+  // median and Gablemor by what is left.
   //
   // A third town carries the fixture, and it has to. What an hour pays is
   // taken from the offers in it, so with only the two towns being compared the
@@ -2185,7 +2185,7 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
   // itself and it reports far less than `Small` does for the identical
   // behaviour — the figure a driver reads becomes a fact about how often they
   // happened to be somewhere rather than about what it paid. On the owner's own
-  // week this is why Atlanta, which owns 65 of the 81 kept offers in the
+  // week this is why Solvane, which owns 65 of the 81 kept offers in the
   // best-paying block, reported $1.47 where the comparison the page promises is
   // $3.28.
   var LIFT = 4;

@@ -1384,13 +1384,13 @@ _FOUNDPAY_CARD = {'ready': True, 'locked': True, 'whole': True, 'state': 'go',
 CHIPS_BEAT = {'alive': True, 'at': 1, 'tooBright': True,
               'notSaving': 'Offers are NOT being saved: [Errno 30] Read-only file system'}
 CHIPS_OFFER = {'offer': {'id': 'chips-1', 'pay': 8.0, 'minutes': 22.0, 'perHour': 21.8,
-                         'state': 'warn', 'dropoff': 'Canton Rd, Marietta',
+                         'state': 'warn', 'dropoff': 'Belvan Rd, Harrowen',
                          'dropoffScanned': True, 'dropoffFrom': 'press'}}
 CHIPS_CARD = dict(_FOUNDPAY_CARD, state='warn', perHour=21.8, grossPerHour=21.8,
                   pay=8.0, minutes=22.0, cardMinutes=22.0, miles=6.9,
                   fromDeadline=False, deliverBy=None, whole=False,
                   milesUncertain=True, uncosted=True, costPerMile=0.3,
-                  places=['Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'])
+                  places=['Vosk Pkwy NW, Ivyhame', 'Belvan Rd, Harrowen'])
 # The heat guard's chip on the status row (live.html heatNote), as the beat
 # brings it: `off`, the guard off at 76°C, which is the row with no note and
 # what the others' layout is held to; `alone`, on at 76°C with nothing else
@@ -1502,10 +1502,10 @@ def _pstop(kind, orders, name, by, line):
 
 
 PLANNER_STOPS = [
-    _pstop('pickup', 1, 'Burger Barn', 712, '310 Mill St, Roswell'),
+    _pstop('pickup', 1, 'Burger Barn', 712, '310 Mill St, Ruswold'),
     _pstop('pickup', 2, 'Taco Hut Express', 725, None),
-    _pstop('pickup', 1, 'Pho Real Kitchen', 751, '77 Birch Ln NW, Roswell, GA 30075'),
-    _pstop('dropoff', 1, 'Pat Q.', 978, '4821 Kestrel Dr S, Powder Springs'),
+    _pstop('pickup', 1, 'Pho Real Kitchen', 751, '77 Birch Ln NW, Ruswold, GA 90675'),
+    _pstop('dropoff', 1, 'Pat Q.', 978, '4821 Kestrel Dr S, Gorrel Springs'),
 ]
 PLANNER_UNFILED = 'list'
 # ...and the stops each of the scanner's reasons comes with, so every line the
@@ -1513,10 +1513,10 @@ PLANNER_UNFILED = 'list'
 PLANNER_NOTES = {
     'list': PLANNER_STOPS,
     'dropoffs': PLANNER_STOPS[:2] + [
-        _pstop('dropoff', 1, 'Lee M.', 751, '77 Birch Ln NW, Roswell, GA 30075'),
+        _pstop('dropoff', 1, 'Lee M.', 751, '77 Birch Ln NW, Ruswold, GA 90675'),
         PLANNER_STOPS[3]],
     'address': PLANNER_STOPS[:3] + [
-        _pstop('dropoff', 1, 'Pat Q.', 978, 'Powder Springs')],
+        _pstop('dropoff', 1, 'Pat Q.', 978, 'Gorrel Springs')],
 }
 PLANNER_PANELS = NOVERDICT_PANELS
 # The notice the stops have to share the card with between offers: the two a
@@ -1550,10 +1550,10 @@ PLANNER_BLIND = ['dark', 'stalled']
 # say so, "same store as ②".
 HELD = {
     'hold': {'pay': 112.45, 'minutes': 55, 'holdId': 'h-layout@1',
-             'dropoff': '4821 Kestrel Dr S, Powder Springs, GA 30127', 'card': None,
+             'dropoff': '4821 Kestrel Dr S, Gorrel Springs, GA 90727', 'card': None,
              'endPinned': False, 'arrived': False, 'endWhy': 'too many answers'},
-    'stops': [_pstop('pickup', 1, "Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100)",
-                     712, '1985 Cobb Pkwy NW, Kennesaw')] + PLANNER_STOPS[1:],
+    'stops': [_pstop('pickup', 1, "Dave's Hot Chicken (1985 Vosk Parkway NW, STE 100)",
+                     712, '1985 Vosk Pkwy NW, Tellmoor')] + PLANNER_STOPS[1:],
     'offer': {'ready': True, 'locked': True, 'whole': True, 'state': 'no',
               'doubt': None, 'perHour': 14.71, 'grossPerHour': 20.97,
               'billedMinutes': 22.0, 'perMile': 0.7, 'pay': 18.04, 'minutes': 22.0,
@@ -1561,8 +1561,8 @@ HELD = {
               'milesUncertain': False, 'milesCorrected': False, 'uncosted': False,
               'fromDeadline': False, 'deliverBy': None, 'track': None, 'legs': 2,
               'mergedFrom': 5, 'items': None, 'text': '',
-              'places': ['Cochran Ridge Rd & Jewel Cole Rd, Hiram',
-                         'Old Alabama Rd & Holcomb Bridge Rd, Roswell'],
+              'places': ['Pochard Ridge Rd & Pearl Dale Rd, Telby',
+                         'Old Merenna Rd & Tolcomb Bridge Rd, Ruswold'],
               'stack': {'pay': 130.49, 'minMinutes': 55, 'maxMinutes': 105,
                         'worst': -16.4, 'best': 133.4, 'state': 'warn', 'sure': True,
                         'uncosted': True, 'ends': 'elsewhere',
@@ -1593,18 +1593,18 @@ HELD = {
 # larger moving than parked; every part both forms draw must come out no
 # smaller.
 _DA = {'n': 1, 'pay': 112.45, 'minutes': 55, 'holdId': 'l-a@1',
-       'dropoff': '4821 Kestrel Dr S, Powder Springs, GA 30127', 'card': None,
+       'dropoff': '4821 Kestrel Dr S, Gorrel Springs, GA 90727', 'card': None,
        'endPinned': False, 'arrived': False, 'endWhy': 'too many answers', 'app': 'uber'}
 _DB = dict(_DA, n=2, pay=128.08, minutes=60, holdId='l-b@2',
-           dropoff='1985 Cobb Pkwy NW, Kennesaw, GA 30152')
+           dropoff='1985 Vosk Pkwy NW, Tellmoor, GA 90752')
 _EMPTY = {'ready': False, 'state': 'empty', 'track': None, 'places': [], 'text': ''}
-# The owner's 17 Oct snap, an Uber card from a KFC to a corner in Marietta,
+# The owner's 17 Oct snap, an Uber card from a KFC to a corner in Harrowen,
 # its pickup at the length a store with its street in brackets runs to.
 # Invented but for the shape.
 # Long enough to be cut on every panel, so the ellipsis is measured too.
-LONG_ENDS = ['KFC (2575 Delk Rd SE, Suite 100, Powers Ferry Village Shopping Center, '
-             'Marietta, GA 30067)',
-             'Powers Ferry Rd & Terrell Mill Rd, Marietta']
+LONG_ENDS = ['KFC (2575 Velk Rd SE, Suite 100, Barley Ferry Village Shopping Center, '
+             'Harrowen, GA 90667)',
+             'Barley Ferry Rd & Hartell Mill Rd, Harrowen']
 _NOTICES = {'tooBright': True, 'notSaving': CHIPS_BEAT['notSaving']}
 DRIVE_FORMS = {
     'offer': {'beat': _NOTICES, 'msgs': [CHIPS_CARD], 'offer': True, 'larger': []},
@@ -1754,7 +1754,7 @@ ok_('rpi/gps.py\'s gate refuses with words this file can measure (%r)' % GATE_WO
     len(GATE_WORDS) >= 3 and 'stale' in GATE_WORDS)
 _here_js = '''
 var MV = require(process.argv[1]), words = JSON.parse(process.argv[2]), out = [];
-var AT = { lat: 33.9526, lon: -84.5499 };
+var AT = { lat: 33.9526, lon: -44.5499 };
 function at(o) { return Object.assign({}, AT, o); }
 words.forEach(function (w) {
   if (w === 'stale') return;        // stale is a grey dot, measured as a label
@@ -2932,7 +2932,7 @@ const SNAP_MEASURE = (fixture) => {
           const d = document.documentElement;
           const sheet = document.getElementById('sheet');
           document.getElementById('sheetWhere').textContent =
-            'Chastain Rd NW, Kennesaw  →  Peachtree St NE, Atlanta';
+            'Morvaine Rd NW, Tellmoor  →  Plumleigh St NE, Solvane';
           document.getElementById('sheetNote').textContent =
             '24.6 mi straight line, card said 3 mi in total — which cannot be '
             + 'right, so one of these pins is wrong.';
@@ -4223,10 +4223,10 @@ const SNAP_MEASURE = (fixture) => {
   // The widest each line is asked to hold: three-figure pays, the longest
   // street a real card printed, and the longest of the GPS drop's words.
   const CARRY_A = { n: 1, pay: 112.45, minutes: 55, holdId: 'l-a@1',
-                    dropoff: '4821 Kestrel Dr S, Powder Springs, GA 30127', card: null,
+                    dropoff: '4821 Kestrel Dr S, Gorrel Springs, GA 90727', card: null,
                     endPinned: false, arrived: false, endWhy: 'too many answers', app: 'uber' };
   const CARRY_B = { n: 2, pay: 128.08, minutes: 60, holdId: 'l-b@2',
-                    dropoff: '1985 Cobb Pkwy NW, Kennesaw, GA 30152', card: null,
+                    dropoff: '1985 Vosk Pkwy NW, Tellmoor, GA 90752', card: null,
                     endPinned: false, arrived: false, endWhy: 'too many answers', app: 'uber' };
   for (const panel of PLANNER_PANELS) {
     for (const view of ['screen', 'scene']) {
@@ -4586,7 +4586,7 @@ const SNAP_MEASURE = (fixture) => {
     return out;
   };
   // Moving, gps.py's hold has 9.6 s left on a beat 0.4 s after a usable fix.
-  const DRIVE_FIX = { lat: 33.9526, lon: -84.5499, gpsAge: 0.4, gpsErr: 12.0, gpsMode: 3,
+  const DRIVE_FIX = { lat: 33.9526, lon: -44.5499, gpsAge: 0.4, gpsErr: 12.0, gpsMode: 3,
                       gpsOk: true, gpsWhy: null, freshFor: 19.6, speed: 0.0, driving: false,
                       drivingFor: 0.0 };
   for (const panel of PLANNER_PANELS) {
@@ -4709,9 +4709,9 @@ for i in range(20):
 # the newest day of the real week, whose distance was cut to "49." at 390px
 # when the figures ran under an ellipsis.
 for k, (state, place, pay, mins, miles) in enumerate([
-        ('go', 'Chick-fil-A, 2500 Cobb Pkwy SE, Kennesaw', 41.02, 63, 49.3),
+        ('go', 'Chick-fil-A, 2500 Vosk Pkwy SE, Tellmoor', 41.02, 63, 49.3),
         ('warn', 'Zaxbys', 15.5, 22, 7.3),
-        ('go', 'The Varsity, 61 North Avenue NW at Spring Street, Atlanta', 16.5, 22, 7.3)]):
+        ('go', 'The Varsity, 61 North Avenue NW at Spring Street, Solvane', 16.5, 22, 7.3)]):
     at = now - 60000 - k * 1000
     rows.append({
         'id': 'rv%d' % k, 'at': at, 'firstAt': at, 'pay': pay, 'minutes': mins,
@@ -4730,11 +4730,11 @@ for i, (state, ends, took) in enumerate([
     rows.append({
         'v': 1, 'kind': 'pair', 'at': now - i * 1800000, 'id': 'r%d' % (i * 3),
         'held': {'pay': 12.0 + i, 'minutes': 30, 'scanned': i % 2 == 0,
-                 'dropoff': '1234 Daffodil Ln, Powder Springs, GA 30127',
+                 'dropoff': '1234 Daffodil Ln, Gorrel Springs, GA 90727',
                  'heldMs': 1080000},
         'offer': {'pay': 8.04 + i, 'minutes': 23,
-                  'pickup': 'Chick-fil-A, 2500 Cobb Pkwy SE',
-                  'dropoff': 'Chastain Rd NW, Kennesaw'},
+                  'pickup': 'Chick-fil-A, 2500 Vosk Pkwy SE',
+                  'dropoff': 'Morvaine Rd NW, Tellmoor'},
         'stack': None if state is None else {
             'pay': 17.2, 'worst': 19.4, 'best': 34.1, 'leftMinutes': 12,
             'minMinutes': 23, 'maxMinutes': 35, 'state': state,
@@ -5319,7 +5319,7 @@ try:
             eq('the two-order lines are whole inside the card at %s' % where,
                [((x or {}).get('text'), (x or {}).get('cut')) for x in _ln],
                [('① $112.45 → 4821 Kestrel Dr S · too many answers', ''),
-                ('② $128.08 → 1985 Cobb Pkwy NW · too many answers', ''),
+                ('② $128.08 → 1985 Vosk Pkwy NW · too many answers', ''),
                 ('2 dropoffs read · whose?', '')])
             eq('...with Drop ▾ on a bar of six at most, and nothing scrolling at %s' % where,
                (_bf['bar']['drop'], _bf['bar']['count'] <= 6, _bf.get('over')),
@@ -5549,7 +5549,7 @@ try:
             _d = _o.get('det') or {}
             eq('...and in one line while an offer is up at %s' % where,
                (_d.get('text'), _d.get('rows'), _d.get('cut'), (_o.get('next') or None)),
-               ('· In car $112.45 · ▸ Dave\'s Hot Chicken (1985 Cobb Parkway NW, STE 100) '
+               ('· In car $112.45 · ▸ Dave\'s Hot Chicken (1985 Vosk Parkway NW, STE 100) '
                 '· too many answers', 1, '', None))
             no_('...and nothing scrolls with the offer up at %s' % where, _o.get('over'))
             # The Took button once its card has gone, with the widest age it

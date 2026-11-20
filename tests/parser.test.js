@@ -37,9 +37,9 @@ function check(name, text, want) {
    the rest. */
 var _twoCards = P.parse(
   '$11.06 Includes expected tip 15 min (5.4 mi) total ' +
-  'Little Caesars (3372 Canton Rd) Barrington Overlook, Marietta ' +
-  '25 min (8.1 mi) total American Deli (Marietta, GA) ' +
-  'Big Shanty Rd, Marietta');
+  'Little Caesars (3372 Belvan Rd) Carrowdene Overlook, Harrowen ' +
+  '25 min (8.1 mi) total American Deli (Harrowen, GA) ' +
+  'Big Gristy Rd, Harrowen');
 eq('a total leg is never marked the approach / leg 0',
    _twoCards.legDetail[0].isApproach, false);
 eq('a total leg is never marked the approach / leg 1',
@@ -50,7 +50,7 @@ eq('...and no split is published off it', _twoCards.toPickupMinutes, null);
 
 check('shop & deliver (verbatim)',
   'Shop & Deliver Exclusive $7.09 Guaranteed (incl. tip) 6 items (6 units) ' +
-  '34 min (3.6 mi) total Dollar General (925 Shiloh Rd Nw) Hidden Forest Ct, Marietta Accept',
+  '34 min (3.6 mi) total Dollar General (925 Merlah Rd Nw) Hidden Forest Ct, Harrowen Accept',
   { pay: 7.09, minutes: 34, miles: 3.6, items: 6 });
 
 /* ---- OCR damage on that same card ---- */
@@ -90,7 +90,7 @@ check('total wins over legs',
 /* ---- things that must never be mistaken for pay ---- */
 
 check('street numbers are not pay',
-  '$7.09 6 items 34 min (3.6 mi) total Dollar General (925 Shiloh Rd Nw) Hidden Forest Ct',
+  '$7.09 6 items 34 min (3.6 mi) total Dollar General (925 Merlah Rd Nw) Hidden Forest Ct',
   { pay: 7.09, minutes: 34, miles: 3.6, items: 6 });
 
 check('largest dollar figure wins over a promo line',
@@ -260,8 +260,8 @@ check('largest dollar figure wins over a promo line',
 (function () {
   var stray = P.parse(
     '| Exclusive x le a ; $10.04 *% 497 @ Verified 16 min (6.6 mi) ; ' +
-    '( Roswell Rd, Atlanta Avg. wait time at pickup: 1 min } 18 mins ' +
-    '(10.2 mi) ¢ Dunwoody Xing, Atlanta 4, 7 mi from fast charger');
+    '( Ruswold Rd, Solvane Avg. wait time at pickup: 1 min } 18 mins ' +
+    '(10.2 mi) ¢ Penwoody Xing, Solvane 4, 7 mi from fast charger');
   var claims = stray.legDetail.map(function (l) { return !!l.lostMiles; });
   eq('a stray bracket after a leg with its distance claims nothing',
      claims.join(','), 'false,false,false');
@@ -273,8 +273,8 @@ check('largest dollar figure wins over a promo line',
      after the wait line has lost its `mins`, leaving " 9 (2.6 mi)", so the
      bracket falls within three characters of the WAIT LINE's minutes and the
      wait line becomes a leg of the journey. */
-  var waitHurt = P.parse('Exclusive x $9.05 12 min (4.4 mi) Gresham Rd ' +
-    'Avg. wait time at pickup: 1 min 9 (2.6 mi) Sedgefield Rd');
+  var waitHurt = P.parse('Exclusive x $9.05 12 min (4.4 mi) Pelsham Rd ' +
+    'Avg. wait time at pickup: 1 min 9 (2.6 mi) Wedgemarsh Rd');
   eq('a wait line is not a leg even when the next leg lost its unit',
      waitHurt.legDetail.map(function (l) { return !!l.lostMiles; }).join(','),
      'false,false');
@@ -283,8 +283,8 @@ check('largest dollar figure wins over a promo line',
 
   /* ...and the shape it must still catch: a leg whose distance did not read,
      on a card that labels its legs with an address rather than "trip". */
-  var hurt = P.parse('$21.08 5 min (1.8 mi) Grace St & Main St, Kennesaw ' +
-                     '12 min (8.1 m1) Oak Ln, Marietta');
+  var hurt = P.parse('$21.08 5 min (1.8 mi) Grace St & Main St, Tellmoor ' +
+                     '12 min (8.1 m1) Oak Ln, Harrowen');
   eq('a leg that lost its distance says so',
      hurt.legDetail.map(function (l) { return !!l.lostMiles; }).join(','),
      'false,true');
@@ -350,7 +350,7 @@ check('largest dollar figure wins over a promo line',
   eq("line_starts cuts the flattened text into the reader's own lines ("
      + lined.length + ' texts)', wrong.length, 0);
   eq('...a blank line and a CRLF each one break, and no start before the first line',
-     P.lineStarts('Jimmy\n\n  Atlanta \r\nPverel').join(','), '6,14');
+     P.lineStarts('Jimmy\n\n  Solvane \r\nPverel').join(','), '6,14');
 })();
 
 /* ---- which leg a deadline line's places came off ---- */
@@ -369,8 +369,8 @@ check('largest dollar figure wins over a promo line',
 })();
 
 /* ---- a Trip Planner address is one the geography can read ---- */
-/* The planner prints no ZIP, so its line is "4821 Kestrel Dr, Marietta" and
-   not "..., Marietta, GA": Advice.area takes the town off the END of a place
+/* The planner prints no ZIP, so its line is "4821 Kestrel Dr, Harrowen" and
+   not "..., Harrowen, GA": Advice.area takes the town off the END of a place
    and strips only a ", ST ZIP" tail, so a line ending at the state gave it no
    town at all - measured, area() is null on it - and every pair judged against
    the order in the car would have gone back to ENDS ? on the very address the
@@ -386,11 +386,11 @@ check('largest dollar figure wins over a promo line',
   var printed = named('...and as the phone printed it')[0];
   var area = A.area(printed.line);
   eq('a Trip Planner address with no ZIP gives Advice.area its town',
-     area && area.town, 'marietta');
+     area && area.town, 'harrowen');
   var withZip = named('three stops in the order the screen lists them, one of them closed')[2];
   area = A.area(withZip.line);
   eq('...and one with a ZIP gives it the ZIP, as findAddress\'s line does',
-     area && area.zip, '30075');
+     area && area.zip, '90675');
 })();
 
 /* ---- the two ends of a planner's list, one at a time ---- */

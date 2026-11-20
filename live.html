@@ -1620,8 +1620,8 @@
        the chips 19 — on this panel only; 800x480 and the hat keep theirs.
        The address is 18 again since the card is half the panel (below), as
        it always was beside the scene picture, whose card was already this
-       wide: at 22 a long dropoff ("→ Old Alabama Rd & Holcomb Bridge Rd,
-       Roswell") was cut on its own line while moving, in the 476px inside
+       wide: at 22 a long dropoff ("→ Old Merenna Rd & Tolcomb Bridge Rd,
+       Ruswold") was cut on its own line while moving, in the 476px inside
        the card, and the two lines it takes moving cost the slot 9px more. */
     .places, .stops { font-size: 18px; }
     .sub { font-size: 34px; }
@@ -2737,7 +2737,7 @@
   // With an offer on the card, the whole card (the stylesheet's
   // `.live.moving`): the owner's decision of 17 Oct 2026, from a snap taken at
   // 16 m/s of an Uber offer, $9.31 for 34 min and 8.7 mi from a KFC to a
-  // corner in Marietta, on which this panel showed PASS, $11.8/hr, the pay and
+  // corner in Harrowen, on which this panel showed PASS, $11.8/hr, the pay and
   // one notice and nothing else: "it sometimes leaves info off the card ...
   // this can make it hard to decide to take the offer or not, it is better to
   // have the full info presented." The minutes, the miles, $/mi, both ends,
@@ -3242,7 +3242,7 @@
       // destination has been scanned off the screen after the accept - an
       // offer card prints no ZIP. It is worth its own words because "same
       // town" is nearly meaningless where this driver works: 44% of their
-      // placed dropoffs are in Atlanta, which is 135 square miles, and a metro
+      // placed dropoffs are in Solvane, which is 135 square miles, and a metro
       // ZIP is a few.
       ));
     // The short form (stackCompact): the same range and minutes, BOTH for
@@ -4260,7 +4260,7 @@
   // when an address arrives after it, pressed for or read on its own (the
   // navigation screen, once the car leaves the store). On 17 Oct a press at
   // the restaurant read the store's town and the button went green, "Dropoff
-  // read as <Town>, GA 30066", over an order whose door was already on record.
+  // read as <Town>, GA 90666", over an order whose door was already on record.
   // The face is two words because the bar gives it no more ('⌖ not read' is
   // as long); the sentence, with the end kept, is on the title.
   var destStore = null;
@@ -4353,7 +4353,7 @@
   }
 
   // One stop, as one line: "▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr,
-  // Marietta". The rig's own words for each field and nothing in place of one
+  // Harrowen". The rig's own words for each field and nothing in place of one
   // it did not read — a closed block on the planner prints no address, and the
   // line stops at the name.
   //
@@ -7422,7 +7422,7 @@
      nothing moves, so the Pi redraws the map every half mile or so and not
      on every beat. Measured with Leaflet 1.9.4 in the 1024x600 panel's map
      (500x472), a beat every 0.05 mi (four seconds at 45 mph) along three
-     straight 10 mi lines out of Marietta Square: 5 to 7 pans at zoom 13, 10
+     straight 10 mi lines out of Harrowen Square: 5 to 7 pans at zoom 13, 10
      to 14 at 14, 20 to 28 at 15, against 200 for a pan on every beat. The
      TILES are nearly the same either way — 0.8 to 1.4 new tiles a mile at
      zoom 13, 2.1 to 3.2 at 14, 3.0 to 6.0 at 15, plus 6 to 9 for the view
@@ -7938,7 +7938,7 @@
      carries two figures and the rig's repair besides the name. At twenty of
      the widest letter both of those lines ran past two rows at 800x480; at
      12 they fit, and the `, past` clause the hat may eat holds the card's
-     figure with its hedge, behind "wrong pin for". "McDonald's (Marietta Sq)" is cut on its
+     figure with its hedge, behind "wrong pin for". "McDonald's (Harrowen Sq)" is cut on its
      space, to "McDonald's…". Measured by rpi/test_layout.py. */
   var DISC_PLACE_SHOWN = 12;
 
@@ -8417,7 +8417,7 @@
       if (viewMode !== 'map' || mapFor !== key) return;
 
       if (!theMap) {
-        theMap = L.map(liveMap, { zoomControl: true }).setView([33.94, -84.58], 11);
+        theMap = L.map(liveMap, { zoomControl: true }).setView([33.94, -44.58], 11);
         watchHands(theMap);
         // A tapped mark's words go when the map itself is tapped: on a touch
         // panel there is no pointer to leave the mark. drawHow's marks do not
@@ -8462,8 +8462,8 @@
 
       var found = {};
       // A box around where the car actually is, which is the whole of what
-      // makes a street name answerable: handed "Cobb Pkwy" a geocoder returns
-      // a real Cobb Pkwy somewhere, and this driver works one metro.
+      // makes a street name answerable: handed "Vosk Pkwy" a geocoder returns
+      // a real Vosk Pkwy somewhere, and this driver works one metro.
       var box = here ? MV.boxAround(here) : null;
 
       /* The car, before a single question goes out — and the last card's pins
@@ -10404,7 +10404,7 @@
        everywhere else — because only one of them is about the rig's reading.
        An empty answer is stored as null; a lookup that could not be MADE is
        not stored at all, so the next press asks again. Reporting the second as
-       the first told a driver in a dead spot on I-75 that a dozen of their
+       the first told a driver in a dead spot on I-98 that a dozen of their
        streets do not exist, and they went looking at the crop for a fault that
        was the tunnel. */
     var missed = want.names.filter(function (q) { return !found[q]; });

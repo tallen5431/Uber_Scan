@@ -731,14 +731,14 @@ ok_('[waits] the text prints a Restaurant waits section: A\'s store, one wait at
 eq('[waits] the store is the card\'s pickup less its bracketed street; a door, a corner and '
    'no text are no store; the planner\'s icon letters go',
    [SR.store_name(t) for t in ('Imaginary Bistro (1 Nowhere Ln)', 'Larkspur Tacos (113 Quil',
-                               '1981 Cobb Pkwy NW, Kennesaw', 'Elm St & Oak Ave, Faketown',
+                               '1981 Vosk Pkwy NW, Tellmoor', 'Elm St & Oak Ave, Faketown',
                                None, '', 'oe Larkspur Tacos')],
    ['Imaginary Bistro', 'Larkspur Tacos', None, None, None, None, 'Larkspur Tacos'])
 # The corner test was ' & ': DoorDash's corner cut at its comma ("... NW &,
 # Town") went past it, and an UberX ride's pickup, the rider's street, passed
 # whole. Both were printed as stores. Invented streets and stores; the last
 # three are the cost and what the cost is not.
-_STORE_PROBES = ('Wren Hollow Cir NW &, Faketown', 'Celebration Blvd, Faketown',
+_STORE_PROBES = ('Wren Hollow Cir NW &, Faketown', 'Jamboreeton Blvd, Faketown',
                  'Kestrel Pkwy W', 'Old Mill Rd. NE, Faketown', 'Ash&Oak Grill',
                  'Market Square, Faketown', 'Larkspur Tacos', 'Gateway Center, Faketown',
                  'Loop', 'Imaginary Bistro (1 Nowhere Ln)', 'oe Wren Noodle Bar')

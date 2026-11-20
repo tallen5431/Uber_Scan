@@ -471,8 +471,8 @@
    *      (heldPickup), 'a pickup'. outranks() lets a press past anything, and on 17 Oct that
    *      was the fault: an Uber order held with the Trip Planner's door as its
    *      end, ⌖ pressed at the restaurant over "Arriving soon / <Store> / <n>
-   *      <Street> & / Suite 128, <Town>, GA / 30066 / Note from business", and
-   *      the press read the town line alone and filed "<Town>, GA 30066" over
+   *      <Street> & / Suite 128, <Town>, GA / 90666 / Note from business", and
+   *      the press read the town line alone and filed "<Town>, GA 90666" over
    *      the planner's door — Map view ran the order to the town's centre, and
    *      every offer for twenty minutes was judged against it. navCandidate
    *      already refuses an unprompted read off that screen and off a held
@@ -655,7 +655,7 @@
   }
 
   /* The owner, 20 Oct 20:44: the planner's dropoff "2100 <Ellison> Lakes Dr /
-   * Kennesaw, GA" read whole-screen as "2100 <Ellison> Lake r" and filed
+   * Tellmoor, GA" read whole-screen as "2100 <Ellison> Lake r" and filed
    * (from 'planner'); the NucBox found nothing. Every read after was a
    * CARD-BOX read of the planner (not whole), which the scanner sends as a
    * dropoff line under a Dropoff label — rank `label`, no stop key — and said
@@ -1012,7 +1012,7 @@
    *
    * ...AND BOTH THE STREET AND THE TOWN READ. With no ZIP on this screen the
    * street is the only precision there is: a town alone would put a pin on
-   * the middle of Marietta: 'address'.
+   * the middle of Harrowen: 'address'.
    *
    * `stops` are the HEADED stops — a stop of no kind (the top of a page that
    * starts mid-stop) is not counted, as planner_stops never handed it over. */
@@ -1097,7 +1097,7 @@
    * order's OWN card names its street; null otherwise. The owner's read of 20
    * Oct, 21:08: "Dropoff · 1 order" lost to OCR on a whole-screen read of the
    * planner, the customer's name, time and door under the pickup's "View
-   * details", and the hold kept the card's end, "<Name> Creek Bivd, Marietta",
+   * details", and the hold kept the card's end, "<Name> Creek Bivd, Harrowen",
    * with no house number.
    *
    * The parser keeps that stop only in one shape (one Pickup header of "1
@@ -1134,7 +1134,7 @@
 
   /* The trip's LAST stop, its header cropped off, as a dropoff candidate, or
    * null. The owner's card-box read of 21 Oct, 15:00, one Uber order held:
-   * "Address / 3259 <Name> Oaks Dr / Marietta, GA / View details / Waybill /
+   * "Address / 3259 <Name> Oaks Dr / Harrowen, GA / View details / Waybill /
    * … / Stop New Requests", the "Dropoff" header above the crop, and nothing
    * filed — a card-box read is no page, and a headless stop has no kind. On
    * Uber's Trip Planner the trip ends on a dropoff, so the block the list's
@@ -1274,7 +1274,7 @@
   // A street's name with its house number, its type and its directions gone:
   // "40 Bramble Rd NW" and "Bramble Road" are both "bramble". "Bivd" is the
   // reader's i/l slip of "Blvd" (offer_parser's STREET_WORD takes it too): the
-  // owner's held card of 20 Oct printed "<Name> Creek Bivd, Marietta". Null for text
+  // owner's held card of 20 Oct printed "<Name> Creek Bivd, Harrowen". Null for text
   // with no street word or house number in it, which is a town, not a street.
   function streetCore(text) {
     var ws = String(text || '').toLowerCase().replace(/['’]/g, '')
@@ -1290,19 +1290,19 @@
   // The streets the card's end names: its corner's two ("A Rd & B St, Town")
   // or its door's one, before the town.
   /* ...and a CORNER as the reader glued it (the owner's snap of 30 Oct,
-   * 20:21, an add-on's card parsed as "Kennesaw J <E> Way & <S> Plains Rd
-   * Marietta"): the town of the line above and a stray letter in front of
+   * 20:21, an add-on's card parsed as "Tellmoor J <E> Way & <S> Plains Rd
+   * Harrowen"): the town of the line above and a stray letter in front of
    * the first street, and the town run on after the second with no comma.
-   * The planner listed "1433 <E> Way, Marietta" — on the corner's first
+   * The planner listed "1433 <E> Way, Harrowen" — on the corner's first
    * street — and nothing was filed ("2 dropoffs read · whose?"), as the
-   * card's streets came out "kennesaw j <e>" and "<s> plains marietta". So
+   * card's streets came out "tellmoor j <e>" and "<s> plains harrowen". So
    * in a corner's part (cornerPart): the words after its last street type
    * go where the text gave no comma (the town); and in front, stray
    * one- and two-letter words, and a word that is the card's own town or
    * stands before a lone letter, go — only while a name and a type are left.
    * That is the planner door's street compared as a word-boundary suffix
    * of the corner's part, past a town and stray letters only: "<E> Way"
-   * matches "Kennesaw J <E> Way"; "Brook Way" never matches "Wexmoor Brook
+   * matches "Tellmoor J <E> Way"; "Brook Way" never matches "Wexmoor Brook
    * Way" (no stray letter before it). The part as read stays a match too. A
    * door's line (no "&") is as it was. */
   function cardStreets(text) {
@@ -1376,7 +1376,7 @@
   }
 
   /* The town the held card printed for its end, and the town a door read
-   * gives, as letters ("Kennesaw, GA 30144" is "kennesaw"); null where either
+   * gives, as letters ("Tellmoor, GA 90744" is "tellmoor"); null where either
    * has none (a card's "Customer dropoff", a line with no comma). The owner,
    * 29 Oct: "make the parser and routing more flexible" — and with it, a door
    * filed onto an order is held to that order's own card where the card can
@@ -2951,7 +2951,7 @@
    * score: it moves no verdict, no state, no range and no colour, and nothing
    * here is ever a distance on the glass. The evidence: on 17 Oct a DoorDash
    * card "$12.05 · 2 stops (8.4 mi) · <Store> / 113 <Street> NE, <Town>,
-   * 30060 GA" came up while an Uber order from that store, "<Store> (113
+   * 90660 GA" came up while an Uber order from that store, "<Store> (113
    * <Street> NW)", was held — the street's quadrant even differs by OCR.
    *
    * WHAT DECIDES "THE SAME PLACE", in this order and no other:
@@ -2970,7 +2970,7 @@
    *      place: sameStore (one i/l slip, as everywhere in this file), the name
    *      distinctive (not a chain, `chainName`: a list of the national names
    *      this driver's metro is full of, a branch label like "Store 3317" or
-   *      "- 0020-Kennesaw", or a key under four letters), AND the two pickups
+   *      "- 0020-Tellmoor", or a key under four letters), AND the two pickups
    *      within SAME_STORE_NEAR_MI of each other by what the cards and pins
    *      prove (`apart`, server.js pickupsApart — an UPPER bound, or null when
    *      nothing bounds it). "Chick-fil-A" by name is a hundred restaurants.
@@ -2984,7 +2984,7 @@
   var SAME_STORE_NEAR_MI = 0.5;
 
   // The national names, as storeKey writes them. A key that STARTS with one
-  // is that chain too ("mcdonalds1155", "chickfilakennesaw"). Not exhaustive
+  // is that chain too ("mcdonalds1155", "chickfilatellmoor"). Not exhaustive
   // and it does not need to be: a chain missing here still has to clear the
   // half-mile bound, which two of its branches seldom both sit inside.
   var CHAINS = ['mcdonalds', 'chickfila', 'wendys', 'burgerking', 'tacobell', 'kfc',

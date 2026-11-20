@@ -454,7 +454,7 @@ hours and 9 runs. The driver's $25 is inside that plateau and the difference is
 
 **`toPickupMinutes` is null on all 1,166.** It is not that the split is absent
 from the cards — 110 of them state it plainly, e.g. "$26.04 / 8 min (3.2 mi) /
-Ector Chase NW…, Kennesaw / 39 mins (25.1 mi) / Hale St NE…, Atlanta", where the
+Ostor Chase NW…, Tellmoor / 39 mins (25.1 mi) / Hale St NE…, Solvane", where the
 first leg is the drive to the pickup and the second is the trip. `to_pickup()`
 requires a leg matching `APPROACH_TAIL = /\baway\b/`, and **the word "away"
 appears on 0 of the 1,166 texts** — against 29 of the 152 corpus fixtures, where
@@ -472,8 +472,8 @@ corpus, which is why it is written down here rather than done in passing.
 **The dropoff carries a fragment of the pickup on 8.3% of cards.** 48 of the 580
 dropoffs hold an unmatched `)`:
 
-    pickup  'Hooters (Old 41 Hwy NW & N l Roberts Rd)'
-    dropoff 'Roberts Rd) Georgia State Route 5 N &!-575 N, Cobb County'
+    pickup  'Hooters (Old 88 Hwy NW & N l Wilbert Rd)'
+    dropoff 'Wilbert Rd) Georgia State Route 5 N &!-818 N, Vosk County'
 
 A merchant name wrapping across lines is being cut in the wrong place, and the
 tail is prepended to the dropoff. That string then goes to a geocoder, so this
@@ -713,7 +713,7 @@ Most of those are right for a reason position does not supply. 410 of the 474
 (86.5%) are a bare merchant name — `Zaxbys`, `Carrabba's Italian Grill` — and
 for a delivery the merchant IS where the job starts. The population that is
 genuinely a coin flip is the 64 street-shaped ones, **5.5% of the week**:
-`Canton Rd, Marietta` is as plausible an end as a start, and the card did not
+`Belvan Rd, Harrowen` is as plausible an end as a start, and the card did not
 say which.
 
 *The evidence this entry used to give was wrong, and the correction is already
@@ -726,7 +726,7 @@ is a replay of the real accumulator over the real frames.
 
 Still not bundled with the two-ends fix, and for a sharper reason than before:
 what would actually move these 64 rows is a merchant test — something that
-knows `Zaxbys` is a shop and `Canton Rd` is not. `PLACE_IS_A_SHOP` is not that
+knows `Zaxbys` is a shop and `Belvan Rd` is not. `PLACE_IS_A_SHOP` is not that
 test. It wants a trailing bracket, and it finds one on 10 of the 474.
 
 *One shape of the 64 is settled since (the owner, 20 Oct 20:44; see Done,
@@ -753,7 +753,7 @@ that: wiping every good lookup to remove one bad one is still the only remedy
 this page has.
 
 **A heat map of $/hr by area, asked for, designed, and refuted on the data.**
-The driver's words: "visualize the $/hr in different areas around Atlanta ...
+The driver's words: "visualize the $/hr in different areas around Solvane ...
 helpful for predicting where my time would be best spent."
 
 The two things that blocked it are shipped: `map-view.js`'s `localityOf` boxes
@@ -779,8 +779,8 @@ zero cells.
 *There is no signal below town scale.* Kruskal-Wallis over distinct places,
 n>=5: H=25.46 against a shuffled p95 of ~31.8, p~0.22 — reproduced to the
 decimal by two reviewers independently. Over towns it is strong (H~65 against
-p95~17), and it collapses the moment Atlanta is removed (p~0.14-0.48). **The
-finest distinction this week supports is Atlanta against the northwest
+p95~17), and it collapses the moment Solvane is removed (p~0.14-0.48). **The
+finest distinction this week supports is Solvane against the northwest
 suburbs.** A grid finer than that draws a difference the data cannot measure.
 
 *And a third of the week cannot be placed at all.* A bare merchant name is
@@ -789,7 +789,7 @@ as it answers an intersection, and it is not the branch the card meant. 462 of
 1,107 named pickups are a bare brand with no street or number, 68 of those
 strings repeating across 293 offers. Nothing catches it: `judge()`'s
 `impossible` needs a second pin and 90% of them have none, `straysAmong`'s
-FAR_MILES is 75 and Atlanta-to-Kennesaw is 24. Excluding them leaves ~422
+FAR_MILES is 75 and Solvane-to-Tellmoor is 24. Excluding them leaves ~422
 offers (36%) — and **that third is not a random third**: pickups naming a
 street pay a median $15.97 against $14.08 for the rest, gap $1.89,
 permutation p=0.0001. The map's population earns ~$2/hr more than the week it
@@ -800,17 +800,17 @@ bad advice.* Measured here with the repo's own `Advice.area`, local hours:
 
 | local | n | median | | town | n | median |
 |---|---|---|---|---|---|---|
-| 14:00-17:00 | 254 | $13.54 | | atlanta | 101 | $20.07 |
-| 17:00-20:00 | 198 | $13.66 | | kennesaw | 71 | $15.51 |
-| 20:00-23:00 | 382 | $13.98 | | marietta | 95 | $14.42 |
-| **23:00-02:00** | 220 | **$17.74** | | acworth | 38 | $13.84 |
-| **02:00-05:00** | 112 | **$16.73** | | powder springs | 19 | $12.24 |
+| 14:00-17:00 | 254 | $13.54 | | solvane | 101 | $20.07 |
+| 17:00-20:00 | 198 | $13.66 | | tellmoor | 71 | $15.51 |
+| 20:00-23:00 | 382 | $13.98 | | harrowen | 95 | $14.42 |
+| **23:00-02:00** | 220 | **$17.74** | | ivyhame | 38 | $13.84 |
+| **02:00-05:00** | 112 | **$16.73** | | gorrel springs | 19 | $12.24 |
 
-Atlanta is **71% of town-labelled offers between 23:00 and 02:00 and 0-4%
+Solvane is **71% of town-labelled offers between 23:00 and 02:00 and 0-4%
 between 14:00 and 20:00**. Its raw $5.58/hr advantage falls to **$3.91 within
-the same hours of the day**. So about a third of "Atlanta pays more" is really
+the same hours of the day**. So about a third of "Solvane pays more" is really
 "late night pays more", and a map showing area without time tells the driver to
-drive to Atlanta at 4pm — which this week says is worth about $14. **Any
+drive to Solvane at 4pm — which this week says is worth about $14. **Any
 version of this feature carries the hour or it is answering the wrong
 question**, which made the time filter a precondition rather than a companion.
 That precondition is now met: the `when` box ships, eight three-hour blocks of
@@ -821,7 +821,7 @@ paragraph below is what it was built from and every word of it held up. What it
 did not anticipate is that the ranking needed a significance test of its own:
 the place-level table it warns about is noise at p=0.23, and the map now refuses
 any ranking that does not beat chance on whatever is loaded. The hour is held
-still per the paragraph further down — Atlanta's raw lead over the fourth town
+still per the paragraph further down — Solvane's raw lead over the fourth town
 is $4.20 and $1.09 once each offer is measured against its own block. See "The
 map could not say where the money was" under Done. The rest of this entry
 stands as the record of why the heat map itself is still refused.

@@ -3,16 +3,16 @@
   "sequences": [
     {
       "name": "a pickup header cut at the foot of one page joins its address at the top of the next, scrolling down",
-      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Kennesaw",
+      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Tellmoor",
                 "card": { "legs": 1, "multiOrder": true } },
       "events": [
         { "t": 2000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM" },
-        { "t": 9000, "page": "Expected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill" }
+        { "t": 9000, "page": "Expected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill" }
       ],
       "expect": {
         "fields": {
-          "dropoff": { "value": "415 Ostrander Way NW, Kennesaw", "from": "planner" },
-          "pickupAddr": { "value": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144", "from": "planner" },
+          "dropoff": { "value": "415 Ostrander Way NW, Tellmoor", "from": "planner" },
+          "pickupAddr": { "value": "2210 Quarry Bend Rd NW, Tellmoor, GA 90744", "from": "planner" },
           "customer": { "value": "Mara T.", "from": "planner" },
           "expectedBy": { "value": 1202, "from": "planner" }
         },
@@ -23,16 +23,16 @@
     },
     {
       "name": "...and the same two pages scrolling up",
-      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Kennesaw",
+      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Tellmoor",
                 "card": { "legs": 1, "multiOrder": true } },
       "events": [
-        { "t": 2000, "page": "Expected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill" },
+        { "t": 2000, "page": "Expected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill" },
         { "t": 9000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM" }
       ],
       "expect": {
         "fields": {
-          "dropoff": { "value": "415 Ostrander Way NW, Kennesaw", "from": "planner" },
-          "pickupAddr": { "value": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144", "from": "planner" },
+          "dropoff": { "value": "415 Ostrander Way NW, Tellmoor", "from": "planner" },
+          "pickupAddr": { "value": "2210 Quarry Bend Rd NW, Tellmoor, GA 90744", "from": "planner" },
           "customer": { "value": "Mara T.", "from": "planner" },
           "expectedBy": { "value": 1202, "from": "planner" }
         },
@@ -42,15 +42,15 @@
     },
     {
       "name": "a header and an address block whose times differ are not one stop",
-      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Kennesaw",
+      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Tellmoor",
                 "card": { "legs": 1, "multiOrder": true } },
       "events": [
         { "t": 2000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM" },
-        { "t": 9000, "page": "Expected by 7:55 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill" }
+        { "t": 9000, "page": "Expected by 7:55 PM\nAddress\n2210 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill" }
       ],
       "expect": {
         "fields": {
-          "dropoff": { "value": "Larch Way & Teal Ct, Kennesaw", "from": "card" },
+          "dropoff": { "value": "Larch Way & Teal Ct, Tellmoor", "from": "card" },
           "customer": null
         },
         "pending": [ "no dropoff", "list" ]
@@ -58,43 +58,43 @@
     },
     {
       "name": "two pages with a navigation screen between them are not stitched",
-      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Kennesaw",
+      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Tellmoor",
                 "card": { "legs": 1, "multiOrder": true } },
       "events": [
         { "t": 2000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM" },
         { "t": 5000, "sighting": { "app": "uber", "screen": "uber.nav", "whole": true, "asked": false,
                                     "titled": false, "page": { "top": false, "bottom": false }, "stops": [] } },
-        { "t": 9000, "page": "Expected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill" }
+        { "t": 9000, "page": "Expected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill" }
       ],
       "expect": {
-        "fields": { "dropoff": { "value": "Larch Way & Teal Ct, Kennesaw", "from": "card" } },
+        "fields": { "dropoff": { "value": "Larch Way & Teal Ct, Tellmoor", "from": "card" } },
         "pending": [ "no dropoff", "list" ]
       }
     },
     {
       "name": "two pages further apart than STITCH_MS are not stitched",
-      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Kennesaw",
+      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Tellmoor",
                 "card": { "legs": 1, "multiOrder": true } },
       "events": [
         { "t": 2000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM" },
-        { "t": 62001, "page": "Expected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill" }
+        { "t": 62001, "page": "Expected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill" }
       ],
       "expect": {
-        "fields": { "dropoff": { "value": "Larch Way & Teal Ct, Kennesaw", "from": "card" } },
+        "fields": { "dropoff": { "value": "Larch Way & Teal Ct, Tellmoor", "from": "card" } },
         "pending": [ "no dropoff", "list" ]
       }
     },
     {
       "name": "a page from another app is not stitched to a planner page",
-      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Kennesaw",
+      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Tellmoor",
                 "card": { "legs": 1, "multiOrder": true } },
       "events": [
         { "t": 2000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM" },
-        { "t": 9000, "page": "Expected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill",
+        { "t": 9000, "page": "Expected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill",
           "app": "doordash" }
       ],
       "expect": {
-        "fields": { "dropoff": { "value": "Larch Way & Teal Ct, Kennesaw", "from": "card" } },
+        "fields": { "dropoff": { "value": "Larch Way & Teal Ct, Tellmoor", "from": "card" } },
         "pending": [ "no dropoff", "list" ]
       }
     },
@@ -103,7 +103,7 @@
       "_why": "The lower page holds only the dropoff's address block and Waybill, no header (find_planner's headless page). Before, the stitch could not hold it and the list stayed unbounded with its dropoff unread.",
       "hold": {
         "acceptedAt": 1000,
-        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "dropoff": "Larch Way & Teal Ct, Tellmoor",
         "card": {
           "legs": 1,
           "multiOrder": true
@@ -112,21 +112,21 @@
       "events": [
         {
           "t": 2000,
-          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
+          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
         },
         {
           "t": 9000,
-          "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
+          "page": "Address\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill"
         }
       ],
       "expect": {
         "fields": {
           "dropoff": {
-            "value": "415 Ostrander Way NW, Kennesaw",
+            "value": "415 Ostrander Way NW, Tellmoor",
             "from": "planner"
           },
           "pickupAddr": {
-            "value": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144",
+            "value": "2210 Quarry Bend Rd NW, Tellmoor, GA 90744",
             "from": "planner"
           },
           "customer": {
@@ -154,7 +154,7 @@
       "_why": "The foot first, alone: the trip's last stop (footDropoff, the owner's rule of 21 Oct, 15:00) files its door at rank label over the card; the page above, stitched on, reads the same door under its header, and the planner's reading takes its place with the customer and the time ('same door').",
       "hold": {
         "acceptedAt": 1000,
-        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "dropoff": "Larch Way & Teal Ct, Tellmoor",
         "card": {
           "legs": 1,
           "multiOrder": true
@@ -163,21 +163,21 @@
       "events": [
         {
           "t": 2000,
-          "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
+          "page": "Address\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill"
         },
         {
           "t": 9000,
-          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
+          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
         }
       ],
       "expect": {
         "fields": {
           "dropoff": {
-            "value": "415 Ostrander Way NW, Kennesaw",
+            "value": "415 Ostrander Way NW, Tellmoor",
             "from": "planner"
           },
           "pickupAddr": {
-            "value": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144",
+            "value": "2210 Quarry Bend Rd NW, Tellmoor, GA 90744",
             "from": "planner"
           },
           "customer": {
@@ -205,7 +205,7 @@
       "_why": "The owner's rule of 21 Oct, 15:00: the block straight over \"Waybill\" is the trip's last stop, a dropoff, filed at rank label (footDropoff) - not joined, so never at rank planner.",
       "hold": {
         "acceptedAt": 1000,
-        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "dropoff": "Larch Way & Teal Ct, Tellmoor",
         "card": {
           "legs": 1,
           "multiOrder": true
@@ -214,17 +214,17 @@
       "events": [
         {
           "t": 2000,
-          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
+          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
         },
         {
           "t": 9000,
-          "page": "Expected by 8:20 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
+          "page": "Expected by 8:20 PM\nAddress\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill"
         }
       ],
       "expect": {
         "fields": {
           "dropoff": {
-            "value": "415 Ostrander Way NW, Kennesaw",
+            "value": "415 Ostrander Way NW, Tellmoor",
             "from": "label"
           },
           "customer": null
@@ -243,7 +243,7 @@
       "_why": "The owner's rule of 21 Oct, 15:00: the block straight over \"Waybill\" is the trip's last stop, a dropoff, filed at rank label (footDropoff) - not joined, so never at rank planner.",
       "hold": {
         "acceptedAt": 1000,
-        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "dropoff": "Larch Way & Teal Ct, Tellmoor",
         "card": {
           "legs": 1,
           "multiOrder": true
@@ -252,7 +252,7 @@
       "events": [
         {
           "t": 2000,
-          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
+          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
         },
         {
           "t": 5000,
@@ -271,13 +271,13 @@
         },
         {
           "t": 9000,
-          "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
+          "page": "Address\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill"
         }
       ],
       "expect": {
         "fields": {
           "dropoff": {
-            "value": "415 Ostrander Way NW, Kennesaw",
+            "value": "415 Ostrander Way NW, Tellmoor",
             "from": "label"
           },
           "customer": null
@@ -296,7 +296,7 @@
       "_why": "The owner's rule of 21 Oct, 15:00: the block straight over \"Waybill\" is the trip's last stop, a dropoff, filed at rank label (footDropoff) - not joined, so never at rank planner.",
       "hold": {
         "acceptedAt": 1000,
-        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "dropoff": "Larch Way & Teal Ct, Tellmoor",
         "card": {
           "legs": 1,
           "multiOrder": true
@@ -305,17 +305,17 @@
       "events": [
         {
           "t": 2000,
-          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
+          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
         },
         {
           "t": 62001,
-          "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
+          "page": "Address\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill"
         }
       ],
       "expect": {
         "fields": {
           "dropoff": {
-            "value": "415 Ostrander Way NW, Kennesaw",
+            "value": "415 Ostrander Way NW, Tellmoor",
             "from": "label"
           },
           "customer": null
@@ -334,7 +334,7 @@
       "_why": "The owner's rule of 21 Oct, 15:00: the block straight over \"Waybill\" is the trip's last stop, a dropoff, filed at rank label (footDropoff) - not joined, so never at rank planner.",
       "hold": {
         "acceptedAt": 1000,
-        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "dropoff": "Larch Way & Teal Ct, Tellmoor",
         "card": {
           "legs": 1,
           "multiOrder": true
@@ -343,18 +343,18 @@
       "events": [
         {
           "t": 2000,
-          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
+          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
         },
         {
           "t": 9000,
-          "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill",
+          "page": "Address\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill",
           "app": "doordash"
         }
       ],
       "expect": {
         "fields": {
           "dropoff": {
-            "value": "415 Ostrander Way NW, Kennesaw",
+            "value": "415 Ostrander Way NW, Tellmoor",
             "from": "label"
           },
           "customer": null
@@ -373,7 +373,7 @@
       "_why": "The page above ends on a dropoff with its own address read, so the block below is some other stop's and nothing says whose. The owner's rule of 21 Oct, 15:00: the block straight over \"Waybill\" is the trip's last stop, a dropoff, filed at rank label (footDropoff) - not joined, so never at rank planner.",
       "hold": {
         "acceptedAt": 1000,
-        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "dropoff": "Larch Way & Teal Ct, Tellmoor",
         "card": {
           "legs": 1,
           "multiOrder": true
@@ -382,17 +382,17 @@
       "events": [
         {
           "t": 2000,
-          "page": "Trip Planner\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n92 Kittering Ct\nKennesaw, GA\nView details"
+          "page": "Trip Planner\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n92 Pottering Ct\nTellmoor, GA\nView details"
         },
         {
           "t": 9000,
-          "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
+          "page": "Address\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill"
         }
       ],
       "expect": {
         "fields": {
           "dropoff": {
-            "value": "415 Ostrander Way NW, Kennesaw",
+            "value": "415 Ostrander Way NW, Tellmoor",
             "from": "label"
           },
           "customer": null
@@ -412,7 +412,7 @@
       "_why": "The owner's rule of 21 Oct, 15:00: the block straight over \"Waybill\" is the trip's last stop, a dropoff, filed at rank label (footDropoff) - not joined, so never at rank planner.",
       "hold": {
         "acceptedAt": 1000,
-        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "dropoff": "Larch Way & Teal Ct, Tellmoor",
         "card": {
           "legs": 1,
           "multiOrder": false
@@ -421,18 +421,18 @@
       "events": [
         {
           "t": 2000,
-          "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
+          "page": "Address\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill"
         },
         {
           "t": 30000,
-          "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill",
+          "page": "Address\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill",
           "asked": true
         }
       ],
       "expect": {
         "fields": {
           "dropoff": {
-            "value": "415 Ostrander Way NW, Kennesaw",
+            "value": "415 Ostrander Way NW, Tellmoor",
             "from": "label"
           },
           "customer": null
@@ -452,17 +452,17 @@
     },
     {
       "name": "a planner from the trip before, refused",
-      "hold": { "acceptedAt": 100000, "dropoff": "Larch Way & Teal Ct, Kennesaw",
+      "hold": { "acceptedAt": 100000, "dropoff": "Larch Way & Teal Ct, Tellmoor",
                 "card": { "legs": 1, "multiOrder": true } },
       "events": [
-        { "t": 95000, "page": "Trip Planner\nDropoff • 1 order\nOrrin B.\nExpected by 6:10 PM\nAddress\n77 Hollins Fork Dr\nAcworth, GA\nView details\nWaybill" },
-        { "t": 104000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM" },
-        { "t": 110000, "took": { "id": "o-next", "dropoff": "Pine St & Elm St, Acworth",
+        { "t": 95000, "page": "Trip Planner\nDropoff • 1 order\nOssel B.\nExpected by 6:10 PM\nAddress\n77 Tallisk Fork Dr\nIvyhame, GA\nView details\nWaybill" },
+        { "t": 104000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM" },
+        { "t": 110000, "took": { "id": "o-next", "dropoff": "Pine St & Elm St, Ivyhame",
                                  "card": { "legs": 1, "multiOrder": true } } }
       ],
       "expect": {
         "fields": {
-          "dropoff": { "value": "Pine St & Elm St, Acworth", "from": "card" },
+          "dropoff": { "value": "Pine St & Elm St, Ivyhame", "from": "card" },
           "customer": null
         },
         "pending": [],
@@ -474,14 +474,14 @@
       "hold": { "acceptedAt": 1000, "dropoff": null, "card": { "legs": 1, "multiOrder": false },
                 "planner": { "stops": [
                   { "kind": "pickup", "orders": 1, "name": "Juniper Taqueria", "expectedBy": 1180,
-                    "street": "2210 Quarry Bend Rd NW", "city": "Kennesaw", "state": "GA",
-                    "zip": "30144", "line": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144" },
+                    "street": "2210 Quarry Bend Rd NW", "city": "Tellmoor", "state": "GA",
+                    "zip": "90744", "line": "2210 Quarry Bend Rd NW, Tellmoor, GA 90744" },
                   { "kind": "dropoff", "orders": 1, "name": "Mara T.", "expectedBy": 1202,
                     "street": null, "city": null, "state": null, "zip": null, "line": null } ] } },
       "events": [
-        { "t": 5000, "dropoff": { "found": true, "line": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144",
-                                  "street": "2210 Quarry Bend Rd NW", "city": "Kennesaw",
-                                  "state": "GA", "zip": "30144", "asked": false,
+        { "t": 5000, "dropoff": { "found": true, "line": "2210 Quarry Bend Rd NW, Tellmoor, GA 90744",
+                                  "street": "2210 Quarry Bend Rd NW", "city": "Tellmoor",
+                                  "state": "GA", "zip": "90744", "asked": false,
                                   "labelled": "dropoff" } }
       ],
       "expect": {
@@ -492,36 +492,36 @@
     },
     {
       "name": "a press is never overwritten by a later label",
-      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Kennesaw",
+      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Tellmoor",
                 "card": { "legs": 1, "multiOrder": false } },
       "events": [
-        { "t": 5000, "dropoff": { "found": true, "line": "61 Saddlebrook Ln, Acworth, GA 30101",
-                                  "street": "61 Saddlebrook Ln", "city": "Acworth",
-                                  "state": "GA", "zip": "30101", "asked": true } },
-        { "t": 9000, "dropoff": { "found": true, "line": "8 Gallant Rise Ct, Acworth, GA 30101",
-                                  "street": "8 Gallant Rise Ct", "city": "Acworth",
-                                  "state": "GA", "zip": "30101", "asked": false,
+        { "t": 5000, "dropoff": { "found": true, "line": "61 Haddlecombe Ln, Ivyhame, GA 90701",
+                                  "street": "61 Haddlecombe Ln", "city": "Ivyhame",
+                                  "state": "GA", "zip": "90701", "asked": true } },
+        { "t": 9000, "dropoff": { "found": true, "line": "8 Gallant Rise Ct, Ivyhame, GA 90701",
+                                  "street": "8 Gallant Rise Ct", "city": "Ivyhame",
+                                  "state": "GA", "zip": "90701", "asked": false,
                                   "labelled": "dropoff" } },
-        { "t": 12000, "page": "Trip Planner\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill" }
+        { "t": 12000, "page": "Trip Planner\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill" }
       ],
       "expect": {
-        "fields": { "dropoff": { "value": "61 Saddlebrook Ln, Acworth, GA 30101", "from": "press" } },
+        "fields": { "dropoff": { "value": "61 Haddlecombe Ln, Ivyhame, GA 90701", "from": "press" } },
         "decisions": [ "press", "outranked by press", "outranked by press" ]
       }
     },
     {
       "name": "Waybill on page 2 bounds page 1",
-      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Kennesaw",
+      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Tellmoor",
                 "card": { "legs": 1, "multiOrder": true } },
       "events": [
-        { "t": 2000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details" },
-        { "t": 12000, "page": "Dropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill" }
+        { "t": 2000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nTellmoor, GA\nView details" },
+        { "t": 12000, "page": "Dropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill" }
       ],
       "expect": {
         "fields": {
-          "dropoff": { "value": "415 Ostrander Way NW, Kennesaw", "from": "planner" },
+          "dropoff": { "value": "415 Ostrander Way NW, Tellmoor", "from": "planner" },
           "customer": { "value": "Mara T.", "from": "planner" },
-          "pickupAddr": { "value": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144", "from": "planner" }
+          "pickupAddr": { "value": "2210 Quarry Bend Rd NW, Tellmoor, GA 90744", "from": "planner" }
         },
         "pending": [],
         "decisions": [ "not a single trip", "over the card" ],
@@ -530,14 +530,14 @@
     },
     {
       "name": "the hotel layout",
-      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Kennesaw",
+      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Tellmoor",
                 "card": { "legs": 1, "multiOrder": true } },
       "events": [
-        { "t": 2000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 9:51 PM\nAddress\n3390 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\n© Tamsin W.\nExpected by 10:05 PM\nAddress\nBriarmoss Inn & Suites Kennesaw NW\nKennesaw\n1760 Hobbleton Rd NW, Kennesaw, GA\nView details\nWaybill" }
+        { "t": 2000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 9:51 PM\nAddress\n3390 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\n© Tamsin W.\nExpected by 10:05 PM\nAddress\nBriarmoss Inn & Suites Tellmoor NW\nTellmoor\n1760 Hobbleton Rd NW, Tellmoor, GA\nView details\nWaybill" }
       ],
       "expect": {
         "fields": {
-          "dropoff": { "value": "1760 Hobbleton Rd NW, Kennesaw", "from": "planner" },
+          "dropoff": { "value": "1760 Hobbleton Rd NW, Tellmoor", "from": "planner" },
           "customer": { "value": "Tamsin W.", "from": "planner" },
           "expectedBy": { "value": 1325, "from": "planner" }
         },
@@ -547,13 +547,13 @@
     },
     {
       "name": "a single-trip lone dropoff",
-      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Kennesaw",
+      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Tellmoor",
                 "card": { "legs": 1, "multiOrder": false } },
       "events": [
-        { "t": 2000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 9:51 PM\nAddress\n3390 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\n© Tamsin W.\nExpected by 10:05 PM\nAddress\nBriarmoss Inn & Suites Kennesaw NW\nKennesaw\n1760 Hobbleton Rd NW, Kennesaw, GA\nView details" }
+        { "t": 2000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 9:51 PM\nAddress\n3390 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\n© Tamsin W.\nExpected by 10:05 PM\nAddress\nBriarmoss Inn & Suites Tellmoor NW\nTellmoor\n1760 Hobbleton Rd NW, Tellmoor, GA\nView details" }
       ],
       "expect": {
-        "fields": { "dropoff": { "value": "1760 Hobbleton Rd NW, Kennesaw", "from": "planner" } },
+        "fields": { "dropoff": { "value": "1760 Hobbleton Rd NW, Tellmoor", "from": "planner" } },
         "pending": [],
         "decisions": [ "over the card" ],
         "unfiled": [ null ]
@@ -561,13 +561,13 @@
     },
     {
       "name": "...and the same page with a two-order card waits in the pool",
-      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Kennesaw",
+      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Tellmoor",
                 "card": { "legs": 1, "multiOrder": true } },
       "events": [
-        { "t": 2000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 9:51 PM\nAddress\n3390 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\n© Tamsin W.\nExpected by 10:05 PM\nAddress\nBriarmoss Inn & Suites Kennesaw NW\nKennesaw\n1760 Hobbleton Rd NW, Kennesaw, GA\nView details" }
+        { "t": 2000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 9:51 PM\nAddress\n3390 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\n© Tamsin W.\nExpected by 10:05 PM\nAddress\nBriarmoss Inn & Suites Tellmoor NW\nTellmoor\n1760 Hobbleton Rd NW, Tellmoor, GA\nView details" }
       ],
       "expect": {
-        "fields": { "dropoff": { "value": "Larch Way & Teal Ct, Kennesaw", "from": "card" } },
+        "fields": { "dropoff": { "value": "Larch Way & Teal Ct, Tellmoor", "from": "card" } },
         "pending": [ "list" ],
         "decisions": [ "not a single trip" ],
         "unfiled": [ "list" ]
@@ -575,14 +575,14 @@
     },
     {
       "name": "two dropoffs over two pages are refused, not guessed between",
-      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Kennesaw",
+      "hold": { "acceptedAt": 1000, "dropoff": "Larch Way & Teal Ct, Tellmoor",
                 "card": { "legs": 1, "multiOrder": true } },
       "events": [
-        { "t": 2000, "page": "Trip Planner\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details" },
-        { "t": 9000, "page": "Dropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details\nDropoff • 1 order\nOrrin B.\nExpected by 8:20 PM\nWaybill" }
+        { "t": 2000, "page": "Trip Planner\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nTellmoor, GA\nView details" },
+        { "t": 9000, "page": "Dropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nTellmoor, GA\nView details\nDropoff • 1 order\nOssel B.\nExpected by 8:20 PM\nWaybill" }
       ],
       "expect": {
-        "fields": { "dropoff": { "value": "Larch Way & Teal Ct, Kennesaw", "from": "card" } },
+        "fields": { "dropoff": { "value": "Larch Way & Teal Ct, Tellmoor", "from": "card" } },
         "pending": [],
         "refused": [ "dropoffs", "dropoffs" ],
         "unfiled": [ "list", "dropoffs" ]
@@ -592,7 +592,7 @@
       "name": "planner, then nav, then press: a navigation screen fills in the planner's stop read fuller, never a different address and never a pickup, and a press replaces it and is never replaced by one",
       "hold": {
         "acceptedAt": 1000,
-        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "dropoff": "Larch Way & Teal Ct, Tellmoor",
         "card": {
           "legs": 1,
           "multiOrder": true
@@ -601,7 +601,7 @@
       "events": [
         {
           "t": 2000,
-          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
+          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nTellmoor, GA 90744\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nTellmoor, GA\nView details\nWaybill"
         },
         {
           "t": 4000,
@@ -623,10 +623,10 @@
                 "place": null,
                 "expectedBy": 1202,
                 "street": "415 Ostrander Way NW",
-                "city": "Kennesaw",
+                "city": "Tellmoor",
                 "state": "GA",
-                "zip": "30144",
-                "line": "415 Ostrander Way NW, Kennesaw, GA 30144",
+                "zip": "90744",
+                "line": "415 Ostrander Way NW, Tellmoor, GA 90744",
                 "partial": null,
                 "label": "dropoff"
               }
@@ -655,10 +655,10 @@
                 "place": null,
                 "expectedBy": null,
                 "street": "88 Wren Hollow Ct",
-                "city": "Kennesaw",
+                "city": "Tellmoor",
                 "state": "GA",
-                "zip": "30144",
-                "line": "88 Wren Hollow Ct, Kennesaw, GA 30144",
+                "zip": "90744",
+                "line": "88 Wren Hollow Ct, Tellmoor, GA 90744",
                 "partial": null,
                 "label": "dropoff"
               }
@@ -687,10 +687,10 @@
                 "place": null,
                 "expectedBy": null,
                 "street": "2210 Quarry Bend Rd NW",
-                "city": "Kennesaw",
+                "city": "Tellmoor",
                 "state": "GA",
-                "zip": "30144",
-                "line": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144",
+                "zip": "90744",
+                "line": "2210 Quarry Bend Rd NW, Tellmoor, GA 90744",
                 "partial": null,
                 "label": "dropoff"
               }
@@ -703,9 +703,9 @@
           "t": 6000,
           "dropoff": {
             "found": true,
-            "line": "77 Birch Ln, Kennesaw",
+            "line": "77 Birch Ln, Tellmoor",
             "street": "77 Birch Ln",
-            "city": "Kennesaw",
+            "city": "Tellmoor",
             "state": "GA",
             "zip": null,
             "asked": true
@@ -731,10 +731,10 @@
                 "place": null,
                 "expectedBy": null,
                 "street": "77 Birch Ln",
-                "city": "Kennesaw",
+                "city": "Tellmoor",
                 "state": "GA",
-                "zip": "30144",
-                "line": "77 Birch Ln, Kennesaw, GA 30144",
+                "zip": "90744",
+                "line": "77 Birch Ln, Tellmoor, GA 90744",
                 "partial": null,
                 "label": "dropoff"
               }
@@ -747,11 +747,11 @@
       "expect": {
         "fields": {
           "dropoff": {
-            "value": "77 Birch Ln, Kennesaw",
+            "value": "77 Birch Ln, Tellmoor",
             "from": "press"
           },
           "pickupAddr": {
-            "value": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144",
+            "value": "2210 Quarry Bend Rd NW, Tellmoor, GA 90744",
             "from": "planner"
           }
         },

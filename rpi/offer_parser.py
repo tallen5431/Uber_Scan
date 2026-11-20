@@ -562,8 +562,8 @@ ITEMS = re.compile(r'(' + DC + r'{1,3})\s*items?\b', re.IGNORECASE | ASCII)
 #     Early look • Order in progress
 #     Delivery  $14.48  Includes expected tip
 #     Est. delivery 4:15 PM • 8.6 mi
-#     Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100)
-#     Foothill Trl & Northwoods Dr, Marietta
+#     Dave's Hot Chicken (1985 Vosk Parkway NW, STE 100)
+#     Foothill Trl & Farrowdene Dr, Harrowen
 #     Matching may take longer
 #
 # A time of delivery, where every Early look card in the owner's week prints a
@@ -661,8 +661,8 @@ PICKUP = re.compile(
 # time at pickup" under the pickup address, and that "pickup" was read as the
 # delivery card's own anchor: what followed it — the rest of the card — went
 # into the journal as where the job went. One real shift stored the phrase
-# itself as a place twice, and stored `1 min 23 min (8.4 mi) trip Celebration
-# Blvd, Acworth` as another.
+# itself as a place twice, and stored `1 min 23 min (8.4 mi) trip Jamboreeton
+# Blvd, Ivyhame` as another.
 #
 # Checked against the text before the match rather than with a lookbehind,
 # which Safari did not have until 16.4 and this parser also runs in a phone
@@ -684,7 +684,7 @@ PICKUP_NOT_A_LABEL = re.compile(r'\b(?:at|time)\s*$', re.IGNORECASE | ASCII)
 # Three separate patterns rather than one alternation, because the town test is
 # the only one that cares about case and a single regex would have to be
 # case-insensitive for the street words — which is how the capital that makes
-# ", Kennesaw" evidence and ", a oo" not would have been thrown away.
+# ", Tellmoor" evidence and ", a oo" not would have been thrown away.
 STREET_WORD = (r'st|street|rd|road|ave|avenue|blvd|bivd|pkwy|parkway|dr|drive|'
                r'ln|lane|way|ct|court|hwy|highway|pl|place|ter|terrace|cir|'
                r'circle|trce|trail|trl|spgs|springs|county')
@@ -708,7 +708,7 @@ def looks_like_a_place(value):
 #
 # `total` joins them because a shop card prints "34 min (3.6 mi) total" and the
 # merchant's name straight after it, so the leg tail begins with the word: 5 of
-# one shift's addresses were stored as "total Five Guys (3450 Cobb Pkwy. NW)".
+# one shift's addresses were stored as "total Five Guys (3450 Vosk Pkwy. NW)".
 #
 # `away` and `trip` are here for the same reason: an Uber ride card writes
 # "5 min (1.2 mi) away" and "20 min (7.3 mi) trip", so the word sits between the
@@ -722,8 +722,8 @@ PLACE_JUNK = re.compile(
 # word the card prints after an address rode along with it into the journal. The
 # commonest by far is Uber's own "Avg. wait time at pickup", which sits directly
 # under the pickup address: it was on 25 of one shift's 60 stored places, and
-# what the offers page showed was `Cobb Pkwy NW, Acworth Avg. wait time at
-# pickup; Canton Rd, Marietta` — an address a driver reads as not-an-address.
+# what the offers page showed was `Vosk Pkwy NW, Ivyhame Avg. wait time at
+# pickup; Belvan Rd, Harrowen` — an address a driver reads as not-an-address.
 #
 # A pipe ends one too. It is never in a street name and it is what the card's
 # own dividers and its bottom icon row come back as.
@@ -732,7 +732,7 @@ PLACE_JUNK = re.compile(
 # that is a word STEM. Inside the `\b(?:...)\b` group, `fast\s*charg` can never
 # match "fast charger": the closing boundary has to fall between "charg" and
 # "e", and there is no boundary there. So the one badge that appears on the very
-# cards this stopper was written for — `Cumberland Blvd SE, Atlanta 4, 7 mi from
+# cards this stopper was written for — `Hollowmere Blvd SE, Solvane 4, 7 mi from
 # fast charger` — walked straight past it, and the address a driver reads to
 # recognise the job months later has a charger advert stapled to the end of it.
 # Three of one shift's 210 cards.
@@ -749,9 +749,9 @@ PLACE_JUNK = re.compile(
 #
 # ...and it had been deciding where a piece split. With the chip on, two
 # pieces were over the cap and the junction seam below cut them: row 914 inside
-# its address (`Kennesaw` / `State University Rd NW & …`), which now stores
+# its address (`Tellmoor` / `State University Rd NW & …`), which now stores
 # whole, and row 86 at its merchant's bracket. Without the chip row 86 stored
-# `(Dallas) Bone Creek Xing & River Run Dr, Dallas` as its PICKUP — the shape
+# `(Dorvan) Rook Creek Xing & River Run Dr, Dorvan` as its PICKUP — the shape
 # the panel's first reads of rows 643, 891 and 904 already had, where the
 # card's route line reads as a pipe in front of the merchant's branch. That
 # pipe is no longer a divider; see _the_route_line.
@@ -766,7 +766,7 @@ PLACE_JUNK = re.compile(
 # tip", which `included` never matched, and the "Early look" badge. No reading
 # of the week puts either after a place, so they move nothing there; a reader
 # that scrambles the line order — row 6's did — would have stored
-# `…, Marietta Includes` and `…, Marietta Early` as the town.
+# `…, Harrowen Includes` and `…, Harrowen Early` as the town.
 PLACE_TAIL = re.compile(
     r'(?:\|'
     r'|\bfast\s*charg'
@@ -776,11 +776,11 @@ PLACE_TAIL = re.compile(
     re.IGNORECASE | ASCII)
 
 # The card's bottom bar — a row of icons — comes back as one and two character
-# scraps: `Kennesaw 4`, `Marietta %`, `Acworth ¥`, `Kennesaw 2c 4`. Stripped a
+# scraps: `Tellmoor 4`, `Harrowen %`, `Ivyhame ¥`, `Tellmoor 2c 4`. Stripped a
 # token at a time from each end, because they arrive in runs.
 #
 # Two lists, not one. `S Main St NW` starts with a real single letter and
-# `Chick-fil-A (2555 Dallas Highway) s` ends with a false one, so a compass
+# `Chick-fil-A (2555 Dorvan Highway) s` ends with a false one, so a compass
 # point is worth keeping at the front and not at the back. Length is the test
 # rather than shape: "Papa John's Store 3317" ends in a number that belongs to
 # it, and four characters is not a scrap.
@@ -789,7 +789,7 @@ PLACE_TRAIL_KEEP = frozenset(('nw', 'ne', 'sw', 'se', 'st', 'rd', 'dr', 'ct',
 PLACE_LEAD_KEEP = PLACE_TRAIL_KEEP | frozenset(('n', 's', 'e', 'w'))
 # ...but only as the card prints a compass point, a capital. The owner's card
 # of 12 Nov read its route line's dot as a lowercase "s" on a line of its own,
-# over "<Name> Blvd SW & <Name> St SW, Atlanta", and the held end, the panel's
+# over "<Name> Blvd SW & <Name> St SW, Solvane", and the held end, the panel's
 # big title and the NucBox's question all began "s <Name> Blvd": a lowercase
 # n, s, e or w standing alone in front of a place is a scrap like any other.
 PLACE_LEAD_COMPASS_SLIP = frozenset(('n', 's', 'e', 'w'))
@@ -816,8 +816,8 @@ MAX_PLACE = 60
 
 # The commonest delivery card puts BOTH ends of the job after one total leg:
 #
-#     27 min (7.3 mi) total  Rick's Hotwings (Kennesaw)  Hamby Place Dr NW &
-#     Travistock Pl NW, Acworth
+#     27 min (7.3 mi) total  Rick's Hotwings (Tellmoor)  Holby Place Dr NW &
+#     Marlestock Pl NW, Ivyhame
 #
 # There is no "Pickup" label to anchor on and only one leg, so the leg-tail rule
 # picked the whole thing up as a single place — 71 characters of merchant and
@@ -827,9 +827,9 @@ MAX_PLACE = 60
 # The card's own grammar separates them: Uber prints the merchant with its
 # branch in brackets, and where the job goes after that. So the closing bracket
 # is the seam.
-# 40 rather than 34, measured. `Wendy's (3442 Ernest W. Barrett Parkway N.W.)`
-# is 35 inside the brackets and `Olive Garden (Ernest W Barrett Pkwy NW &
-# Roberts Ct)` is 37, and on the driver's own 272-card export those two were
+# 40 rather than 34, measured. `Wendy's (3442 Osbert W. Tallett Parkway N.W.)`
+# is 35 inside the brackets and `Olive Garden (Osbert W Tallett Pkwy NW &
+# Wilbert Ct)` is 37, and on the driver's own 272-card export those two were
 # the only cards the limit touched: both stored NOTHING — no merchant and no
 # destination — because the seam was one character out of reach and the whole
 # piece then failed the length check below. Widening it moves exactly those two
@@ -871,21 +871,21 @@ PLACE_JUNCTION_AT = re.compile(
     % (PLACE_WORD_CAP, PLACE_WORD_CAP, PLACE_WORD_CAP, PLACE_WORD_CAP), ASCII)
 
 # ...and an address ends at its town. Nothing on the card marks the end of one,
-# which is what left "Lakeview Ter & Windmill Dr, Dallas ill" in the journal —
+# which is what left "Lakeview Ter & Windmill Dr, Dorvan ill" in the journal —
 # the "ill" is the bottom icon row. A comma, a capitalised name or two, and that
 # is the whole address; what follows is furniture.
 #
 # The possessive is allowed because a card does not always end on a town: "1min
-# (0.2 mi) Roswell Road, Johnny's Hideaway" ends on the venue, and a rule that
-# stopped at the first capitalised word after a comma cut it to "Roswell Road,
+# (0.2 mi) Ruswold Road, Johnny's Hideaway" ends on the venue, and a rule that
+# stopped at the first capitalised word after a comma cut it to "Ruswold Road,
 # Johnny". Lower case still ends it, which is what keeps the icon row out.
 #
 # ...and "a capitalised name or two" took its second name from the NEXT LINE.
 # normalize() joins the reader's lines with a space, so a capitalised scrap on
-# the line under the town reads exactly like the second half of "Powder
+# the line under the town reads exactly like the second half of "Gorrel
 # Springs". The rig's snap of a Jimmy John's card on 8 October: one frame
 # caught the Accept button under the card as `Pverel 8) 4 P`, and the dropoff
-# on the panel and in the journal was `Shadowood Pkwy SE, Atlanta Pverel` —
+# on the panel and in the journal was `Gloamwood Pkwy SE, Solvane Pverel` —
 # kept over every frame that read it cleanly, because merge_place keeps the
 # longer of two readings of a place.
 #
@@ -896,18 +896,18 @@ PLACE_JUNCTION_AT = re.compile(
 # test for that. Measured on the owner's 6,657 frames and stored texts it
 # refuses a second name on 97 of them, 53 rows, and every one is furniture or
 # the next field: `Uber`, a bag count, `Long trip (45+ min)`, the next leg's
-# `Umins (6.5 mi)`, the icon row (`Atlanta Pele`, `Dallas Mbit`, `Marietta
-# Ill`), and once the next merchant, `Kennesaw` / `Little Caesars (1600 …`. Of
+# `Umins (6.5 mi)`, the icon row (`Solvane Pele`, `Dorvan Mbit`, `Harrowen
+# Ill`), and once the next merchant, `Tellmoor` / `Little Caesars (1600 …`. Of
 # the corpus it refuses only the two cases written for it. Two-word towns DO
 # wrap — "Springs" begins a line on 56 of the 137 readings that print
-# `, Powder Springs`, "County" on 5 of the 22 that print `, Cobb County` and on
-# all 7 of `, Bartow County` — and every one is kept, because those are words
+# `, Gorrel Springs`, "County" on 5 of the 22 that print `, Vosk County` and on
+# all 7 of `, Garlow County` — and every one is kept, because those are words
 # looks_like_a_place already calls a street.
 #
 # What it still takes is a next line the test calls address-shaped that is not
-# the town's: `…, USA` / `Buckley Way NE & Pacer Pl, Atlanta` on row 590,
-# `…, Dallas` / `Five Guys (3450 Cobb Pkwy. NW)` on row 504, `…, Marietta` /
-# `On the way` on row 815, `…, Cumberl` / `SE, Atlanta` on row 813 — seven rows
+# the town's: `…, USA` / `Tuckett Way NE & Mavel Pl, Solvane` on row 590,
+# `…, Dorvan` / `Five Guys (3450 Vosk Pkwy. NW)` on row 504, `…, Harrowen` /
+# `On the way` on row 815, `…, Hollowm` / `SE, Solvane` on row 813 — seven rows
 # (466, 504, 590, 757, 813, 815, 943), which read exactly as they did. It is the
 # test the rule was asked for, and a tighter one is a different change with a
 # replay of its own.
@@ -916,10 +916,10 @@ PLACE_JUNCTION_AT = re.compile(
 # the address's line and begins the town's with icon-row scraps, so the town
 # did not follow its comma and the rule above never matched: the whole reading
 # was kept, scraps, trailing furniture and all — `Peach Ct NW & Peach Ter NW,
-# . Acworth`, `Evian Ct NW & Evian Xing NW, 7 Kennesaw lstop`. Two readings
+# . Ivyhame`, `Arvan Ct NW & Arvan Xing NW, 7 Tellmoor lstop`. Two readings
 # of one address with different scraps are two places to merge_place, and the
 # offers page joins places with an arrow: row 423 drew a two-stop route out of
-# `…, 28 kt Kennesaw` and `…, ps ? ys ti Kennesaw`. Where the town did not
+# `…, 28 kt Tellmoor` and `…, ps ? ys ti Tellmoor`. Where the town did not
 # follow the comma, the scraps after it come out first — see _town_past_scraps
 # — on 321 of the week's readings, 121 rows. Published rows that show one
 # address twice go from 15 to 9, and published ends with a scrap before the
@@ -971,7 +971,7 @@ LEG_TAIL = re.compile(r'\b(?:away|tr[il1|]p|tota?l|dropoff|drop\s*off)\b',
 # leg that came out with no distance.
 #
 # LEG_TAIL is a word list, and this driver's ride cards do not use those words.
-# They label a leg with an ADDRESS — "12 min (8.1 mi) Oak Ln, Marietta" — so
+# They label a leg with an ADDRESS — "12 min (8.1 mi) Oak Ln, Harrowen" — so
 # both legs of a two-leg card count as travel only because they carry
 # distances. The moment one of them loses its distance it drops out of the set
 # legs_short_a_distance counts, the count falls to one, and the rule that exists
@@ -982,7 +982,7 @@ LEG_TAIL = re.compile(r'\b(?:away|tr[il1|]p|tota?l|dropoff|drop\s*off)\b',
 # be the FIRST thing after the minutes, which is the whole difference between
 #
 #     20 min (7.3 m1) trip                      <- the bracket is this leg's
-#     Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Sedgefield Rd
+#     Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Wedgemarsh Rd
 #
 # where a bracket appears in the wait line's tail too, but another leg's minutes
 # come first. Searching the tail loosely instead fires on 43% of clean cards;
@@ -1142,7 +1142,7 @@ def line_starts(raw_text):
 # The rig photographs whatever is on the phone, and between jobs that is the map.
 # One screen off this driver's own shift:
 #
-#     The Townes at Chastain ... Windsor Drive ... 3min  11 min  $ 22min
+#     The Townes at Morvaine ... Windsor Drive ... 3min  11 min  $ 22min
 #     3 min (1.0 mi)  Fastest route now due to traffic conditions
 #
 # Route alternatives, with a map glyph in front of one of them that read as a
@@ -1177,7 +1177,7 @@ PAY_IS_A_DURATION = re.compile(
 # The app asks the driver to change zones with a prompt of its own, and five of
 # them on the owner's week were journalled as offers. Row 565 in full:
 #
-#     GA: Marietta North / Switch to this zone / with peak pay! /
+#     GA: Harrowen North / Switch to this zone / with peak pay! /
 #     +$1.00/order until 8:20 PM / Avg. offer wait / 1min / Don't switch
 #
 # find_pay took the bonus as the payout and the zone's average wait as the job's
@@ -1770,7 +1770,7 @@ def place_ends(legs, places, whose):
         in the middle of the list and was dropped.
       - one surviving place, and it the destination (rows 307, 1149), which is
         the shape the ledger filed this under. On row 1149 all four frames read
-        `S Cobb Dr SE, Smyrna` against the second leg and nothing at all
+        `S Vosk Dr SE, Pyrnel` against the second leg and nothing at all
         against the first, and the row went to the journal saying the job
         started there.
 
@@ -1803,9 +1803,9 @@ def laid_out_approach(legs, places, whose, pickup, dropoff):
 
         $26.04
         8 min (3.2 mi)                                <- the drive TO the pickup
-        Ector Chase NW & Ector Overlook NW, Kennesaw  <- the pickup
+        Ostor Chase NW & Ostor Overlook NW, Tellmoor  <- the pickup
         39 mins (25.1 mi)                             <- the trip
-        Hale St NE & Inman Village Pkwy NE, Atlanta   <- the dropoff
+        Hale St NE & Ilsen Village Pkwy NE, Solvane   <- the dropoff
 
     The card's own statement is the ORDER: a leg, the place it arrives at, a
     leg, the place THAT one arrives at. So a leg followed by the pickup's name
@@ -2303,8 +2303,8 @@ def minutes_until(deadline, now_minutes):
 #
 # Merging the addresses seen across a window of frames is what stops a frame
 # that lost the map to glare from erasing one that had it — and, done on exact
-# strings, it invents journeys. Two frames one comma apart give "Cobb Pkwy NW,
-# Acworth" and "Cobb Pkwy NW Acworth", both survive an exact-match dedupe, and
+# strings, it invents journeys. Two frames one comma apart give "Vosk Pkwy NW,
+# Ivyhame" and "Vosk Pkwy NW Ivyhame", both survive an exact-match dedupe, and
 # the offers page joins places with an arrow: one address rendered as a two-stop
 # route that never happened. That is worse than the missing address the merge
 # was added to fix, and the behaviour it replaced could not produce it.
@@ -2319,7 +2319,7 @@ def minutes_until(deadline, now_minutes):
 PLACE_SAME = 0.90
 
 # A truncated read is the front of the whole one. Ratio alone is poor at this —
-# "Cobb Pkwy NW" against "Cobb Pkwy NW, Acworth" scores 0.74 — so containment
+# "Vosk Pkwy NW" against "Vosk Pkwy NW, Ivyhame" scores 0.74 — so containment
 # gets its own rule, with a floor so a fragment cannot swallow a real address.
 PLACE_PREFIX_SHARE = 0.7
 
@@ -2408,13 +2408,13 @@ def _the_route_line(value, at):
     lines are what this reads:
 
         Los Portales Mexican Restaurant      Nova sushi bar Asian bistro
-        | (Dallas)                           | (Buckhead)
-        Bone Creek Xing & River Run Dr,      Frontenac Ct NE & Woodrow Way
-        Dallas                               | NE, Brookhaven
+        | (Dorvan)                           | (Tuckmead)
+        Rook Creek Xing & River Run Dr,      Gorvennic Ct NE & Hartlow Way
+        Dorvan                               | NE, Ashenhaven
 
     The merchant's bracketed branch: split there, the merchant's name — which
     names no street — was not kept, and the branch was read fused to the
-    destination, `(Dallas) Bone Creek Xing & River Run Dr, Dallas`, as the
+    destination, `(Dorvan) Rook Creek Xing & River Run Dr, Dorvan`, as the
     PICKUP with no dropoff. On the owner's week that was every reading of rows
     86, 643, 891 and 904 that caught the line as a pipe — the panel's first
     reads of 643, 891 and 904, and the journal row of 86 once the Matching
@@ -2423,18 +2423,18 @@ def _the_route_line(value, at):
     _inside_a_bracket's reason.
 
     And the address's own last word and its town, wrapped onto the line below:
-    split there, `NE, Brookhaven` was stored as a place of its own, and on rows
-    61, 277 and 309 it was the published DROPOFF — `Ln, Powder Springs`, `NW,
-    Kennesaw`, `SW, Marietta` — with the street it belongs to filed beside it.
+    split there, `NE, Ashenhaven` was stored as a place of its own, and on rows
+    61, 277 and 309 it was the published DROPOFF — `Ln, Gorrel Springs`, `NW,
+    Tellmoor`, `SW, Harrowen` — with the street it belongs to filed beside it.
     A word of one to four letters (a compass point, `Ln`, `Way`, the reader's
     `Tri` for Trl), a comma, and a town by PLACE_TOWN: the parser's one rule
     for what a town is. Row 277 now publishes its whole address. Row 309 does
-    not: the reader put an `i` and an `F` between its pipe and `SW, Marietta`,
+    not: the reader put an `i` and an `F` between its pipe and `SW, Harrowen`,
     which this does not read through. Row 61 publishes no place at all — its
     joined merchant and address, `Sugar Shane's I Georgia State Route 360 &
-    Line Tree Ln, Powder Springs`, is over MAX_PLACE with no seam the junction
+    Lyre Tree Ln, Gorrel Springs`, is over MAX_PLACE with no seam the junction
     rule can find — where it published a merchant fused to half a street as
-    the pickup and `Ln, Powder Springs` as the dropoff.
+    the pickup and `Ln, Gorrel Springs` as the dropoff.
 
     Measured on the owner's 6,657 frames and stored texts: the branch on 42
     readings of 12 rows, the last line on 22 readings of 16.
@@ -2492,7 +2492,7 @@ def _closes_what_it_never_opened(value):
     than repaired. Repairing it — cutting everything up to the stray `)` — was
     tried and measured on this driver's week: the stray sits past position 20
     on 7 of them, where it is icon-row sludge rather than a seam, and
-    `'McDuffie Cir & Stanley Dr, . . Douglasville s ED) 5-10 bags'` becomes
+    `'McTavish Cir & Merrick Dr, . . Harloweville s ED) 5-10 bags'` becomes
     `'5-10 bags'`. A name invented out of a bad reading is the thing this
     parser refuses everywhere else.
 
@@ -2500,8 +2500,8 @@ def _closes_what_it_never_opened(value):
     symmetrise. An unmatched `(` is the ordinary end of the 130-character leg
     window landing inside a merchant's bracket, and refusing those costs 29 of
     the 500 dropoffs and 8 of the 1,080 pickups this parser reads off the
-    owner's 1,166-offer week — clean addresses, every one: 'Lakefield Ct &
-    Lakefield Walk, Marietta', 'Scenic Mountain Dr SE, Acworth'. Measured, by
+    owner's 1,166-offer week — clean addresses, every one: 'Pondfield Ct &
+    Pondfield Walk, Harrowen', 'Lonely Mountain Dr SE, Ivyhame'. Measured, by
     making it symmetrical and counting. Do not.
     """
     depth = 0
@@ -2534,8 +2534,8 @@ def _town_past_scraps(value):
 
     Only an address's comma: the reader puts commas in the middle of a
     merchant's line too, and row 397 of the owner's week reads `Come-N-Get It
-    1 ' , ' Farm Ridge Dr NE & Farm Valley Dr`, where skipping to the first
-    capitalised word took `Farm Ridge` for a town and cut the street off.
+    1 ' , ' Fold Ridge Dr NE & Farm Valley Dr`, where skipping to the first
+    capitalised word took `Fold Ridge` for a town and cut the street off.
     """
     head, comma, rest = value.rpartition(',')
     if not comma or not looks_like_a_place(head):
@@ -2555,11 +2555,11 @@ def trim_place(value):
     scraps off each end a token at a time. See PLACE_TAIL.
 
     Parentheses survive on purpose: a branch address is printed inside them —
-    "Dollar General (925 Shiloh Rd Nw)" — and taking the closing one off leaves
+    "Dollar General (925 Merlah Rd Nw)" — and taking the closing one off leaves
     a dangling bracket and a name that reads as truncated.
     """
     # The front first, and the tail after. Order matters: a pipe ends a place,
-    # but `oN | Cobb Pkwy NW, Kennesaw 'a` is a pipe with the sludge on the
+    # but `oN | Vosk Pkwy NW, Tellmoor 'a` is a pipe with the sludge on the
     # *near* side of it, and cutting there first threw the address away and
     # kept the "oN".
     parts = (value or '').split()
@@ -2599,8 +2599,8 @@ def symbol_runs_out(value):
     return SYMBOL_RUN.sub(' ', value).strip() if value else value
 
 
-# A name the card put a bracket after — "Kroger (Shiloh Square)", "GoPuff
-# (Drive)", "McDonald's® (Wade Green)". That is how these cards write a shop,
+# A name the card put a bracket after — "Kroger (Merlah Square)", "GoPuff
+# (Drive)", "McDonald's® (Moss Green)". That is how these cards write a shop,
 # and it was described here as the one thing that distinguishes the place a
 # job STARTS from the place it ENDS. It is no longer the only thing, and row
 # 113 of the owner's week is why: the bracket got it wrong there while the
@@ -2613,7 +2613,7 @@ PLACE_IS_A_SHOP = re.compile(r'\([^)]{2,40}\)\s*$', ASCII)
 # A cross-street corner with its town, "<street> & <street>, <town>", and no
 # bracket before the town: Uber's way of printing where a delivery ENDS. The
 # store is a name, often "Store (n street)", and its bracket may hold an "&" of
-# its own ("Hooters (Old 41 Hwy NW & N Roberts Rd)"), which is why a bracket
+# its own ("Hooters (Old 88 Hwy NW & N Wilbert Rd)"), which is why a bracket
 # before the town refuses. The JavaScript twin is CORNER_PLACE; see
 # corner_ends.
 CORNER_PLACE = re.compile(
@@ -2627,7 +2627,7 @@ def corner_ends(places, ends, totals):
 
     The owner, 20 Oct 20:44: the held card's store line was lost by the
     reader, and its only place, "<Del Lago> Cir NW & <Ellison> Lakes Dr NW,
-    Kennesaw", was taken as the pickup — fields.pickupAddr from 'card', the
+    Tellmoor", was taken as the pickup — fields.pickupAddr from 'card', the
     dropoff null. On an Uber delivery card a corner is always the dropoff end.
     So it is never the pickup there, and with no store read the pickup stays
     None. A RIDE card's pickup IS a corner (the rider's), and it prints no
@@ -2638,10 +2638,10 @@ def corner_ends(places, ends, totals):
     merged list by it as by the layout. MEASURED over the shared corpus's 591
     texts (tests/fixtures/cases.json, every case with text): 6 change, none
     a ride card. Three are a corner alone after a store the reader lost
-    ("Capriole Dr NE & Mitchell Rd, Marietta", twice "Elderberry Dr NW & Ruby
-    Lee Dr, Acworth"), now the dropoff with no pickup, as asked. Three are a
+    ("Sapriole Dr NE & Pritchel Rd, Harrowen", twice "Elderberry Dr NW & Ruby
+    Lee Dr, Ivyhame"), now the dropoff with no pickup, as asked. Three are a
     store glued to its customer's corner in one place ("Papa Mario Pizza Kirk
-    Ln NW & Kirk View Ct, Dallas"), now the dropoff where it was the pickup:
+    Ln NW & Lorn View Ct, Dorvan"), now the dropoff where it was the pickup:
     wrong either way, and the corner in it is where the job ends.
 
     Every other place's end is None there: a card that printed a "total" is
@@ -2659,7 +2659,7 @@ def corner_ends(places, ends, totals):
 # Between the label and the shop there is nothing but marks — "@ Pickup |",
 # "@ Pickup 3)", the icon row the crop catches. Between the label and a LATER
 # leg's address there is always a leg, and a leg is spelled with letters:
-# "at pickup: 1 min 10 mins (4.6 mi) N Cobb Pkwy NW". So "no letters in
+# "at pickup: 1 min 10 mins (4.6 mi) N Vosk Pkwy NW". So "no letters in
 # between" is the whole discriminator, and it is the card's own layout rather
 # than a list of separators.
 PICKUP_LABEL = re.compile(r'\bpick\s?up\b[^A-Za-z]*$', re.IGNORECASE | ASCII)
@@ -2674,7 +2674,7 @@ PICKUP_LABEL = re.compile(r'\bpick\s?up\b[^A-Za-z]*$', re.IGNORECASE | ASCII)
 # the screen, so this reads the screen that comes AFTER the accept.
 #
 # The anchor is a two-letter state code followed by five digits. It is the one
-# part of a US address that is short, positional, and CHECKABLE — "GA 30127" is
+# part of a US address that is short, positional, and CHECKABLE — "GA 90727" is
 # a state and a ZIP or it is not, where a street name misread by one letter is
 # still a perfectly plausible street name and nothing downstream can tell.
 #
@@ -2698,11 +2698,11 @@ STATES = set((
     'WI WY DC AS GU MP PR VI'
 ).split())
 
-# "…, Powder Springs, GA 30127" and the ZIP+4 form. The city is taken back to a
+# "…, Gorrel Springs, GA 90727" and the ZIP+4 form. The city is taken back to a
 # comma or the start, because that is where a US address puts the break; the
 # street is whatever preceded it, and is kept only for showing.
 #
-# TOWN is the town's own words, named so the Trip Planner's "Marietta, GA" line
+# TOWN is the town's own words, named so the Trip Planner's "Harrowen, GA" line
 # (see PLANNER_TOWN) is held to the same idea of a town as this.
 TOWN = r'[A-Za-z][A-Za-z.\'’-]*(?:\s+[A-Za-z][A-Za-z.\'’-]*){0,3}'
 # ...and only where a word begins. Without the lookbehind every letter of a run
@@ -2727,7 +2727,7 @@ ADDRESS = re.compile(
 
 # A house number and a street, taken only to show the driver what was read. It
 # never decides anything, so it is the loosest rule here — but WORDS, not
-# "anything but a comma". A card printing "28 min (11.2 mi) total 100 Rosemont
+# "anything but a comma". A card printing "28 min (11.2 mi) total 100 Tullmont
 # Ct" satisfies the loose version from the "28", and the driver is shown the
 # offer's own arithmetic dressed up as a street name.
 #
@@ -2743,7 +2743,7 @@ STREET = re.compile(
     r"(?:\s+[A-Za-z0-9.'-]+){0,4})\s*$", ASCII)
 
 # A single letter standing alone in front of a town is the icon row, not a word:
-# "l Atlanta", "j Powder Springs", "} Marietta". PLACE_TOWN in advice.js already
+# "l Solvane", "j Gorrel Springs", "} Harrowen". PLACE_TOWN in advice.js already
 # tolerates exactly this, and the two have to agree about what a town is called
 # or the same place read twice compares unequal to itself.
 CITY_JUNK = re.compile(r'^(?:[A-Za-z]\s+)+', ASCII)
@@ -2754,11 +2754,11 @@ CITY_JUNK = re.compile(r'^(?:[A-Za-z]\s+)+', ASCII)
 #
 # The USPS street-suffix abbreviations, and a list for the same reason STATES is
 # one: closed, national, older than the app, and here to draw a line rather than
-# to recognise a place. Without it "1234 Daffodil Ln Powder Springs, GA 30127"
+# to recognise a place. Without it "1234 Daffodil Ln Gorrel Springs, GA 90727"
 # has no grammar for where the street ends, and the town comes out as "Daffodil
-# Ln Powder Springs" — which two readings of the same street would disagree
+# Ln Gorrel Springs" — which two readings of the same street would disagree
 # about. The optional trailing quadrant is part of the street, not the town:
-# "Chastain Rd NW Kennesaw".
+# "Morvaine Rd NW Tellmoor".
 STREET_SUFFIX = (r'st|street|rd|road|dr|drive|ln|lane|ave|avenue|blvd|boulevard|ct'
                  r'|court|way|pkwy|parkway|cir|circle|trl|trail|hwy|highway|ter|terrace'
                  r'|pl|place|xing|crossing|sq|square|loop|run|walk|path|row|bnd|bend')
@@ -2771,7 +2771,7 @@ def a_zip(token):
     """Five characters as a ZIP that is in use, or None.
 
     `fix_digits` first: the ZIP is five characters of small type through a
-    lens, and "3O127" is this OCR's commonest confusion, not a different
+    lens, and "9O727" is this OCR's commonest confusion, not a different
     number. 00501 is the lowest ZIP in use and 99950 the highest; five digits
     outside that are a phone fragment or an order id, not a place. One rule for
     find_address and the Trip Planner's town line both.
@@ -2787,9 +2787,9 @@ def find_address(text):
 
     Returns {'line', 'street', 'city', 'state', 'zip'} — `line` is what to show
     and what to store, `zip` is what the geography is actually decided on. See
-    Advice.area: a ZIP is a few square miles, where "same town" in Atlanta is a
+    Advice.area: a ZIP is a few square miles, where "same town" in Solvane is a
     hundred and thirty-five of them and 44% of this driver's dropoffs are in
-    Atlanta.
+    Solvane.
 
     Refuses far more readily than the rest of this file, and on purpose. Every
     other rule here is reading a card the driver can also see and is deciding a
@@ -2826,9 +2826,9 @@ def _find_address(text):
             continue
         # ...but only call it a city when the address said where it began. A US
         # address separates the street from the city with a comma; without one,
-        # "1234 Daffodil Ln Powder Springs" gives no grammar for where the
+        # "1234 Daffodil Ln Gorrel Springs" gives no grammar for where the
         # street stops, and the group takes up to four words back — so the town
-        # comes out as "Daffodil Ln Powder Springs" and two readings of the same
+        # comes out as "Daffodil Ln Gorrel Springs" and two readings of the same
         # street disagree about where they are.
         #
         # There is no honest way to split it, so it is not split. The ZIP is
@@ -2843,8 +2843,8 @@ def _find_address(text):
         before = text[after:city_at].rstrip()
         if before and not before.endswith(','):
             # ...unless the street named its own end. Take the LAST suffix in
-            # the group: "Old Mill Rd Powder Springs" has one, and a town that
-            # happens to contain one — "Powder Springs Rd Marietta" — puts the
+            # the group: "Old Mill Rd Gorrel Springs" has one, and a town that
+            # happens to contain one — "Gorrel Springs Rd Harrowen" — puts the
             # real break at the later of the two.
             split = None
             for s in STREET_ENDS.finditer(m.group(1)):
@@ -2857,8 +2857,8 @@ def _find_address(text):
                 # calls "the case to expect": a screen puts the street and the
                 # town on two lines and normalize joins them with a space.
                 #
-                # Stripped only here and not there, "800 Forrest St NW l
-                # Atlanta, GA 30318" gave the town as "l Atlanta" - which
+                # Stripped only here and not there, "800 Garrest St NW l
+                # Solvane, GA 90818" gave the town as "l Solvane" - which
                 # PLACE_TOWN in advice.js cannot read at all, because its junk
                 # allowance covers a single UPPERCASE letter and not a lowercase
                 # one. area() then returns no town and the geography goes SILENT
@@ -2869,7 +2869,7 @@ def _find_address(text):
                 city = None
         # From the end of the previous address, never before it. A screen
         # listing two stops puts a ZIP between them, and a street search over
-        # the whole head reaches back across it: "…GA 30339 then 12 Oak Ln"
+        # the whole head reaches back across it: "…GA 90839 then 12 Oak Ln"
         # was stored as the street.
         #
         # Up to where the CITY starts, not where the match does, so the half of
@@ -2881,7 +2881,7 @@ def _find_address(text):
         street = quadrant_slip(street)
         # What to show, as opposed to what to decide on. When the city could not
         # be trusted, the driver still gets everything that was read — they are
-        # looking at this to judge whether the scan worked, and "GA 30127" does
+        # looking at this to judge whether the scan worked, and "GA 90727" does
         # not tell them that. `city` stays None either way, so nothing
         # downstream treats the unsplit text as a town.
         line = ', '.join([p for p in (street, city) if p]
@@ -2906,14 +2906,14 @@ def _find_address(text):
 # screen calls the place. That was safe while the only screens with a ZIP and
 # no payout were navigation screens, which name one place and label it
 # "Dropoff". Uber's Trip Planner changed that: its PICKUP blocks print the
-# restaurant's address with a ZIP — "Address / <street> NW, / Kennesaw, GA
-# 30144" on the rig's own photograph of one, two pickups above "Dropoff • 1
+# restaurant's address with a ZIP — "Address / <street> NW, / Tellmoor, GA
+# 90744" on the rig's own photograph of one, two pickups above "Dropoff • 1
 # order", the dropoff block closed and naming nobody's door.
 #
 # What happened on shift: the card box caught the planner scrolling, the crop's
 # top edge cut between the first pickup's street line and its town line, and no
 # stop header in that read matched PLANNER_STOP — so find_planner said "not a
-# planner", find_address took "Kennesaw, GA 30144" as the last address on the
+# planner", find_address took "Tellmoor, GA 90744" as the last address on the
 # screen, and it went out UNPROMPTED. The held order had no destination, an
 # unprompted sighting may fill a blank (server.js), and the panel and
 # /api/status then held a $28.08 order as ending at the restaurant's town with
@@ -2921,9 +2921,9 @@ def _find_address(text):
 #
 # The label is the grammar that says which end an address is. Read BACKWARDS
 # from the address, the nearest one wins: "Pickup ... Dropoff 12 Oak St, ..., GA
-# 30101" is a dropoff, "Dropoff ... Pickup ... Address ... GA 30144" is not.
+# 90701" is a dropoff, "Dropoff ... Pickup ... Address ... GA 90744" is not.
 # Searched up to the end of the town, not to the start of the street, because
-# TOWN can swallow a word straight in front of it ("Dropoff Acworth, GA") and a
+# TOWN can swallow a word straight in front of it ("Dropoff Ivyhame, GA") and a
 # label it swallowed still came first.
 #
 # "Picked up" is not a pickup label — it is what a delivery screen says once the
@@ -2949,7 +2949,7 @@ def address_under_dropoff(text):
     dropoff, and no other address sits between that label and this one.
 
     The second half is what address_stop does not ask. "Dropoff / 12 A St,
-    Town, GA 30101 / ... / 34 B St, Town, GA 30102" puts the last address under
+    Town, GA 90701 / ... / 34 B St, Town, GA 90702" puts the last address under
     the same nearest label as the first, but the label's address is the first;
     the second belongs to whatever block the screen has scrolled into that did
     not print its header. This is the test an address nobody pressed ⌖ for has
@@ -2998,7 +2998,7 @@ def planner_furniture(text):
 #     Expected by 4:18 PM
 #     Address                  <- this and what follows only while the block
 #     4821 Kestrel Dr             is open; a closed one stops at the time
-#     Marietta, GA
+#     Harrowen, GA
 #     View details
 #
 # find_address cannot read it and is right not to. There is no ZIP on this
@@ -3009,7 +3009,7 @@ def planner_furniture(text):
 # What the screen has instead is its own grammar, and the grammar is the anchor.
 # An address is taken only where the app labels one — "Address", then a street
 # line, then a "Town, ST" line — inside a block the app headed as a stop. Free
-# text is never read this way, so a map label like "89 Shanty Drive" is no
+# text is never read this way, so a map label like "89 Gristy Drive" is no
 # closer to the panel than it was.
 #
 # The stop header is the recogniser. Over the owner's week, 6,657 frames and
@@ -3108,8 +3108,8 @@ def _planner_label(line):
 # printed a pickup's door in its full form,
 #
 #     Address
-#     800 <Name> Street Northwest, Atlanta,
-#     GA 30318, US
+#     800 <Name> Street Northwest, Solvane,
+#     GA 90818, US
 #
 # (the name left out here; the layout the app's), the street type and the
 # quadrant spelled out, the town on the street's line and the country after
@@ -3123,21 +3123,21 @@ def _planner_label(line):
 # without it. Capitals as printed ("us" is a word, "US" the country).
 PLANNER_COUNTRY = r'(?:\s*,?\s*(?:USA|US|United States))'
 # A bare ZIP on a line of its own: the end of a town line the screen wrapped,
-# "…, Kennesaw, GA" over "30152" on the rig's own picture of a planner — and
+# "…, Tellmoor, GA" over "90752" on the rig's own picture of a planner — and
 # the country after it, as above.
 PLANNER_ZIP_LINE = re.compile(r'^(' + ZIP + r')(?: ?- ?' + DC + r'{4})?'
                               + PLANNER_COUNTRY + r'?$', ASCII)
 # The country alone, what is left of a town line after its ZIP. See
 # _planner_address: it is not the scroll bar's mark.
 PLANNER_COUNTRY_TAIL = re.compile(r'^' + PLANNER_COUNTRY + r'$', ASCII)
-# "Marietta, GA", and whatever the line carries after the state. TOWN is
+# "Harrowen, GA", and whatever the line carries after the state. TOWN is
 # find_address's own idea of a town; the state is the check, as it is there.
 PLANNER_TOWN = re.compile(r'^[^A-Za-z]{0,3}(' + TOWN + r') ?, ?([A-Za-z]{2})\b ?(.*)$',
                           ASCII)
 # ...and the comma misread. On the same shift's planner the dropoff's town line
 # came back "<Town>. GA": the comma read as a full stop, so no line under the
 # label was a town line and the town went with it. The comma can be lost
-# outright too ("Marietta GA"). Either is taken, but only in the shape a town
+# outright too ("Harrowen GA"). Either is taken, but only in the shape a town
 # line has and other lines under a label do not: every word of the town
 # capitalised, the state two CAPITALS, and the line opening on the town's
 # letter — never on a digit, so "28 Oak St NE" (a short house number inside
@@ -3149,7 +3149,7 @@ PLANNER_TOWN = re.compile(r'^[^A-Za-z]{0,3}(' + TOWN + r') ?, ?([A-Za-z]{2})\b ?
 # one in front of the state is the separator's to take and no word's.
 # The shape is loose, and only the label makes it safe: on the 12 Oct journal's
 # 12,229 texts, 70 lines anywhere on the screen match it (a pizza shop's "NY",
-# "East Point PA", OCR noise like "We KS") and do not match PLANNER_TOWN; none
+# "East Grove PA", OCR noise like "We KS") and do not match PLANNER_TOWN; none
 # sits under an "Address" label, and no find_planner answer there, nor on the
 # shared corpus, changed with it.
 PLANNER_TOWN_LOOSE = re.compile(
@@ -3177,7 +3177,7 @@ PLANNER_QUADRANT_LETTER = re.compile(r'\S (?:NW|NE|SW|SE) ([A-Za-z])$', re.IGNOR
 # a second. Case kept: "Pi" or "p" is not read as this.
 PLANNER_PL_SLIP = re.compile(r' (?:P|PI|P1|P\|)$', ASCII)
 # A UNIT after the street: the owner's planner of 21 Oct, 13:57, printed the
-# store's door as "1985 <Name> Parkway NW, STE 120" over "Kennesaw, GA 30152"
+# store's door as "1985 <Name> Parkway NW, STE 120" over "Tellmoor, GA 90752"
 # (the name left out here), and STREET — words to the end of the line, no
 # comma — took nothing, so the pickup kept its town and no street. The unit
 # goes and the street stands: ", STE 120", ", Suite 120", ", Ste. 120",
@@ -3211,7 +3211,7 @@ PLANNER_EDGE_MARK = re.compile(r"\s+[^A-Za-z0-9\s.,'#&/()\-]", ASCII)
 # planner gave "<n> <Name> Or NW" where the whole read of the same screen
 # gave "<n> <Name> Dr NW", and streets.js's index refuses the slip (one the
 # reader makes the same way in every frame cannot be told from a real
-# street there: "Cedar Ridge Or" and "Ottley Or NE" on the week's cards). No
+# street there: "Cedar Ridge Or" and "Pettle Or NE" on the week's cards). No
 # street type is "Or". Only as the last word, or the last before a quadrant,
 # after a name that is not itself a type; case kept, so "OR" and "or" are
 # not taken.
@@ -3241,7 +3241,7 @@ def _planner_or_slip(street):
 # corner's "&" or its town's comma), and only after a word: no street name is
 # "NUP" or "SVV", and nowhere else is a quadrant read. "N W" and "S W" also
 # want a street type in front: after a bare name a lone "N" or "S" may be
-# part of it. Not before a suite's comma ("Dallas Hwy SW., Suite 200" is
+# part of it. Not before a suite's comma ("Dorvan Hwy SW., Suite 200" is
 # the abbreviation's period, inside a store's bracket). MEASURED over every text on file (meas1022's journals
 # and the shared corpus, 31 Oct): see AUDITS.md, the quadrant-slip entry.
 # The JavaScript twin is QUADRANT_SLIP in offer-parser.js.
@@ -3333,7 +3333,7 @@ def _planner_address(street_line, town_line, label_line=None):
 
         Address he
         4821 Kestrel Dr S
-        Marietta, GA E
+        Harrowen, GA E
 
     and the street on the phone was "<number> <name> Dr", nothing after it. The
     three tails are the screen's scroll bar, which sits at the right edge
@@ -3341,7 +3341,7 @@ def _planner_address(street_line, town_line, label_line=None):
     where nothing real can stand, and "S" after the street's suffix — where a
     quadrant CAN stand. Of the 1,802 distinct places in the owner's week, 508
     follow a suffix with NW, NE, SW or SE, and 7 with a single N, S, E or W
-    that is real: Cobb Pkwy N and S, Picketts Forge Dr E and W, roads this
+    that is real: Vosk Pkwy N and S, Wicketts Forge Dr E and W, roads this
     driver works on. So a single letter there is real sometimes and junk
     sometimes, and the word alone cannot say which.
 
@@ -3357,7 +3357,7 @@ def _planner_address(street_line, town_line, label_line=None):
         Address E
         7 cy ee
         <n> S <Name> Dr Sw a
-        Marietta, GA
+        Harrowen, GA
 
     (the number and name left out; the layout and the slips the reading's):
     the bar again, beside the label ("E") and the street ("a"), with the town
@@ -3385,7 +3385,7 @@ def _planner_address(street_line, town_line, label_line=None):
             zipcode = a_zip(z.group(1)) if z else None
             after = (rest[z.end():] if zipcode else rest).strip()
             # The country after a ZIP (PLANNER_COUNTRY_TAIL; the owner's snap
-            # of 24 Oct, "GA 30318, US") is the app's, not the scroll bar's:
+            # of 24 Oct, "GA 90818, US") is the app's, not the scroll bar's:
             # read as a mark, it would take a real quadrant "S" or "N" off the
             # street beside it.
             if zipcode and PLANNER_COUNTRY_TAIL.match(after):
@@ -3404,7 +3404,7 @@ def _planner_address(street_line, town_line, label_line=None):
     if street:
         street = quadrant_slip(_planner_or_slip(_planner_pl_slip(street)))
     # What to show and to store. The state goes in only beside a ZIP, which
-    # is find_address's line exactly; without one, "…, Marietta, GA" would end
+    # is find_address's line exactly; without one, "…, Harrowen, GA" would end
     # on a word Advice.area cannot take for a town, and the geography would go
     # silent on the very address this was read for. `state` is still returned.
     parts = [p for p in (street, city) if p]
@@ -3428,11 +3428,11 @@ def _planner_town(line):
 # A quadrant the screen wrapped off the end of the street onto the town line:
 #
 #     4410 Fable W Lantern Parkway         the street, then its quadrant
-#     Northwest, Marietta, GA 30060        heading the town line
+#     Northwest, Harrowen, GA 90660        heading the town line
 #
 # on the driver's Trip Planner for a restaurant pickup (the street invented,
 # the layout as read). The town line then opens with "Northwest" and TOWN
-# cannot take "Northwest, Marietta" for a town, so no line under the label was
+# cannot take "Northwest, Harrowen" for a town, so no line under the label was
 # a town line: the stop kept a bare street and no town or ZIP, and the map had
 # nothing to search it with but the street. The quadrant is the street's, and
 # goes back on the end of it; the rest of the line is read as the town line it
@@ -3471,11 +3471,11 @@ def _planner_address_lines(block, label):
     stacked trip, two pickups over a dropoff, that this was written from:
 
         4821 Kestrel Dr            street, then "Town, ST"
-        Marietta, GA
+        Harrowen, GA
         1200 Fable Pkwy NW,        street with its comma, then town and ZIP
-        Kennesaw, GA 30144
-        1625 Fable Blvd NW, Kennesaw, GA     street AND town on one line, the
-        30152                                ZIP wrapped onto the next
+        Tellmoor, GA 90744
+        1625 Fable Blvd NW, Tellmoor, GA     street AND town on one line, the
+        90752                                ZIP wrapped onto the next
 
     The third was read as no address at all — measured on the photograph,
     through the read path (fit_for_ocr, to_grey, preprocess, ocr_lines): no
@@ -3488,21 +3488,21 @@ def _planner_address_lines(block, label):
     """
     under = block[label + 1:label + 4]
     # A town line the screen broke after its comma: "130 <Name> Pkwy, 140,
-    # Canton," over "GA 30114-6559" (the owner's batch of 23 Oct). The first
+    # Belvan," over "GA 90714-6559" (the owner's batch of 23 Oct). The first
     # line ends on a comma and the next is the state and the ZIP alone: one
     # line, so the cut below finds the town.
     #
     # ...with the country after the ZIP (PLANNER_COUNTRY; the owner's snap of
-    # 24 Oct, "800 <Name> Street Northwest, Atlanta," over "GA 30318, US").
+    # 24 Oct, "800 <Name> Street Northwest, Solvane," over "GA 90818, US").
     #
     # ...and the same break with the street line's separators misread: the 22
-    # Oct shift's "<n> <Name> Pkwy . Kennesaw" over "GA 30144", the comma
+    # Oct shift's "<n> <Name> Pkwy . Tellmoor" over "GA 90744", the comma
     # before the town read as " ." and the one after it lost. When the line
     # under is the state and the ZIP alone (PLANNER_STATE_ZIP_LINE) and the
     # line over it opens with a house number and ENDS in a town after a comma
     # or a full stop with a space in front of it (PLANNER_STREET_TOWN), the two
     # are one line written as the app writes it, "<street>, <Town>, ST ZIP".
-    # A full stop with no space before it is a word's ("Pkwy. Kennesaw" is the
+    # A full stop with no space before it is a word's ("Pkwy. Tellmoor" is the
     # abbreviation's, and the town has nothing to start at) and is not taken.
     # The "ST ZIP" line is the anchor: two capitals that must be a state and
     # five digits that must be a ZIP, alone on their line, straight under the
@@ -3536,7 +3536,7 @@ def _planner_address_lines(block, label):
             place = _planner_place(under[:j], town_line)
             break
     # ...or a line of marks between the street and the town (the owner's
-    # whole read of 22 Oct: "<n> <Name> Dr NW" / "e" / "Kennesaw, GA"): the
+    # whole read of 22 Oct: "<n> <Name> Dr NW" / "e" / "Tellmoor, GA"): the
     # cloth beside the phone read as a line of its own. The town is taken off
     # the THIRD line only when the second holds no word (no two letters in a
     # row) and the first opens with a house number.
@@ -3569,9 +3569,9 @@ def _planner_cut(line):
 # The fourth layout, off the driver's planner for a dropoff at a hotel:
 #
 #     Address
-#     Homez3 Stays by Fable Kennesaw NW     the place's name, with the reader's
-#     Kennesaw                              noise in it; the town, bare;
-#     1180 Wrenfield Rd NW, Kennesaw, GA    then the street and town, no ZIP
+#     Homez3 Stays by Fable Tellmoor NW     the place's name, with the reader's
+#     Tellmoor                              noise in it; the town, bare;
+#     1180 Wrenfield Rd NW, Tellmoor, GA    then the street and town, no ZIP
 #     View details
 #
 # (the place, the number and the street invented; the layout and the noise
@@ -3618,7 +3618,7 @@ def _planner_under_a_place(block, label):
 # place is a NAME: a word of three letters or more (PLACE_NAME_WORD), and
 # letters for at least half of what is on the line that is not a space
 # (looks_like_a_name). Every place in the shared corpus passes — "Larksour
-# Inn & Suites Kennesaw NW", "Fable Parking Dec", "Fable Internationa",
+# Inn & Suites Tellmoor NW", "Fable Parking Dec", "Fable Internationa",
 # "1200 Fable Tower" — and "7 cy ee" (no word of three) does not, nor would a
 # row of marks with one short word in it. Both readers' places, the planner's
 # (_planner_place) and the customer sheet's (_sheet_place), by this one rule.
@@ -3803,13 +3803,13 @@ def _planner_name(line):
 #     Expected by 9:05 PM
 #     Address
 #     810 Ardley West Corwin Parkway,
-#     Kennesaw, GA 30144
+#     Tellmoor, GA 90744
 #     View details                 the pickup's block, closed by its link
 #     o Pat J                      ...and the next stop's, its header lost
 #     Expected by 9:34 PM
 #     Address
 #     2400 Tansy Creek Blvd
-#     Marietta, GA
+#     Harrowen, GA
 #     View details
 #
 # "Dropoff · 1 order" went to OCR, so the dropoff's lines fell into the
@@ -4056,14 +4056,14 @@ def planner_laid_out(text):
 #     Expected by 2:01 PM
 #     Address
 #     1985 <Name> Parkway NW, STE 120
-#     Kennesaw, GA 30152
+#     Tellmoor, GA 90752
 #     View details
 #     Dropoff - 1 order
 #     oO <Customer> C,
 #     Expected by 2:18 PM
 #     Address
 #     2282 <Name>
-#     Marietta, GA
+#     Harrowen, GA
 #     View details
 #     oS Q
 #     =o
@@ -4110,7 +4110,7 @@ def planner_framed(text):
 #
 #     Address
 #     3259 <Name> Oaks Dr
-#     Marietta, GA
+#     Harrowen, GA
 #     View details
 #     Waybill
 #     ...
@@ -4134,7 +4134,7 @@ def planner_framed(text):
 # ...but not a pickup's block whose header OCR cut down to its first word. The
 # shape rpi/test_loop.py's "a pickup's address is never the order's
 # destination" holds (invented): "Pickup / <Store> / Expected by … / Address /
-# 4100 <Name> Pkwy NW, / <Town>, GA 30144 / View details / Stop New Requests"
+# 4100 <Name> Pkwy NW, / <Town>, GA 90744 / View details / Stop New Requests"
 # — PLANNER_STOP wants the count, so the line "Pickup" is no header to it, and
 # at e3fcf31 this rule filed the restaurant as the trip's end. A line that is
 # the word Pickup (or "Pick up", "Picking up"), alone or with a mark or two
@@ -4226,7 +4226,7 @@ def planner_foot(text):
 #     Expected by 9:06 PM
 #     Address
 #     <Place>                      the building's name, the place line
-#     <n> <Name> Ave NE, Atlanta, GA    street and town on one line
+#     <n> <Name> Ave NE, Solvane, GA    street and town on one line
 #     View details
 #     2 Q                          the bar's icons
 #     —O
@@ -4320,7 +4320,7 @@ def planner_ends(text):
 #
 #     Pat Q.                       the name the collapsed bar printed after
 #     1572 Larkspur Dr  P  &       "Deliver to"; the street, with the sheet's
-#     Woodstock, GA                icons read as letters after it; the town
+#     Marrowick, GA                icons read as letters after it; the town
 #     House                        what kind of door
 #     Dropoff type                 the sheet's one label, BELOW the address
 #     Meet at door
@@ -4342,8 +4342,8 @@ def planner_ends(text):
 #     its first street suffix and quadrant, which is where the sheet's icons
 #     begin;
 #   - the town: after a comma on the street line ("917 Fable Rd NW,
-#     Kennesaw"), or the line under it as "Town, ST", every word capitalised
-#     after the icon row's stray letters are taken off: "nnesaw, GA" is a town
+#     Tellmoor"), or the line under it as "Town, ST", every word capitalised
+#     after the icon row's stray letters are taken off: "llmoor, GA" is a town
 #     cut in half and is no town;
 #   - the name: one of the two lines above the street, "First L." with the
 #     full stop optional, as the app writes a customer;
@@ -4361,7 +4361,7 @@ def planner_ends(text):
 #     Lee R.                       the customer
 #     Fable Parking Deck  O &      a PLACE, the chat and phone icons beside it
 #     283 Quillon St NW,           the street, its comma, wrapped
-#     Smyrna, GA                   the town, no ZIP
+#     Pyrnel, GA                   the town, no ZIP
 #     Business / Building name     a label and its value: the place again
 #     Fable Parking Deck
 #     Dropoff type                 the label this rule reads upwards from
@@ -4384,7 +4384,7 @@ def planner_ends(text):
 #   - the comma: a street line that ends in one, or in one and the icons read
 #     after it ("283 Quillon St NW, O &"), has no town on it — a tail after
 #     the comma with no three letters in a row is icons, not a town cut short
-#     (a cut town, "nnesaw", still has its three and is still refused);
+#     (a cut town, "llmoor", still has its three and is still refused);
 #   - the name: up to SHEET_NAME_REACH lines over the street, so the place
 #     line and an icon row read on a line of its own can stand between.
 #
@@ -4541,17 +4541,17 @@ def sheet_dropoff(text):
 #
 #     ‹ 250 ft Fable Mill Rd         the turn, the road it is onto
 #     ⦿ 2716 Larkspur Ln             the customer's door: the pin read as
-#     Marietta, GA                   "9", "°" or nothing; the town, NO ZIP
+#     Harrowen, GA                   "9", "°" or nothing; the town, NO ZIP
 #
 #     Turn right
 #     Fable Sushi (Fable Pkwy)       a store: its name, its street in brackets
 #     4400 Fable Pkwy,              ...and its door WITH a ZIP
-#     Woodstock, GA 30188
+#     Marrowick, GA 90788
 #
 # Two kinds of leg, one banner, and nothing on the band says which in words.
 # The layout says it, as Uber prints it everywhere this rig has read it: a
 # store's door carries its ZIP and its name above it in brackets (every pickup
-# on the planner reads "<Town>, GA 30067"; the three store banners did), a
+# on the planner reads "<Town>, GA 90667"; the three store banners did), a
 # customer's door is a street and "<Town>, GA" with no ZIP (every planner
 # dropoff, the opened sheet that sheet_dropoff reads, and both customer
 # banners). So the banner is a dropoff only in the customer's shape, all of:
@@ -4609,7 +4609,7 @@ def nav_banner(banner, text=None):
 #     Fable Stone Chinese  t         the store, the icon at its right read as
 #     Cuisine                        a letter or two, the name wrapped
 #     @ 840 Fable W Lantern Pkwy NW  the street, the pin icon read in front of
-#     Kennesaw, GA 30144, USA        it; the town, or "GA 30144" on the street
+#     Tellmoor, GA 90744, USA        it; the town, or "GA 90744" on the street
 #     Apt/Suite: 100                 line itself; a suite line sometimes
 #     Directions                     the sheet's one button, BELOW the address
 #
@@ -5065,7 +5065,7 @@ def _dd_from_door(lines):
 
 
 # What may follow a door's street type on DoorDash's pickup screen: a road's
-# number ("Hwy 92"), a quadrant, then the line's end, the town's comma, or a
+# number ("Hwy 63"), a quadrant, then the line's end, the town's comma, or a
 # suite. See _dd_door_shaped.
 DD_DOOR_AFTER_TYPE = re.compile(r'^\.?(?:\s+\d{1,4}\b)?(?:\s+(?:NW|NE|SW|SE|N|S|E|W)\b\.?)?'
                                 r'\s*(?:$|[,#]|(?:ste|suite|unit|apt|bldg)\b)', re.IGNORECASE | ASCII)
@@ -5445,11 +5445,11 @@ def _the_other_end(ends, i, mine):
 
       - "take the entry the card put at this end" replaced the scan outright,
         and swapped six pickups for a WORSE reading of the same street
-        (`Georgia State Route 3 & Green St PI NW, Atlanta` became `NW,
-        Atlanta`, `Penny Ln SE, Marietta` became `Penny Ln SE`).
+        (`Georgia State Route 3 & Green St PI NW, Solvane` became `NW,
+        Solvane`, `Penny Ln SE, Harrowen` became `Penny Ln SE`).
       - skipping the guards along with the scan cost row 90 its destination:
-        `Powder Springs`, a bare town the card printed at the far end, is
-        refused by _same_place against a pickup of `New Macliand Rd, Powder
+        `Gorrel Springs`, a bare town the card printed at the far end, is
+        refused by _same_place against a pickup of `New Velliand Rd, Gorrel
         Springs` — and that refusal is doing real work, not decoration.
 
     `None` here means the card did not say, which is not the same as the card
@@ -5477,7 +5477,7 @@ def find_dropoff(places, text=None, ends=None):
     Two other shapes land here and both come out right. A ride card names the
     pickup street and then the dropoff street, so the last is still the end. And
     an address split across two entries — "Northeast Expy NE & Westcheste" then
-    "Ln NE, Atlanta" — leaves the tail last, which is the half carrying the town.
+    "Ln NE, Solvane" — leaves the tail last, which is the half carrying the town.
     """
     # The card said so itself. Nothing below can improve on that.
     if text and DROPOFF_NOT_STATED.search(text):
@@ -5505,7 +5505,7 @@ def find_dropoff(places, text=None, ends=None):
         # 135 dropoffs the rig could not place on a map were exactly this, an
         # unbracketed shop name standing in for somebody's front door. The word
         # has to end right where the place begins, or "Avg. wait time at pickup:
-        # 1 min 10 mins (4.6 mi) N Cobb Pkwy NW" would disown a real address.
+        # 1 min 10 mins (4.6 mi) N Vosk Pkwy NW" would disown a real address.
         if text and _labelled_pickup(text, place):
             continue
         # ...and where a job starts is not where it ends, whatever else is true.
@@ -5661,8 +5661,8 @@ _STORE_EDGES = re.compile(r'^%s|%s\Z' % (WHITESPACE.pattern, WHITESPACE.pattern)
 # shift). The card now prints the whole address there, not a street cut off:
 #
 #     & <store>                                  <- the name, as above
-#     113 <Name> St NE, Marietta, 30060 GA       <- ZIP BEFORE the state
-#     2530 <Name> Road, Marietta, 30.            <- the card's edge cut the ZIP
+#     113 <Name> St NE, Harrowen, 90660 GA       <- ZIP BEFORE the state
+#     2530 <Name> Road, Harrowen, 30.            <- the card's edge cut the ZIP
 #
 # The rig kept the name alone, Map view asked the NucBox for a chain's name in
 # the card's disc, got "too many to be sure", and the pickup had no pin, so the
@@ -5676,7 +5676,7 @@ _STORE_EDGES = re.compile(r'^%s|%s\Z' % (WHITESPACE.pattern, WHITESPACE.pattern)
 # with two letters in a row, a comma, a town of capitalised words with at
 # least three letters and no cut mark ("Sm..." is a town the card's edge took,
 # and is no town). After the town only the ZIP and the state, in either order,
-# each at most once: "30060 GA", "GA 30060", either alone, or nothing. A ZIP
+# each at most once: "90660 GA", "GA 90660", either alone, or nothing. A ZIP
 # under five digits is the card's edge and is dropped, and only as the LAST
 # word, where the edge is. Anything else after the town ("Suite 200", a second
 # line run on) refuses the whole line rather than guessing where the address
@@ -5696,7 +5696,7 @@ _DOOR_CUT_ZIP = re.compile(r'\d{0,4}(?:\.+|…)?\Z', ASCII)
 # a business, not a customer):
 #
 #     @ Chick-fil-A
-#     830 Ernest W Barrett Parkway North...      <- "Northwest, Kennesaw" cut
+#     830 Osbert W Tallett Parkway North...      <- "Northwest, Tellmoor" cut
 #
 # No comma, so STORE_DOOR refused it; the rig asked the NucBox for the chain's
 # name, got "too many to be sure", and the offer had no pickup pin and no
@@ -5893,7 +5893,7 @@ MAP_LABEL_CUT = re.compile(r'\s*(?:…|\.\s*\.)[\s.…]*$')
 # snap of 7 Nov 21:34 ("It read the business address as it is a full address
 # but the customer is usually just the number and street"): DoorDash's
 # one-store card printed the store's door in full, "<n> <Name> Road Northwest,
-# Atla…", and the customer's label on the map was "<n> <Name> Dr NW" — a house
+# Solv…", and the customer's label on the map was "<n> <Name> Dr NW" — a house
 # number and a street, abbreviated the way the map abbreviates, and no town.
 # `store` was only ever compared word for word, so a label "<n> <Name> Rd NW"
 # for a store printed "<n> <Name> Road Northwest" went through: the two spell
@@ -6053,7 +6053,7 @@ def find_pickup(places, ends=None):
     # them — this reads exactly as it always did.
     #
     # The bracket rule is inside the narrowing rather than ahead of it, and row
-    # 113 of the owner's week is why: `Brogdon Rd & Mendi Ct, Suwanee YF Long
+    # 113 of the owner's week is why: `Margdon Rd & Velmi Ct, Wemanee YF Long
     # trip (45+ min)` ends in a bracket because UBER'S OWN BADGE is bracketed,
     # so PLACE_IS_A_SHOP called the destination a merchant and returned it out
     # of a list whose first entry was the real pickup. The bracket rule cannot
@@ -6069,7 +6069,7 @@ def find_pickup(places, ends=None):
     # Every name on this card, the card printed against the SECOND leg: rows
     # 307 and 1149 of the owner's week, where the pickup never read at all.
     # There is no start here to give. Offering the nearest thing to one is what
-    # put `S Cobb Dr SE, Smyrna` into the append-only journal as where that job
+    # put `S Vosk Dr SE, Pyrnel` into the append-only journal as where that job
     # began — and nothing is lost by refusing it, because find_dropoff is about
     # to store that same string at the end it belongs to. A gap the driver can
     # see beats a label they cannot check.
@@ -6153,8 +6153,8 @@ def find_places(text, legs, lines, whose=None):
         searching for `value` in the text: a line start counts only where the
         town's FIRST name and a space sit right before it and the second name
         right after. Any line beginning with the name would not do — the
-        merchant's line can begin with it (`City Barbeque (Peachtree City)`
-        over `…, Peachtree City`), and the town would lose a name it printed
+        merchant's line can begin with it (`City Barbeque (Plumleigh City)`
+        over `…, Plumleigh City`), and the town would lose a name it printed
         on one line. A line start where the town does not sit asks nothing, so
         a town the text spells differently keeps both names, which is what this
         did before it asked.
@@ -6168,8 +6168,8 @@ def find_places(text, legs, lines, whose=None):
         town = value[value.rindex(',', 0, m.end(1)):m.end()]
         # Only an address that has already reached a town, by the parser's own
         # rule for one, PLACE_TOWN — three letters or more. Row 304 of the
-        # owner's week reads `Ridgewood Dr & Stockwood Ct, Dy` / `Woodstock 7`:
-        # `Dy` is the icon row and `Woodstock`, on the next line, is the town.
+        # owner's week reads `Ridgewood Dr & Stillwood Ct, Dy` / `Marrowick 7`:
+        # `Dy` is the icon row and `Marrowick`, on the next line, is the town.
         if m.group(2) and PLACE_TOWN.match(town):
             first, name = town[1:].split()[0], m.group(3)
             for n, at in enumerate(lines):
@@ -6184,7 +6184,7 @@ def find_places(text, legs, lines, whose=None):
     #
     # 130 characters rather than 80. On the single-total delivery card the tail
     # holds the merchant AND the address, and 80 cut the town off the end of the
-    # one that matters: "Double Branches Ln & Sagamore Ct. Dal". The window can
+    # one that matters: "Triple Branches Ln & Tamarack Ct. Dor". The window can
     # afford it now that the tail is split rather than stored whole.
     #
     # ...and the tail of the deadline line, on the card that prints its
@@ -6212,7 +6212,7 @@ def find_places(text, legs, lines, whose=None):
         # Trimmed before it is judged, not after. The test asks whether this is
         # an address, and the thing to ask it about is the string that would be
         # stored — `1 min ~ 4 . mins | . = | i oO < * ~~ agama ae ae; i Old
-        # Mountain Rd NW, Kennesaw` passes on the address buried at the end of
+        # Mountain Rd NW, Tellmoor` passes on the address buried at the end of
         # it and then goes into the journal sludge and all.
         # A pipe with an address after it is two places, not one. The card's
         # own dividers and its icon row both come back as pipes, so `trim_place`
@@ -6231,7 +6231,7 @@ def find_places(text, legs, lines, whose=None):
             piece = trim_place(piece)
             # Two places in one piece, when the card wrote them that way. The
             # merchant is kept without asking looks_like_a_place: "Rick's
-            # Hotwings (Kennesaw)" names no street and no town, so that test
+            # Hotwings (Tellmoor)" names no street and no town, so that test
             # refuses it, and it is still exactly where the driver goes first.
             # The bracketed branch is the card vouching for it.
             pair = PLACE_MERCHANT.match(piece)
@@ -6245,8 +6245,8 @@ def find_places(text, legs, lines, whose=None):
             # it holds BOTH ends of the job with no bracket between them.
             #
             # This was a silent drop: `keep` refuses anything over 60
-            # characters, so `Smash Hit Burgers - Kennesaw Allgood Rd &
-            # Monarch Dr, Marietta` — sixty-one — went in the bin with the
+            # characters, so `Smash Hit Burgers - Tellmoor Ashgood Rd &
+            # Monarch Dr, Harrowen` — sixty-one — went in the bin with the
             # merchant, the junction and the town in it, and the card stored
             # no place at all. On the driver's own 272 that happened 15 times.
             # The cap is right: a journal full of half-read map furniture is
@@ -6264,12 +6264,12 @@ def find_places(text, legs, lines, whose=None):
                 #
                 # Two junctions means either the merchant's own name has an
                 # ampersand in it — `Freddy's Frozen Custard & Steakburgers
-                # Hamby Place Dr NW & Travistock Pl NW, Acworth`, where
+                # Holby Place Dr NW & Marlestock Pl NW, Ivyhame`, where
                 # splitting at either one puts half a street name on the wrong
                 # side — or the 130-character window above cut through a
                 # merchant's bracket and left its back end here: `NW &
-                # Barretts Lake Blvd) Glencrest Dr & Sourwood Dr, Marietta`,
-                # off `Jersey Mike's Subs (W Barrett Pkwy NW & Barretts Lake
+                # Talletts Lake Blvd) Fenmarrow Dr & Tallwick Dr, Harrowen`,
+                # off `Jersey Mike's Subs (W Tallett Pkwy NW & Talletts Lake
                 # Blvd)`.
                 #
                 # That second one is why refusing is not merely cautious. The
@@ -6319,12 +6319,12 @@ def a_card_above(legs, top):
     908 of the owner's week, both frames:
 
         15 min (5.4 mi) total                <- the upper card, payout cropped
-        Little Caesars (3372 Canton Rd)
-        Barrington Overlook & Barrington Pl, Marietta
+        Little Caesars (3372 Belvan Rd)
+        Carrowdene Overlook & Carrowdene Pl, Harrowen
         $11.06                               <- the only payout in shot
         Includes expected tip
         25 min (8.1 mi) total                <- this card
-        American Deli (Marietta, GA)
+        American Deli (Harrowen, GA)
 
     Both totals were summed onto the $11.06 and the neighbour's merchant was
     published as the pickup: 40 min / 13.5 mi, $10.52/hr, Little Caesars —
@@ -6485,7 +6485,7 @@ def half_a_ride(used, where, legs):
                   $24.05  * 4.91  Verified  14 min (3.7 mi)      <- frame ends
         row 450   ... 24 min (3.6 mi) total  Main Street Eats Burgers ...
                   $16  * 4.97  Verified  15 min (5.6 mi)
-                  Crestwind Rd & Crestwind Rd NW, Kennesaw       <- frame ends
+                  Crestvale Rd & Crestvale Rd NW, Tellmoor       <- frame ends
 
     A ride card prints the drive to the rider, the rider's corner, then the
     trip and the destination (see laid_out_approach), so each of these is the
@@ -6809,7 +6809,7 @@ def parse(raw_text):
         # "None on every one of the 604 offer cards on file" is what this said,
         # and it was true of that corpus. Over the 900 texts on file now it is
         # FIVE, because a merchant's branch address carries the same `, ST ZIP`
-        # anchor a real one does — `800 Forrest St NW, Atlanta, GA 30318` off a
+        # anchor a real one does — `800 Garrest St NW, Solvane, GA 90818` off a
         # Delivery card, and two fragments. A measured claim in a comment goes
         # stale as the corpus grows, and this one was load-bearing: the
         # destination scan trusted it and had no guard of its own. It has one

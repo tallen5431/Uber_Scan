@@ -228,7 +228,7 @@ docker run -it --shm-size=1g -e PBF_PATH=/nominatim/data/georgia-latest.osm.pbf 
 
 **TIGER (US house numbers) was not imported.** The setting name that turns it
 on for this image was not found, and the import ran without it. House numbers
-in Cobb County are there anyway, from OSM itself (below); elsewhere a street
+in Vosk County are there anyway, from OSM itself (below); elsewhere a street
 may have none.
 
 ### What the real install answered
@@ -238,17 +238,17 @@ Measured against the driver's NucBox, over its Tailscale address (written
 
 | Asked | Answered |
 |---|---|
-| route Marietta Square (-84.5499,33.9526) → Five Points (-84.3880,33.7490) | 31307.4 m (19.5 road mi); OSRM's 1659.8 s is free-flow and is never used |
-| `q=McDonald's`, `viewbox=-84.65,34.04,-84.45,33.87`, `bounded=1`, `limit=10` | 10 branches, all inside the box, each with a house number and street ("McDonald's, 2700, Windy Hill Road Southeast, Cumberland, Marietta, Cobb County, 30067") |
-| `q=Shadowood Pkwy SE, Atlanta, GA` | nothing |
-| `street=Shadowood Parkway Southeast` in a bounded box, no town | 2, in Cumberland, Cobb County |
-| `street=1985 Cobb Parkway` in a bounded box | 3, at "1985, Cobb Parkway, Kennesaw" |
+| route Harrowen Square (-44.5499,33.9526) → Nine Rivers (-44.3880,33.7490) | 31307.4 m (19.5 road mi); OSRM's 1659.8 s is free-flow and is never used |
+| `q=McDonald's`, `viewbox=-44.65,34.04,-44.45,33.87`, `bounded=1`, `limit=10` | 10 branches, all inside the box, each with a house number and street ("McDonald's, 2700, Gusty Hill Road Southeast, Hollowmere, Harrowen, Vosk County, 90667") |
+| `q=Gloamwood Pkwy SE, Solvane, GA` | nothing |
+| `street=Gloamwood Parkway Southeast` in a bounded box, no town | 2, in Hollowmere, Vosk County |
+| `street=1985 Vosk Parkway` in a bounded box | 3, at "1985, Vosk Parkway, Tellmoor" |
 | `q=Dave's Hot Chicken` | nothing — it is not in OSM |
-| Cobb Parkway NW | one point for the whole street |
+| Vosk Parkway NW | one point for the whole street |
 
 So: Uber's abbreviations (Pkwy, SE) are fine, and Uber's **town is the postal
-town**, which often is not OSM's (Atlanta against Cumberland; Marietta against
-Kennesaw for 1985 Cobb Parkway). A place is therefore searched **inside an
+town**, which often is not OSM's (Solvane against Hollowmere; Harrowen against
+Tellmoor for 1985 Vosk Parkway). A place is therefore searched **inside an
 area and never by its town**, and the town is not used to choose among what
 comes back either: as a tie-break it pinned a namesake 1.35 mi from the right
 street because its OSM address said the card's postal town. And because a
@@ -260,27 +260,27 @@ index to ask" rather than pinning one of the two.
 ### The street index
 
 Uber prints most dropoffs as a corner — 403 of the week's 1,166, 390 different
-ones ("Foothill Trl & Northwoods Dr, Marietta") — to keep the customer's
+ones ("Foothill Trl & Farrowdene Dr, Harrowen") — to keep the customer's
 address off the card. Where two streets meet is a question about the street
 graph, which is in the Georgia file, so it is answered from that: once, on the
 NucBox, `tools/street_index.py` keeps every **named** way a car is driven on
 (motorway down to residential and living_street, the `_link`s, and named
 `service` drives — an apartment complex's or a shopping centre's own drive,
 where dropoffs often are; never a footway, path, track or building) inside the
-driver's metro, `-85.00,33.50,-83.95,34.40` (every town the week's cards name,
-Cartersville and White to Suwanee, Lithonia and Union City, with a margin),
-and writes one JSON file. `osmium-tool` cuts the file (apt, 1.16.0 on Ubuntu
-24.04); the rest is Python's standard library. Run from the repo on the
-NucBox:
+box `--bbox W,S,E,N` names, in degrees: the driver's own metro, every town the
+cards name with a margin, since a card's disc reaches its own distance past
+where the car was. The box is the driver's to give and is written nowhere in
+this repository. It writes one JSON file. `osmium-tool` cuts the file (apt,
+1.16.0 on Ubuntu 24.04); the rest is Python's standard library. Run from the
+repo on the NucBox:
 
 ```sh
 sudo apt install osmium-tool
-python3 tools/street_index.py ~/osrm/georgia-latest.osm.pbf ~/streets.json
+python3 tools/street_index.py ~/osrm/georgia-latest.osm.pbf ~/streets.json --bbox W,S,E,N
 ```
 
 It prints what it kept and dropped, how long osmium and the index took, and
-the file's size; `--bbox W,S,E,N` takes another area. Then the NucBox's own
-server loads it at start:
+the file's size. Then the NucBox's own server loads it at start:
 
 ```sh
 NUCBOX_STREETS_FILE=~/streets.json npm start      # on the NucBox
@@ -309,18 +309,18 @@ What it answers, `GET /api/streets/cross?a=&b=&box=`,
   exactly, after case, punctuation and the USPS abbreviations both ways
   (Trl/Trail, Pkwy/Parkway, NW/Northwest …); with a directional on one side
   only (two names each with one the other lacks never match, wherever they
-  stand — in Atlanta NW and SE are different streets, and "Main St NW" is not
+  stand — in Solvane NW and SE are different streets, and "Main St NW" is not
   "S Main St"; one on one side only is the rule's own risk: 18 of its 112
   pairs on the week's card names put a leading N, S, E or W against none, West
-  Barrett Pkwy against Barrett Pkwy, which can be another street, and only
+  Tallett Pkwy against Tallett Pkwy, which can be another street, and only
   the disc then tells them apart); the same after dropping the OCR's litter — one- and two-letter
   tokens after the street's type printed short ("Ct re ou NW"), never a word
-  before the type, which is the name ("Ol Canton Rd" is not Canton Road), and
+  before the type, which is the name ("Ol Belvan Rd" is not Belvan Road), and
   never a digit; and with one letter misread in one word — only i for l
   or l for i ("Tri" for Trl, "PI" for Pl, "Biue" for Blue), which is 177 of
   the 190 one-letter-for-another differences between two frames of one card
   on the week's address lines, while any letter for any letter matched Beach
-  St (Acworth) to Beech St (Marietta), both on the cards; never in a word under
+  St (Ivyhame) to Beech St (Harrowen), both on the cards; never in a word under
   four letters unless it is a street word; only among the names inside the
   card's disc; and only when no rule before it found the name anywhere. So
   12th St NW and 17th St NW, and Parliament Ct and Parliament St, all on the
@@ -328,8 +328,8 @@ What it answers, `GET /api/streets/cross?a=&b=&box=`,
   is refused: "Cedar Ridge Or" (for Dr) is on the cards and finds nothing.
   Each of the week's 722 cross-street
   halves, asked of an index holding every other half, matched another in 29
-  cases: 28 the same street by reading, and bare "Peachtree St", which
-  matched both Peachtree St NE and Peachtree St SW — two streets, and where
+  cases: 28 the same street by reading, and bare "Plumleigh St", which
+  matched both Plumleigh St NE and Plumleigh St SW — two streets, and where
   each meets the other name is what decides between them. The card's town is
   never sent and never used.
 * **The one street a name as read is** (`named`, asked only inside a card's
@@ -424,7 +424,7 @@ all:
   place, and only from a list that did not stop at ten: a cut list cannot
   show there is only one ("no pin for Starbucks — too many to be sure · the
   NucBox lists 10 at most"). A merchant is searched by name; a bracketed door
-  ("Jimmy John's (1985 Cobb Parkway NW)") by that street address; "Street,
+  ("Jimmy John's (1985 Vosk Parkway NW)") by that street address; "Street,
   Town" and the Trip Planner's door line by the street. The town is never
   sent and never used. An address with a house number is pinned only where
   the answer carries that number — asked for a door it does not hold,
@@ -476,7 +476,7 @@ all:
   before the card's comma: the 63 of the week's 403 corner dropoffs that
   came off the card with no comma (the reader lost it, and a town or the
   OCR's litter often runs on after the second street: "...& Maple Dr NE
-  Atlanta ll O Gok") are asked of Nominatim as a name, as before — the
+  Solvane ll O Gok") are asked of Nominatim as a name, as before — the
   NucBox's inside the card's disc — and never of the street index. A
   street with no number is its stretch inside the disc — refused as "2 fit
   the card and disagree" when it is two streets of one name more than a
@@ -560,7 +560,7 @@ candidates there is a different question that has not been answered. What
 `map.html` can show of how a place was found is its own walk: each pin's
 popup says whether it was found inside the box searched round where the car
 was (its size read off the box: the 60 miles widened by half a grid step,
-about 137 mi north–south by 134 east–west in Atlanta), asked with no box, or
+about 137 mi north–south by 134 east–west in Solvane), asked with no box, or
 asked wide because the box found nothing — and a place answered wide and
 outside its box is RINGED, a dashed ring round its filled dot: it was used.
 Not hollow, which on the panel's Map view means a candidate that was not
@@ -668,7 +668,7 @@ So the Pi scanner keeps one line per offer it was confident about, in
   It is also what puts the job on the map.
 * **the stops on Uber's Trip Planner.** Press **⌖ Scan** with the planner
   up on the phone and the driving screen lists its stops in order, one line
-  each — `▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr, Marietta` — between
+  each — `▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr, Harrowen` — between
   offers, until you press again, the order is put down or the next offer is
   recorded, which is when a read destination goes too; a panel reloaded in
   between shows the same. A notice on the card (the journal not saving, the
