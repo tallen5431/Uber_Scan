@@ -28,9 +28,16 @@
 # of its own merge; install a package; switch branches; touch the phone. A tree
 # with local changes is skipped and said, never tidied.
 #
-# The time it runs is the timer's (04:20 plus up to ten minutes, just after the
-# 4am driver-day turn and well clear of places_nightly.sh at 05:17); on the
-# NucBox it takes places_nightly.sh's own lock, so the two can never overlap.
+# When it runs is the timer's. The NucBox's is nightly: 04:20 plus up to ten
+# minutes, just after the 4am driver-day turn and well clear of
+# places_nightly.sh at 05:17, whose lock it also takes. The rig's is hourly,
+# because a Pi in a car is off at 04:20 nearly every night: it takes its
+# chance whenever it has been powered, quiet and still for the window — parked
+# with the engine running, on a charger at home — inside UPDATE_HOURS, at most
+# once a driver day. Each hour that is not such a time is a skip like any
+# other; the two that are only the clock (outside UPDATE_HOURS, already updated
+# today) go to the journal alone and leave the status file saying what last
+# happened, rather than "not now" twenty-three times a day.
 #
 # SETTINGS, from the environment or from a file of KEY=value lines (default
 # /etc/uberscan/autoupdate.env, which tools/install-autoupdate.sh writes, or
@@ -48,7 +55,18 @@
 #                   uberscan-kiosk.service too where lite/install.sh made one.
 #                   On the NucBox it is required: the manager's own command
 #   QUIET_MIN       minutes with no offer or reading before it counts as no
-#                   shift (default 60)
+#                   shift (default 90). An hour is not enough: a driver online
+#                   can wait longer than that between offers, phone in the
+#                   mount and car parked. The server must also have been up
+#                   that long, since it forgets every age across a restart
+#   UPDATE_HOURS    the rig's hours it may update in, local clock, a list of
+#                   hours and inclusive ranges that may wrap midnight (default
+#                   22-10,14-16: everything but the lunch rush, 11:00-13:59,
+#                   and the dinner rush, 17:00-21:59). Empty: any hour. Not
+#                   asked on the NucBox, whose timer is its window
+#   DAILY_CAP       1 (the rig's default): after an update, none until the next
+#                   4am driver-day turn, so a rig on all afternoon restarts once
+#                   in it, not every hour a new commit lands. NucBox default 0
 #   BOOT_QUIET_MIN  on the rig, minutes since boot before it may act (default
 #                   30): a Pi switched on is a shift starting, and its clock
 #                   may only just have been set
@@ -66,11 +84,14 @@
 #   REPO            the checkout, default the one this script is in
 #   SYNC_UNIT       the rig's sync, skipped round (default uberscan-sync.service)
 #   SYSTEMCTL       default systemctl (the tests point it at a stand-in)
+#   AUTOUPDATE_NOW  epoch seconds taken as now by the hour and the day gates
+#                   and the status file's time (the tests' clock); environment
+#                   only
 
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KEYS=" ROLE ENABLED BRANCH REMOTE PORT RESTART_CMD QUIET_MIN BOOT_QUIET_MIN HEALTH_TIMEOUT HEALTH_SETTLE FETCH_TIMEOUT VERIFY_SIGNED LOCK STATUS_FILE REPO SYNC_UNIT SYSTEMCTL "
+KEYS=" ROLE ENABLED BRANCH REMOTE PORT RESTART_CMD QUIET_MIN UPDATE_HOURS DAILY_CAP BOOT_QUIET_MIN HEALTH_TIMEOUT HEALTH_SETTLE FETCH_TIMEOUT VERIFY_SIGNED LOCK STATUS_FILE REPO SYNC_UNIT SYSTEMCTL "
 
 load_env() {
     local file="${AUTOUPDATE_ENV:-/etc/uberscan/autoupdate.env}" line key val
@@ -108,13 +129,18 @@ settings() {
         PORT="$(num "${PORT:-}" 8080)"
         BOOT_QUIET_MIN="$(num "${BOOT_QUIET_MIN:-}" 30)"
         HEALTH_SETTLE="$(num "${HEALTH_SETTLE:-}" 20)"
+        UPDATE_HOURS="${UPDATE_HOURS-22-10,14-16}"
+        DAILY_CAP="${DAILY_CAP:-1}"
     else
         PORT="$(num "${PORT:-}" 8082)"
         BOOT_QUIET_MIN="$(num "${BOOT_QUIET_MIN:-}" 0)"
         HEALTH_SETTLE="$(num "${HEALTH_SETTLE:-}" 0)"
+        UPDATE_HOURS=""
+        DAILY_CAP="${DAILY_CAP:-0}"
     fi
+    NOW="$(num "${AUTOUPDATE_NOW:-}" "$(date +%s)")"
     RESTART_CMD="${RESTART_CMD:-}"
-    QUIET_MIN="$(num "${QUIET_MIN:-}" 60)"
+    QUIET_MIN="$(num "${QUIET_MIN:-}" 90)"
     HEALTH_TIMEOUT="$(num "${HEALTH_TIMEOUT:-}" 90)"
     FETCH_TIMEOUT="$(num "${FETCH_TIMEOUT:-}" 120)"
     VERIFY_SIGNED="${VERIFY_SIGNED:-0}"
@@ -161,7 +187,7 @@ record() {
     [ "$DRY" = 1 ] && return 0
     as_owner mkdir -p "$(dirname "$STATUS_FILE")" 2>/dev/null
     OUTCOME="$outcome" WHY="$why" FROM="$from" TO="$to" NOTE="$note" REFUSED="$refused" \
-    BRANCH="$BRANCH" ROLE="$ROLE" COUNT="${COUNT:-}" \
+    BRANCH="$BRANCH" ROLE="$ROLE" COUNT="${COUNT:-}" NOW_S="$NOW" \
     as_owner python3 - "$STATUS_FILE" <<'PY' || say "could not write the status file"
 import json, os, sys, time
 path = sys.argv[1]
@@ -173,7 +199,7 @@ try:
         before = {}
 except (OSError, ValueError):
     before = {}
-now = time.time()
+now = float(e['NOW_S'])
 out = {
     'at': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now)),
     'atMs': int(now * 1000),
@@ -201,7 +227,7 @@ if e['REFUSED']:
 elif refused:
     out['refusedAt'] = before.get('refusedAt')
 if e['OUTCOME'] == 'updated':
-    out['lastUpdate'] = {'at': out['at'], 'from': out['from'], 'to': out['to']}
+    out['lastUpdate'] = {'at': out['at'], 'atMs': out['atMs'], 'from': out['from'], 'to': out['to']}
 elif isinstance(before.get('lastUpdate'), dict):
     out['lastUpdate'] = before['lastUpdate']
 tmp = '%s.%d.part' % (path, os.getpid())
@@ -252,6 +278,12 @@ elif num(st.get('lastAgeMs')) is not None and st['lastAgeMs'] < quiet:
     why = 'a reading ' + mins(st['lastAgeMs'])
 elif fix.get('driving') is True and (num(beat.get('ageMs')) or 0) < 5 * 60000:
     why = 'the car is moving'
+elif num(st.get('upMs')) is not None and st['upMs'] < quiet:
+    # The ages above are this process's memory: one up for less than the
+    # window cannot say there was no reading in it. A rig booted for a shift
+    # with no offer yet would otherwise look quiet.
+    why = 'the server has been up only ' + mins(st['upMs']).replace(' ago', '') \
+        + ', too short to vouch for the quiet window'
 else:
     # The journal's newest offer: what offerAgeMs cannot say across a
     # restart of the server, which forgets it.
@@ -393,6 +425,53 @@ uptime_min() {
     echo $(( $(num "$up" 999999) / 60 ))
 }
 
+# Is HOUR (0-23) inside SPEC ("22-10,14-16": hours and inclusive ranges, a
+# range may wrap midnight)? Prints yes, no, or bad for a spec it cannot read,
+# which the caller takes as a skip: a gate nobody can read is not open.
+in_hours() {
+    local spec="$1" h="$2" part a b found=no
+    local -a parts
+    IFS=, read -r -a parts <<< "$spec"
+    [ "${#parts[@]}" -gt 0 ] || { echo bad; return; }
+    for part in "${parts[@]}"; do
+        part="${part// /}"
+        case "$part" in
+            *-*) a="${part%-*}"; b="${part#*-}" ;;
+            *) a="$part"; b="$part" ;;
+        esac
+        case "$a$b" in ''|*[!0-9]*) echo bad; return ;; esac
+        a=$((10#$a)); b=$((10#$b))
+        if [ "$a" -gt 23 ] || [ "$b" -gt 23 ]; then echo bad; return; fi
+        if [ "$a" -le "$b" ]; then
+            [ "$h" -ge "$a" ] && [ "$h" -le "$b" ] && found=yes
+        else
+            { [ "$h" -ge "$a" ] || [ "$h" -le "$b" ]; } && found=yes
+        fi
+    done
+    echo "$found"
+}
+
+# The time of the last update when it was in the current driver day, or
+# nothing. The day turns at 4am by the clock, as advice.js dayKeyOf turns it
+# (clock time, not four hours of real time, so a clock change does not move
+# the boundary): 03:50 belongs to the day before.
+updated_today() {
+    NOW_S="$NOW" python3 - "$STATUS_FILE" <<'PY' 2>/dev/null
+import datetime, json, os, sys
+try:
+    lu = json.load(open(sys.argv[1], encoding='utf-8')).get('lastUpdate') or {}
+except (OSError, ValueError, AttributeError):
+    lu = {}
+at = lu.get('atMs') if isinstance(lu, dict) else None
+if isinstance(at, (int, float)) and not isinstance(at, bool):
+    def day(t):
+        d = datetime.datetime.fromtimestamp(t)
+        return d.date() - datetime.timedelta(days=1) if d.hour < 4 else d.date()
+    if day(at / 1000.0) == day(float(os.environ['NOW_S'])):
+        print(datetime.datetime.fromtimestamp(at / 1000.0).strftime('%H:%M'))
+PY
+}
+
 show_status() {
     local file="${STATUS_FILE}"
     if [ ! -f "$file" ]; then
@@ -435,6 +514,27 @@ main() {
             return 1
         fi
     done
+
+    # --- the clock's two gates, the rig's hourly runs. Said in the journal
+    # only: the status file keeps what last happened.
+    if [ -n "$UPDATE_HOURS" ]; then
+        local hour
+        hour="$(date -d "@$NOW" +%H)"
+        case "$(in_hours "$UPDATE_HOURS" "$((10#$hour))")" in
+            yes) ;;
+            no) say "skipped: $hour:00 is outside UPDATE_HOURS ($UPDATE_HOURS)"; return 0 ;;
+            *) record skipped "UPDATE_HOURS is not understood ('$UPDATE_HOURS'): hours 0-23, ranges like 22-10, commas between"
+               return 0 ;;
+        esac
+    fi
+    if [ "$DAILY_CAP" = 1 ]; then
+        local today
+        today="$(updated_today)"
+        if [ -n "$today" ]; then
+            say "skipped: already updated this driver day (at $today); the next after the 4am turn"
+            return 0
+        fi
+    fi
 
     # --- the lock: one of us at a time, and never beside the nightly report.
     # Opened to append, as places_nightly.sh opens it, and never touched: that

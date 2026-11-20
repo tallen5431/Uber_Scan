@@ -153,7 +153,7 @@ class Stub(http.server.BaseHTTPRequestHandler):
         try:
             up = (time.time() - float(open(MARK).read())) * 1000
         except (OSError, ValueError):
-            up = 3600 * 1000
+            up = 6 * 3600 * 1000
         falls = os.path.exists(os.path.join(clone, 'SCANNER_FALLS'))
         st = {'scanner': {'enabled': True, 'running': not falls, 'fell': 2 if falls else 0},
               'holding': None, 'offerAgeMs': None, 'lastAgeMs': None, 'upMs': round(up),
@@ -220,11 +220,17 @@ def restarts():
         return []
 
 
-def run(extra=None, args=(), timeout=120):
+def run(extra=None, args=(), timeout=120, server_age=6 * 3600):
+    """The script, once. The clock's gates are opened (any hour, no daily cap)
+    unless a case sets them, and the stand-in server has been up `server_age`
+    seconds — hours, as between two real runs, so the "up long enough to
+    vouch for the quiet window" gate holds unless a case says otherwise."""
+    if server_age is not None:
+        write(MARK, str(time.time() - server_age))
     env = dict(GITENV, REPO=clone, AUTOUPDATE_ENV=os.path.join(work, 'no-such.env'),
                ROLE='rig', PORT=str(PORT), RESTART_CMD='sh "%s"' % restart_sh,
                BOOT_QUIET_MIN='0', HEALTH_TIMEOUT='4', HEALTH_SETTLE='0',
-               SYSTEMCTL=fake_systemctl, FETCH_TIMEOUT='30')
+               SYSTEMCTL=fake_systemctl, FETCH_TIMEOUT='30', UPDATE_HOURS='0-23', DAILY_CAP='0')
     env.update(extra or {})
     for k in [k for k, v in env.items() if v is None]:
         del env[k]
@@ -470,8 +476,7 @@ try:
     push('v11a', {'server.txt': 'v11a\n'})
 
     # --- the old process still answering: not taken for the new one ---------------
-    write(MARK, str(time.time() - 600))
-    got = run(extra={'RESTART_CMD': 'true'})
+    got = run(extra={'RESTART_CMD': 'true'})   # the "process" stays six hours old
     ok_('a restart that left the old process answering: rolled back (%r)' % (outcome(),),
         outcome()[0] == 'rolled back' and 'old process' in (outcome()[1] or '') and head() == fixed)
     v11 = push('v11', {'server.txt': 'v11\n'})
@@ -548,6 +553,72 @@ try:
     got = run(extra={'AUTOUPDATE_ENV': envfile, 'ENABLED': '0'})
     eq('...and the environment wins over the file', outcome(), ('skipped', 'turned off (ENABLED=0)'))
 
+    # --- the rig's hourly cadence: the quiet window, the hours, once a day ---------
+    # The rig's timer is hourly (a Pi in a car is off at 04:20 most nights),
+    # so the script's own gates are what keep it to one quiet moment a day.
+    # Times on the rig's clock, America/New_York; AUTOUPDATE_NOW is "now".
+    from zoneinfo import ZoneInfo
+
+    def at(day, hh, mm):
+        import datetime
+        return str(int(datetime.datetime(2026, 11, day, hh, mm,
+                                         tzinfo=ZoneInfo('America/New_York')).timestamp()))
+
+    v16 = push('v16', {'server.txt': 'v16\n'})
+    state['newest'] = int((time.time() - 75 * 60) * 1000)
+    got = run()
+    eq('the rig\'s default quiet window is 90 minutes: an offer 75 minutes ago is a shift',
+       outcome(), ('skipped', 'a shift: an offer in the journal 75 min ago'))
+    state['newest'] = None
+    got = run(server_age=30 * 60)
+    eq('a server up 30 minutes cannot vouch for 90 quiet ones: skipped (a rig booted for a shift)',
+       (outcome(), head()), (('skipped', 'a shift: the server has been up only 30 min, too short '
+                              'to vouch for the quiet window'), v15))
+    before = open(STATUS).read()
+    got = run(extra={'UPDATE_HOURS': None, 'DAILY_CAP': None, 'AUTOUPDATE_NOW': at(23, 12, 30)})
+    ok_('12:30, in the lunch rush the default UPDATE_HOURS leaves out: skipped in the journal (%r)'
+        % got.stdout.strip(), got.returncode == 0 and 'outside UPDATE_HOURS (22-10,14-16)' in got.stdout
+        and head() == v15)
+    eq('...and the status file still says what last happened', open(STATUS).read(), before)
+    got = run(extra={'UPDATE_HOURS': None, 'DAILY_CAP': None, 'AUTOUPDATE_NOW': at(23, 18, 40)})
+    ok_('...18:40, the dinner rush, the same', 'outside UPDATE_HOURS' in got.stdout and head() == v15)
+    got = run(extra={'UPDATE_HOURS': 'lunchtime'})
+    ok_('an UPDATE_HOURS nobody can read is a closed gate, said (%r)' % (outcome(),),
+        outcome()[0] == 'skipped' and 'UPDATE_HOURS is not understood' in (outcome()[1] or '')
+        and head() == v15)
+    got = run(extra={'UPDATE_HOURS': None, 'DAILY_CAP': None, 'AUTOUPDATE_NOW': at(23, 2, 30)})
+    eq('02:30 on the 23rd, inside 22-10 across midnight, no update yet this driver day: updated',
+       (outcome()[0], head()), ('updated', v16))
+    ok_('...the status stamped on the rig\'s clock (%r)' % status().get('at'),
+        status().get('at') == '2026-11-23 02:30:00' and status()['lastUpdate'].get('atMs')
+        == int(at(23, 2, 30)) * 1000)
+    v17 = push('v17', {'server.txt': 'v17\n'})
+    before = open(STATUS).read()
+    got = run(extra={'UPDATE_HOURS': None, 'DAILY_CAP': None, 'AUTOUPDATE_NOW': at(23, 3, 55)})
+    ok_('03:55, still the driver day that 02:30 was in: once a day, skipped in the journal (%r)'
+        % got.stdout.strip(), 'already updated this driver day (at 02:30)' in got.stdout
+        and head() == v16)
+    eq('...the status file untouched, still "updated"', (open(STATUS).read() == before,
+                                                         status().get('outcome')), (True, 'updated'))
+    got = run(extra={'UPDATE_HOURS': None, 'DAILY_CAP': None, 'AUTOUPDATE_NOW': at(23, 4, 5)})
+    eq('04:05, just past the 4am turn, a new driver day: updated', (outcome()[0], head()),
+       ('updated', v17))
+    v18 = push('v18', {'server.txt': 'v18\n'})
+    got = run(extra={'UPDATE_HOURS': None, 'DAILY_CAP': None, 'AUTOUPDATE_NOW': at(23, 15, 10)})
+    ok_('15:10 the same day, inside the hours: the day\'s one update was at 04:05, skipped',
+        'already updated this driver day (at 04:05)' in got.stdout and head() == v17)
+    got = run(extra={'UPDATE_HOURS': None, 'DAILY_CAP': None, 'AUTOUPDATE_NOW': at(24, 3, 59)})
+    ok_('03:59 the next morning is still that driver day', 'already updated' in got.stdout
+        and head() == v17)
+    got = run(extra={'UPDATE_HOURS': None, 'DAILY_CAP': None, 'AUTOUPDATE_NOW': at(24, 4, 0)})
+    eq('04:00 sharp is the next one: updated', (outcome()[0], head()), ('updated', v18))
+    v19 = push('v19', {'server.txt': 'v19\n'})
+    got = run(extra={'ROLE': 'nucbox', 'UPDATE_HOURS': None, 'DAILY_CAP': None,
+                     'AUTOUPDATE_NOW': at(24, 12, 30)})
+    eq('the NucBox has neither gate: 12:30, a second update that driver day, taken',
+       (outcome()[0], head()), ('updated', v19))
+    latest = v19
+
     # --- the installer ------------------------------------------------------------
     # A copy of the two scripts inside the clone (as they are in a checkout),
     # its units and settings into the temp dir. Root here, so the account the
@@ -586,14 +657,18 @@ try:
     eq('[install] ...the service runs as root on the rig, the script in the checkout',
        (value(svc, 'User'), value(svc, 'ExecStart')),
        ('root', '/bin/bash "%s/tools/autoupdate.sh"' % clone))
-    eq('[install] ...the timer at 04:20 with up to ten minutes\' spread, never caught up at boot',
+    eq('[install] ...the rig\'s timer hourly, up to twenty minutes\' spread, never caught up at boot',
        (value(tmr, 'OnCalendar'), value(tmr, 'RandomizedDelaySec'), value(tmr, 'Persistent')),
-       ('*-*-* 04:20:00', '10min', None))
-    ok_('[install] ...and a run is capped well short of 05:17', value(svc, 'TimeoutStartSec') == '20min')
+       ('hourly', '20min', None))
+    eq('[install] ...its quiet window 90 minutes, its hours and its once a day',
+       [value(envtxt, k) for k in ('QUIET_MIN', 'UPDATE_HOURS', 'DAILY_CAP')],
+       ['90', '"22-10,14-16"', '1'])
+    ok_('[install] ...and a run is capped inside the hour, so the next never meets it',
+        value(svc, 'TimeoutStartSec') == '20min')
     ok_('[install] ...the timer enabled', 'enable --now uberscan-update.timer' in open(SYSTEMCTL_LOG).read())
     ok_('[install] ...and it tried once, with --dry-run (%r)' % got.stdout[-300:],
         'trying it once' in got.stdout and 'autoupdate:' in got.stdout)
-    eq('[install] ...which changed nothing', head(), v15)
+    eq('[install] ...which changed nothing', head(), latest)
     if shutil.which('systemd-analyze'):
         for unit in ('uberscan-update.service', 'uberscan-update.timer'):
             said = subprocess.run(['systemd-analyze', 'verify', os.path.join(units, unit)],
@@ -609,7 +684,16 @@ try:
        [value(envtxt, k) for k in ('ROLE', 'PORT', 'LOCK', 'RESTART_CMD')],
        ['nucbox', '8082', '"%s"' % places_lock, '"%s"' % restart_cmd])
     svc = open(os.path.join(units, 'uberscan-update.service')).read()
+    tmr = open(os.path.join(units, 'uberscan-update.timer')).read()
     eq('[install] ...run as the checkout\'s owner on the NucBox', value(svc, 'User'), 'root')
+    eq('[install] ...its timer nightly at 04:20, clear of the report at 05:17, no clock gates written',
+       (value(tmr, 'OnCalendar'), value(tmr, 'RandomizedDelaySec'), value(envtxt, 'UPDATE_HOURS'),
+        value(envtxt, 'DAILY_CAP')), ('*-*-* 04:20:00', '10min', None, None))
+    got = install('rig', '--hours', '')
+    ok_('[install] --hours \'\' on the rig: any hour', got.returncode == 0 and value(
+        open(os.path.join(etc, 'autoupdate.env')).read(), 'UPDATE_HOURS') == '""')
+    got = install('rig', '--hours', 'evenings')
+    ok_('[install] ...and an unreadable --hours refused', got.returncode != 0)
     got = install('nucbox')
     ok_('[install] nucbox with no restart command and nobody to ask: refused, and says how to find it',
         got.returncode != 0 and 'ps -eo' in got.stdout + got.stderr)
@@ -619,15 +703,17 @@ try:
         and git(clone, 'symbolic-ref', '--short', 'HEAD') == 'main')
     got = install('nucbox', '--restart-cmd', restart_cmd)
     envtxt = open(os.path.join(etc, 'autoupdate.env')).read()
-    ok_('[install] ...the NucBox lock defaults to places_nightly.sh\'s (%r)' % value(envtxt, 'LOCK'),
-        (value(envtxt, 'LOCK') or '').endswith('places-report.lock"'))
+    import pwd
+    owner_home = pwd.getpwnam(pwd.getpwuid(os.stat(clone).st_uid).pw_name).pw_dir
+    eq('[install] ...with no --lock and no places.env, the NucBox lock is places_nightly.sh\'s default',
+       (got.returncode, value(envtxt, 'ROLE'), value(envtxt, 'LOCK')),
+       (0, 'nucbox', '"%s/places-report.lock"' % owner_home))
     # The written settings, read back by the script itself: the command runs.
-    write(MARK, '0')
-    v16 = push('v16', {'server.txt': 'v16\n'})
+    v20 = push('v20', {'server.txt': 'v20\n'})
     got = run(extra={'AUTOUPDATE_ENV': os.path.join(etc, 'autoupdate.env'), 'ROLE': None,
                      'PORT': str(PORT), 'RESTART_CMD': None, 'LOCK': places_lock, 'REPO': None})
     eq('[install] the settings it wrote, read by the update: updated with its restart command',
-       (outcome()[0], head(), restarts()[-1]), ('updated', v16, v16))
+       (outcome()[0], head(), restarts()[-1]), ('updated', v20, v20))
     got = install('off')
     envtxt = open(os.path.join(etc, 'autoupdate.env')).read()
     ok_('[install] off: the timer disabled and ENABLED=0',
