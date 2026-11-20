@@ -16130,6 +16130,69 @@ finally:
     stop(proc)
 shutil.rmtree(_tddir, ignore_errors=True)
 
+# targetsOut and goldAnswer were worked out afresh on every request, most of
+# each request's time, and the same answer every time while the file stood
+# (keptAnswer). Counted by a preload that wraps Advice.targets and
+# strategy.analyse: once per journal state and per set of rows handed in,
+# again when the window's rows differ, when the file changes, when a row
+# stamped ahead of the clock comes due and moves the line, and when the
+# store has had to let the answer go.
+_KEPT_COUNT = r"""
+var fs = require('fs'), path = require('path'), D = process.env.HOLD_DIR;
+var root = path.dirname(process.argv[1]);
+function note(w) { fs.appendFileSync(D + '/events', w + '\n'); }
+var A = require(path.join(root, 'advice.js')), S = require(path.join(root, 'tools', 'strategy.js'));
+var targets = A.targets, analyse = S.analyse;
+A.targets = function () { note('targets'); return targets.apply(this, arguments); };
+S.analyse = function () { note('analyse'); return analyse.apply(this, arguments); };
+"""
+_kpdir = tempfile.mkdtemp()
+_kpj = os.path.join(_kpdir, 'offers.jsonl')
+_kpdue = int(time.time() * 1000) + 6000
+write(_kpj, [offer(i, NOW - 7200000 + i * 60000) for i in range(40)]
+      + [offer(90, _kpdue, target=31)])
+proc, base, _kplog = _logged({'SCANNER': '0', 'HOLD_DIR': _kpdir}, _kpj, preload=_KEPT_COUNT)
+
+
+def _kpn(what):
+    return sum(1 for e in _held_events(_kpdir) if e == what)
+
+
+try:
+    _kp1 = get(base, '/api/journal?days=30')
+    _kp2 = get(base, '/api/journal?days=30')
+    eq('[kept] the Targets box twice over one file: worked out once, the same answer, '
+       'its line off the newest row already due',
+       (_kpn('targets'), _kp1['targets'] == _kp2['targets'], _kp1['targets']['target']), (1, True, 25))
+    get(base, '/api/journal?days=30&limit=5')
+    get(base, '/api/journal?days=30')
+    eq('[kept] ...other rows handed in (limit=5) are worked out; back to 30 days is kept',
+       _kpn('targets'), 2)
+    for _kpl in (6, 7, 8, 9):
+        get(base, '/api/journal?days=30&limit=%d' % _kpl)
+    get(base, '/api/journal?days=30')
+    eq('[kept] ...four answers kept at most: 30 days, let go behind four others, is worked out again',
+       _kpn('targets'), 7)
+    _kpg1 = get(base, '/api/gold')
+    _kpg2 = get(base, '/api/gold')
+    eq('[kept] the Gold card twice over one file: analysed once, the same answer',
+       (_kpn('analyse'), _kpg1 == _kpg2), (1, True))
+    eq('[kept] ...its settings changed (a gold row appended): analysed again, and it says so',
+       (post(base, '/api/gold', {'goal': 40})[0], get(base, '/api/gold')['settings']['goal'], _kpn('analyse')),
+       (200, 0.4, 2))
+    write(_kpj, [offer(91, NOW - 1000)], 'a')
+    get(base, '/api/journal?days=30')
+    eq('[kept] ...an offer appended: the Targets box worked out again', _kpn('targets'), 8)
+    while time.time() * 1000 < _kpdue + 200:
+        time.sleep(0.1)
+    _kp3 = get(base, '/api/journal?days=30')
+    eq('[kept] ...nothing appended, but the row stamped ahead has come due: the line moves '
+       'and the answer is worked out again, not kept off the clock it was worked out at',
+       (_kpn('targets'), _kp3['targets']['target']), (9, 31))
+finally:
+    stop(proc)
+shutil.rmtree(_kpdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

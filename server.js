@@ -5451,7 +5451,7 @@ function refigured(offers, taken) {
  * report's rule; no geocoding). Descriptive: no verdict, state, target or
  * panel reads it. See Advice.targets for the floors and what each part
  * reuses. Aggregates and town names only. */
-function targetsOut(offers, taken) {
+function targetsOut(offers, taken, rows) {
   var now = Date.now(), line = null;
   for (var i = (offers || []).length - 1; i >= 0; i--) {
     var o = offers[i];
@@ -5460,15 +5460,70 @@ function targetsOut(offers, taken) {
       break;
     }
   }
-  try {
-    return Advice.targets(offers, taken, {
-      target: line === null ? 25 : line,
-      key: townOfCard
-    });
-  } catch (e) {
-    console.error('targets: ' + e.message);
-    return null;
+  var target = line === null ? 25 : line;
+  // The line is worked out above on every request and is part of the key, so
+  // the one way the clock reaches this answer — a row stamped ahead of it
+  // coming due — is a different key, not a stale answer (keptAnswer).
+  return keptAnswer(targetsKept, rows, offers, JSON.stringify([target, taken]), function () {
+    try {
+      return Advice.targets(offers, taken, { target: target, key: townOfCard });
+    } catch (e) {
+      console.error('targets: ' + e.message);
+      return null;
+    }
+  });
+}
+
+/* An answer over the journal's rows, kept until the journal changes.
+ *
+ * targetsOut and goldAnswer were worked out afresh on every request, and they
+ * were most of their requests (the server review's second round, Nov 2026):
+ * on an invented 15,000-offer journal, /api/journal?days=30 spent 218 ms of
+ * 270-370 in Advice.targets, and /api/gold 160 ms of 130-220 in
+ * strategy.analyse — identical answers, load after load, while the file did
+ * not change. Kept as latestCache keeps the fold: thrown away whole when
+ * readJournal hands back another array.
+ *
+ * KEYED ON WHAT THE ANSWER IS WORKED OUT FROM, not on the request that asked.
+ * `offers` is compared row object by row object — latestPerOffer hands back
+ * the same objects while the file and the day floor stand, and the window,
+ * `until`, `limit` and `hidden` only choose among them — so two requests share
+ * an answer exactly when they hand the same rows in the same order, and a
+ * `days=30` floor that moves by the millisecond is a new key the moment an
+ * offer falls out of it. `also` is everything else the answer reads, as JSON:
+ * the orders taken (takenRuns, which has a floor of its own), the line, the
+ * Gold settings. Neither Advice.targets nor strategy.analyse reads the clock;
+ * the one place `now` reaches either is in what is handed in, and so in the
+ * key. A null — a throw, logged — is not kept, so it is logged again.
+ *
+ * ANSWERS_KEPT per store: the offers page's ranges and the Gold card's 90
+ * days, without growing past a handful however many windows are asked. */
+var ANSWERS_KEPT = 4;
+var targetsKept = { rows: null, n: 0, list: [] };
+var goldKept = { rows: null, n: 0, list: [] };
+
+function sameRows(a, b) {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function keptAnswer(store, rows, offers, also, work) {
+  if (store.rows !== rows || store.n !== (rows ? rows.length : 0)) {
+    store.rows = rows;
+    store.n = rows ? rows.length : 0;
+    store.list = [];
   }
+  for (var i = 0; i < store.list.length; i++) {
+    var e = store.list[i];
+    if (e.also === also && sameRows(e.offers, offers)) return e.answer;
+  }
+  var answer = work();
+  if (answer === null) return null;
+  store.list.push({ offers: offers, also: also, answer: answer });
+  if (store.list.length > ANSWERS_KEPT) store.list.shift();
+  return answer;
 }
 
 /* MV.townFor with Advice.area, remembered by its input: the card's dropoff and
@@ -14932,7 +14987,7 @@ function journalRoute(req, res, p) {
                                       // time of day, the replay's line, the
                                       // towns (targetsOut). Over the offers
                                       // listed, as the page's own replay is.
-                                      targets: targetsOut(offers, taken),
+                                      targets: targetsOut(offers, taken, rows),
                                       // The rig's "keepPlaces" as the
                                       // scanner last said it (null where it
                                       // has not: the copy at home), for the
@@ -17183,17 +17238,25 @@ function goldOrders(runs) {
   });
 }
 
+// Kept until the journal changes (keptAnswer): the offers and orders of the
+// 90 days and the settings are the key; whether tesseract is installed is
+// asked on every request, outside it, since it changes without the journal.
 function goldAnswer(rows, now) {
   var S = goldStrategy();
   var floor = now - GOLD_DAYS * 86400000;
   var offers = shownOffers(windowOffers(latestPerOffer(rows, floor), floor).kept);
   var settings = goldSettings(rows);
-  var res = S.analyse({ offers: offers, orders: goldOrders(takenRuns(rows, floor, offers)),
-                        earnings: Earnings.fold(rows), light: true,
-                        gold: { goal: settings.goal, uber: settings.uber } });
-  return { ok: true, days: GOLD_DAYS, settings: settings, gold: res.gold,
-           lines: S.goldLines(res.gold, res.floors), floors: { curveOffers: res.floors.curveOffers },
-           tesseract: !!earningsTesseract() };
+  var orders = goldOrders(takenRuns(rows, floor, offers));
+  var kept = keptAnswer(goldKept, rows, offers, JSON.stringify([orders, settings]), function () {
+    var res = S.analyse({ offers: offers, orders: orders, earnings: Earnings.fold(rows), light: true,
+                          gold: { goal: settings.goal, uber: settings.uber } });
+    return { ok: true, days: GOLD_DAYS, settings: settings, gold: res.gold,
+             lines: S.goldLines(res.gold, res.floors), floors: { curveOffers: res.floors.curveOffers } };
+  });
+  var out = {};
+  Object.keys(kept).forEach(function (k) { out[k] = kept[k]; });
+  out.tesseract = !!earningsTesseract();
+  return out;
 }
 
 function goldRoute(req, res, pathname) {

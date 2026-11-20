@@ -4357,6 +4357,12 @@ Checks: rpi/test_server.py `[fresh]` 3 — a `-r` preload holds the journal's re
 
 Checks: rpi/test_server.py `[today]` 3, through the `[fresh]` preload: the offers page's read held, a second offer appended, the poll's stat seen to land before it joins. Warm, joined, the same poll after, a fresh `since`: 5, 6, 6, 7 before; 5, 6, 7, 7 after.
 
+**Targets and the Gold card were worked out again on every offers-page load, identical while the journal stood (the server review's second round, Nov 2026).** On an invented 15,000-offer journal, /api/journal?days=30 spent 218 ms of 270-370 in Advice.targets and /api/gold 160 ms of 130-220 in strategy.analyse.
+  - *keptAnswer* (`targetsKept`, `goldKept`, ANSWERS_KEPT 4 each): kept until readJournal hands back another array, as latestCache is. Keyed on what each answer is worked out from rather than on the request: the offers handed in, compared row object by row object (latestPerOffer's objects stand while the file and the day floor do, so a `days=30` floor moving by the millisecond is a new key the moment an offer leaves it, and `until`, `limit` and `hidden` are in the rows chosen), plus the orders taken and, for the Targets box, the line it judges by, worked out per request — the one way the clock reaches either answer is a row stamped ahead of it coming due, and that moves the line. Neither Advice.targets nor strategy.analyse reads the clock. Whether tesseract is installed stays outside the Gold key; a null (a throw) is not kept.
+  - Warm medians of eight on that journal, the container the suites run on: /api/journal?days=30 245 → 59 ms, /api/gold 121 → 8 ms. Every answer byte for byte the same as at 1b1d964 (30 days twice, 7 days with a limit, All, hidden, an `until`, 1 day, the Gold card twice).
+
+Checks: rpi/test_server.py `[kept]` 7, counted by a preload that wraps Advice.targets and strategy.analyse: once over one file, again for other rows (a limit) and kept on the way back, four kept at most, the Gold card once and again after its settings move, again after an append, and again when a row stamped six seconds ahead comes due and moves the line from 25 to 31. All seven failed before; with the line out of the key, the last one fails. AUDITS.md's Open note on targetsOut's cost says what is left: the first load after each append.
+
 ---
 
 ## Settled — do not re-propose
@@ -4955,8 +4961,11 @@ rig, nothing into a verdict. *Open:* the rig's town scores (floor 8) and the
 report's (floor 30) can differ for a thin town; the real $/hr is gross pay
 less the card's estimated cost, not fuel measured; per-block town lines rest
 on few outings until the record grows; `targetsOut` runs `advise` and up to
-nine `areas` permutations per `/api/journal` load (about 25 ms on 480 offers
-on the dev box, more on a Pi asked for All). Tests: tests/advice.test.js
+nine `areas` permutations once per journal state and window (keptAnswer,
+Nov 2026): a load with nothing appended since is free, but the first load
+after each appended offer still pays it whole (about 25 ms on 480 offers on
+the dev box, about 200 ms on an invented 15,000 over 30 days, more on a Pi
+asked for All). Tests: tests/advice.test.js
 (targets: floors, the replay reused, no-effect towns "indistinguishable",
 nothing changed), rpi/test_server.py `[targets]`, rpi/test_offerspage.py
 `[targets]`, tests/placesreport.test.js (the Targets tab).
