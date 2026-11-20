@@ -3,16 +3,30 @@
 
 'use strict';
 
+var TR = require('../../trends.js');
 var ST = require('./stats.js');
 var VIEWS = ST.VIEWS, shareName = ST.shareName, labelOf = ST.labelOf;
 
 /* --- CSV ----------------------------------------------------------------- */
 
+/* A text cell goes through trends.js's safeCell, the rule the offers page's
+ * every-offer and records CSVs already keep: these files carry card text too
+ * (a pickup, a restaurant, a town as the card spelled it), and a pickup read
+ * as "=HYPERLINK(...)", "-" or "+ 1 order" went out raw and ran as a formula
+ * when places.csv was opened in Excel. A number is a figure and keeps its
+ * sign. A \r is quoted as \n is: bare, a spreadsheet ends the row on it. */
 function csvCell(v) {
   if (v === null || v === undefined) return '';
-  var s = String(v);
-  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  var s = typeof v === 'number' ? String(v) : TR.safeCell(String(v));
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
+
+/* Each file starts with the BOM the offers page's CSVs start with (trends.js
+ * BOM): without it Excel opens UTF-8 in the machine's code page, and every
+ * "6–9pm" hours label came out as mojibake. Put on as a file is written
+ * (io.js writeCsv), so the text the suite matches line by line is the table
+ * alone. */
+var BOM = TR.BOM;
 
 function csvOf(r, kind) {
   var head = ['hours', kind === 'grid' ? 'cell' : kind, 'lat', 'lon', 'n', 'outings',
@@ -230,7 +244,7 @@ function coverageCsv(r) {
 }
 
 module.exports = {
-  csvOf: csvOf, dropCsv: dropCsv, tableCsv: tableCsv, MORE_CSVS: MORE_CSVS, shareCsv: shareCsv,
+  csvCell: csvCell, BOM: BOM, csvOf: csvOf, dropCsv: dropCsv, tableCsv: tableCsv, MORE_CSVS: MORE_CSVS, shareCsv: shareCsv,
   levelsCsv: levelsCsv, restCsv: restCsv, restBranchCsv: restBranchCsv, strategyCsv: strategyCsv,
   coverageCsv: coverageCsv,
 };

@@ -638,19 +638,21 @@ async function main(argv) {
               truncated: !!body.truncated, since: o.since } });
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, 'index.html'), html(report));
-  fs.writeFileSync(path.join(outDir, 'places.csv'), csvOf(report, 'place'));
-  fs.writeFileSync(path.join(outDir, 'towns.csv'), csvOf(report, 'town'));
-  fs.writeFileSync(path.join(outDir, 'grid.csv'), csvOf(report, 'grid'));
-  fs.writeFileSync(path.join(outDir, 'dropoff_towns.csv'), dropCsv(report, 'dropTown'));
-  fs.writeFileSync(path.join(outDir, 'dropoff_grid.csv'), dropCsv(report, 'dropGrid'));
-  fs.writeFileSync(path.join(outDir, 'coverage.csv'), coverageCsv(report));
-  fs.writeFileSync(path.join(outDir, 'restaurants.csv'), restCsv(report));
-  fs.writeFileSync(path.join(outDir, 'restaurant_branches.csv'), restBranchCsv(report));
-  fs.writeFileSync(path.join(outDir, 'top_share_tests.csv'), shareCsv(report));
-  fs.writeFileSync(path.join(outDir, 'coverage_levels.csv'), levelsCsv(report));
-  fs.writeFileSync(path.join(outDir, 'strategy_curve.csv'), strategyCsv(report));
+  // Every CSV through one door, so none is written without csv.js's BOM.
+  function writeCsv(name, text) { fs.writeFileSync(path.join(outDir, name), CSV.BOM + text); }
+  writeCsv('places.csv', csvOf(report, 'place'));
+  writeCsv('towns.csv', csvOf(report, 'town'));
+  writeCsv('grid.csv', csvOf(report, 'grid'));
+  writeCsv('dropoff_towns.csv', dropCsv(report, 'dropTown'));
+  writeCsv('dropoff_grid.csv', dropCsv(report, 'dropGrid'));
+  writeCsv('coverage.csv', coverageCsv(report));
+  writeCsv('restaurants.csv', restCsv(report));
+  writeCsv('restaurant_branches.csv', restBranchCsv(report));
+  writeCsv('top_share_tests.csv', shareCsv(report));
+  writeCsv('coverage_levels.csv', levelsCsv(report));
+  writeCsv('strategy_curve.csv', strategyCsv(report));
   Object.keys(MORE_CSVS).forEach(function (name) {
-    fs.writeFileSync(path.join(outDir, name), tableCsv(report, MORE_CSVS[name][0], MORE_CSVS[name][1]));
+    writeCsv(name, tableCsv(report, MORE_CSVS[name][0], MORE_CSVS[name][1]));
   });
   console.log(summary(report));
   console.log('\nWritten: ' + path.join(outDir, 'index.html') + ' (and ' + (11 + Object.keys(MORE_CSVS).length)

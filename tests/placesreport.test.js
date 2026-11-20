@@ -607,6 +607,16 @@ function nbx() {
            + P.coverageCsv(rep5);
   ok('no dropoff text or drop position in the CSVs', csvs.indexOf('Ombre') < 0 && csvs.indexOf(String(dropFix.lat).slice(0, 7)) < 0);
   ok('the drop cell is named by its 2-mile cell, not a door', /cell near/.test(P.dropCsv(rep5, 'dropGrid')));
+  // Card text in a cell is defused as the offers page's CSVs defuse it
+  // (trends.js safeCell): a pickup opening = @ - + went out raw and ran as a
+  // formula in Excel. A figure keeps its sign, and a \r is quoted.
+  var CSVM = require('../tools/report/csv.js');
+  eq('[csv] a pickup a spreadsheet would run is led with an apostrophe; a figure keeps its sign',
+     ['=HYPERLINK("x")', '@Home Kitchen', '-', '+ 1 order', '\tTab Inn', -3.5, '-3.50', 'Utopian Bowl', 'Ash\rRow']
+       .map(CSVM.csvCell),
+     ['"\'=HYPERLINK(""x"")"', "'@Home Kitchen", "'-", "'+ 1 order", "'\tTab Inn", '-3.5', '-3.50', 'Utopian Bowl',
+      '"Ash\rRow"']);
+  ok('[csv] ...and the BOM put on each file is the offers page\'s', CSVM.BOM === '﻿');
   ok('the page\'s script parses', (function () {
     var js = page.split('<script>\n')[1].split('\n</script>')[0];
     try { new Function(js); return true; } catch (e) { console.log(e); return false; }
@@ -1836,6 +1846,10 @@ function nbx() {
       return ['top_share_tests.csv', 'coverage_levels.csv', 'good_towns.csv', 'waiting_towns.csv', 'dead_miles_towns.csv',
               'size_restaurants.csv', 'strategy_curve.csv'].every(function (f3) { return fs.existsSync(path.join(tmp, 'out', f3)); });
     }()));
+    var noBom = fs.readdirSync(path.join(tmp, 'out')).filter(function (f3) {
+      return /\.csv$/.test(f3) && fs.readFileSync(path.join(tmp, 'out', f3), 'utf8').charAt(0) !== '﻿';
+    });
+    eq('[csv] ...every CSV written starts with the BOM, so Excel reads "6–9pm" as written', noBom, []);
     ok('...and drawn as the Strategy tab\'s card vs paid', /<h3 id="s-paid">Card vs paid<\/h3>/.test(page2)
        && /over 1 matched order/.test(page2));
     ok('...the Gold card\'s goal and Uber\'s figures are read from the source (/api/gold) for the acceptance lines',

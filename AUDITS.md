@@ -4346,6 +4346,10 @@ Every answer byte for byte the same as at 9247f36 on the invented journal (/api/
 
 route() is 1,179 lines. Moved code is the old text dedented, with only the path's name changed. Replayed against 924be14, at a frozen clock on an invented journal of 1,500 offers over 30 days, each build in turn in one directory: 160 requests (every route family, the marks and every POST door, 404s, 405s, a NUL, bad escapes, encoded paths, HEAD, gzip, a conditional GET, the event stream) and 34 scanner lines (chatter, non-objects, a torn line, one the handler throws on), in full and in lite. Every status, header (Date aside) and body byte the same, the journal each server ended with the same, and both servers' logs the same once stack frames are set aside; /server.js differs, being the file changed. Checks: rpi/test_lint.py 448 → 451 (send() handed the JSON type in sendJson alone; the path worked out once; route()'s POST doors and the journal's sync doors ahead of the gate and its pages after the decode). Not done: route()'s other POST doors (delivered, drop-undo, choose, held-end, held-pickup, settings, crop) are still inline, and lite/lite.js still works the path out for itself.
 
+### The tools
+
+**Excel ran card text in the places report's 43 CSVs: a pickup read as "=HYPERLINK(...)" went out raw and became a formula (the tools review, Nov 2026).** `tools/report/csv.js` `csvCell` quoted only `"`, `,` and `\n`, while the offers page's CSVs had defused the same text since trends.js `safeCell`. It now takes that rule: a text cell opening `= + - @`, tab or carriage return is led with an apostrophe unless it is a plain number (a figure keeps its sign), and a cell holding `\r` is quoted as `\n` is. Every file now starts with trends.js's BOM, put on in one place (`tools/report/io.js` `writeCsv`), so an hours label such as "6–9pm" is not mojibake in Excel. Checks: tests/placesreport.test.js 520 → 522 ('[csv] a pickup a spreadsheet would run is led with an apostrophe; a figure keeps its sign', '[csv] ...every CSV written starts with the BOM, so Excel reads "6–9pm" as written').
+
 ---
 
 ## Settled — do not re-propose
