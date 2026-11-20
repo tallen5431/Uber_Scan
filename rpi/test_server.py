@@ -16240,6 +16240,33 @@ finally:
     stop(proc)
 shutil.rmtree(_pfdir, ignore_errors=True)
 
+# Two special days added at once kept one: each POST took the list as it
+# stood and wrote the lot. The same held rename, on special-days.json: the
+# first add waits there, the second is given two seconds to reach its own
+# rename (which it did, from the list without the first day) and now queues.
+_sdpre = _HOLD_RENAME.replace("'places.json'", "'special-days.json'")
+_sddir = tempfile.mkdtemp()
+_sdj = os.path.join(_sddir, 'offers.jsonl')
+open(_sdj, 'w').close()
+proc, base, _sdlog = _logged({'SCANNER': '0', 'HOLD_DIR': _sddir}, _sdj, preload=_sdpre)
+try:
+    open(os.path.join(_sddir, 'hold'), 'w').close()
+    _sdt1, _sdr1 = _in_thread(post, base, '/api/specialdays', {'add': '2026-07-04'})
+    ok_('[specialdays] the first add is held at its rename', _hold_saw(_sddir, 'held'))
+    _sdt2, _sdr2 = _in_thread(post, base, '/api/specialdays', {'add': '2026-11-26'})
+    _sdreached = _hold_saw(_sddir, 'held', 1, seconds=2.0)
+    os.remove(os.path.join(_sddir, 'hold'))
+    _sdt1.join(20)
+    _sdt2.join(20)
+    eq('[specialdays] two days added at once: the second waits for the first, and both are kept',
+       (_sdreached, (_sdr1.get('got') or [None])[0], (_sdr2.get('got') or [None])[0],
+        get(base, '/api/specialdays')['days'],
+        json.load(open(os.path.join(_sddir, 'special-days.json')))['days']),
+       (False, 200, 200, ['2026-07-04', '2026-11-26'], ['2026-07-04', '2026-11-26']))
+finally:
+    stop(proc)
+shutil.rmtree(_sddir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

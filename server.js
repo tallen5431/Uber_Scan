@@ -15968,28 +15968,36 @@ function route(req, res) {
       if (keys.length !== 1) return spReply(400, { ok: false, error: 'one of add or remove, with one date' });
       var day = specialDate(body[keys[0]]);
       if (!day) return spReply(400, { ok: false, error: 'a date as YYYY-MM-DD, a real one from 2020 to 2099' });
+      // From the list to the rename, one at a time (the server review's second
+      // round, Nov 2026). Each POST took the list as it stood, added its day
+      // and wrote the lot; two adds at once both started from the list before
+      // either was saved, and whichever renamed last threw the other's day
+      // away while both answered `ok: true`. Every exit below is a `done`.
+      return fileLock('specialdays', function (release) {
+      var done = function (code, b) { release(); spReply(code, b); };
       var list = specialDaysList().filter(function (d) { return d !== day; });
       if (keys[0] === 'add') {
-        if (list.length >= SPECIAL_MAX) return spReply(400, { ok: false, error: 'at most ' + SPECIAL_MAX + ' days' });
+        if (list.length >= SPECIAL_MAX) return done(400, { ok: false, error: 'at most ' + SPECIAL_MAX + ' days' });
         list.push(day);
       }
       list.sort();
       var tmp = partName(SPECIAL_PATH);
-      return withDirectory(SPECIAL_PATH, function (dirErr) {
-        if (dirErr) return spReply(500, { ok: false, error: 'could not save' });
+      withDirectory(SPECIAL_PATH, function (dirErr) {
+        if (dirErr) return done(500, { ok: false, error: 'could not save' });
         fs.writeFile(tmp, JSON.stringify({ v: 1, days: list }), function (writeErr) {
           var failed = function (e) {
             fs.unlink(tmp, function () {});
             console.error('special days: ' + e.message);
-            spReply(500, { ok: false, error: 'could not save' });
+            done(500, { ok: false, error: 'could not save' });
           };
           if (writeErr) return failed(writeErr);
           fs.rename(tmp, SPECIAL_PATH, function (renameErr) {
             if (renameErr) return failed(renameErr);
             specialCache = list;
-            spReply(200, { ok: true, days: list.slice() });
+            done(200, { ok: true, days: list.slice() });
           });
         });
+      });
       });
     });
   }

@@ -4368,6 +4368,11 @@ Checks: rpi/test_server.py `[kept]` 7, counted by a preload that wraps Advice.ta
 
 Checks: rpi/test_server.py `[forget]`, through a preload that holds the save's rename: the Forget answered on its own while the save waited and the file came back with 3,001; now it queues, the save adds its one, and Forget removes 3,001. The reviewer's race: 0 of 10 undone.
 
+**Two special days added at once kept only one, both answered `ok: true` (the server review's second round, Nov 2026).** POST /api/specialdays took the list as it stood, added its day and renamed the lot into place; a second add before the first was saved started from the same list, and whichever renamed last threw the other's day away.
+  - From the list to the rename under `fileLock('specialdays')`, every exit giving it back (`done`).
+
+Checks: rpi/test_server.py `[specialdays]`, the first add held at its rename by the `[forget]` preload: the second reached its own rename from the list without the first day, and the file kept `2026-07-04` alone; now it queues and both are kept, on disk and in the answer.
+
 ---
 
 ## Settled — do not re-propose
