@@ -4364,6 +4364,8 @@ route() is 1,179 lines. Moved code is the old text dedented, with only the path'
 
 **A checkout path with a space broke both installers in this lane (the tools review).** `tools/install-sync.sh`'s ExecStart= and ReadWritePaths=, and `lite/install.sh`'s `KIOSK_CMD` (labwc autostart, desktop Exec=, cage's ExecStart=), split at the space. All quoted now; rpi/install-service.sh is another lane's. Checks: tools/test_installers.py, new, 10, with systemd-analyze verify.
 
+**A GPS log the NucBox held as both `.jsonl` and `.jsonl.gz` was read twice (the tools review).** places_nightly.sh never deletes, so a log copied before the rig gzipped it stays beside the `.gz`. `tools/shift_report.py` `load_fixes`, the places report's reader too, now skips such a `.jsonl` and counts it (`twins`). Checks: tools/test_shift_report.py 292 → 294.
+
 ---
 
 ## Settled — do not re-propose

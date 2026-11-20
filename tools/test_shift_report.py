@@ -1187,6 +1187,23 @@ ok_('[clock step] ...and the text\'s GPS line says it',
 eq('[clock step] ...as the JSON does',
    [SR.as_json(_srep)['gps'][k] for k in ('clockSteps', 'restamped')], [1, 30])
 
+# A log held twice: the NucBox's copy never deletes, so a `.jsonl` it took
+# before the rig's gpslog_tidy gzipped it stays beside the `.gz` the next night
+# brings. Both were read and every fix of that log counted twice (the places
+# report reads through this same load_fixes).
+_twin = os.path.join(work, 'twins')
+shutil.copytree(GPSDIR, _twin)
+with gzip.open(os.path.join(GPSDIR, '2026-03-03_1758.jsonl.gz'), 'rb') as _src, \
+        open(os.path.join(_twin, '2026-03-03_1758.jsonl'), 'wb') as _dst:
+    _dst.write(_src.read())
+_fx1, _fi1 = SR.load_fixes(GPSDIR)
+_fx2, _fi2 = SR.load_fixes(_twin)
+eq('[gps] a .jsonl beside its own .jsonl.gz is read once, as the .gz: the same fixes, the same '
+   'logs, and the twin counted', (_fx2 == _fx1, _fi2['files'], _fi2['passed'], _fi2['twins']),
+   (True, _fi1['files'], _fi1['passed'], 1))
+ok_('[gps] ...and the text\'s GPS line says it',
+    '; 1 .jsonl read as the .gz beside it' in SR.text(dict(rep, info=dict(rep['info'], twins=1))))
+
 # ...and a log named by tools/gpslog_name.py (the GPS's own minute) is read
 # back as beginning at that minute; one it marked `-unsynced` as saying no
 # date, so every day's report reads it.

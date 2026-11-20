@@ -213,7 +213,8 @@ counted apart. Words only, as the row has them: the row carries no address
 and no coordinate for this, and the report prints none.
 
 THE GPS LOG is `gpspipe -w -uu` output in one directory, `.jsonl` or the
-`.jsonl.gz` tools/gpslog_tidy.py leaves; of those, the logs whose names say
+`.jsonl.gz` tools/gpslog_tidy.py leaves (a `.jsonl` beside its own `.gz` is
+read once, as the `.gz`); of those, the logs whose names say
 they can hold the day's fixes (_logs_for), and the header says how many others
 it left unread. `-uu` stamps every line with the
 Pi's clock, the same clock the server stamps the journal with, which is what
@@ -1438,14 +1439,27 @@ def load_fixes(directory, window=None):
 
     `window`, [lo, hi) in ms: read only the logs that can hold a fix in it, by
     their names (_logs_for); `info['otherDays']` counts the ones left unread.
-    Every log, as before, without it."""
+    Every log, as before, without it. A `.jsonl` beside its own `.jsonl.gz`
+    is not read (`info['twins']` counts them): the same log, held twice."""
     info = {'files': 0, 'positions': 0, 'passed': 0, 'refused': collections.Counter(),
             'unstamped': 0, 'beforeClock': 0, 'otherDays': 0,
-            'clockSteps': 0, 'restamped': 0}
+            'clockSteps': 0, 'restamped': 0, 'twins': 0}
     if not directory or not os.path.isdir(directory):
         return None, info
     names = sorted(n for n in os.listdir(directory)
                    if n.endswith('.jsonl') or n.endswith('.jsonl.gz'))
+    # A `.jsonl` with its own `.jsonl.gz` beside it is one log held twice, and
+    # read once, as the `.gz`. The NucBox's copy (tools/places_nightly.sh)
+    # never deletes, as it must not: the rig's gpslog_tidy gzips a log after it
+    # was copied, the next night brings the `.gz`, and the `.jsonl` stays. Both
+    # were read, so every fix of that log counted twice: two fixes a second in
+    # the stop and moving minutes, and the places report's spells stood on
+    # doubled fixes. The `.gz` is the one kept: gpslog_tidy writes it only
+    # once it has read it back byte for byte, so it is the whole log, while
+    # the `.jsonl` may be a copy taken mid-shift.
+    packed = set(n for n in names if n.endswith('.jsonl.gz'))
+    info['twins'] = sum(1 for n in names if n + '.gz' in packed)
+    names = [n for n in names if n + '.gz' not in packed]
     if window is not None:
         keep = _logs_for(names, window)
         info['otherDays'] = len(names) - len(keep)
@@ -2110,7 +2124,9 @@ def text(rep):
                          if info.get('clockSteps') else '')
                       + (('; %d log%s of other days not read'
                           % (info['otherDays'], '' if info['otherDays'] == 1 else 's'))
-                         if info.get('otherDays') else '')))
+                         if info.get('otherDays') else '')
+                      + (('; %d .jsonl read as the .gz beside it' % info['twins'])
+                         if info.get('twins') else '')))
     if info['unreadable']:
         out.append('Journal: %d unreadable line%s skipped'
                    % (info['unreadable'], '' if info['unreadable'] == 1 else 's'))
