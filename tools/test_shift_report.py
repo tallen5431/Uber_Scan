@@ -1366,6 +1366,22 @@ with open(os.path.join(ROOT, 'journal.html'), encoding='utf-8') as fh:
 _jcols = re.search(r'var RECORD_COLUMNS = \[([^\]]*)\];', _jh)
 eq('[record csv] the offers page\'s CSV has these columns, word for word',
    tuple(re.findall(r"'([a-z_]+)'", _jcols.group(1))) if _jcols else None, SR.RECORD_COLUMNS)
+# ...and dates an order by the driver's day as advice.js dayKeyOf does, 4
+# hours off the clock: the file took 4 hours of real time off, a day out at
+# each clock change. Instants in UTC: 03:30 EST on 1 Nov 2026 (an hour after
+# the fall back), 04:30 EDT on 8 Mar 2026 (an hour and a half after the spring
+# forward), and an ordinary 03:59 and 04:00 either side of the boundary.
+_dst = [1793521800000, 1772958600000, 1773215940000, 1773216000000]
+_dstrow = lambda ms: next(csv.DictReader(io.StringIO(SR.to_records_csv(
+    [{'orders': [dict(_rr['orders'][0], took=ms)]}]))))['date']
+_dstjs = subprocess.run(['node', '-e', 'var A = require(process.argv[1]); process.stdout.write('
+                         'JSON.stringify(JSON.parse(process.argv[2]).map(A.dayKeyOf)))',
+                         os.path.join(ROOT, 'advice.js'), json.dumps(_dst)],
+                        stdout=subprocess.PIPE, timeout=60).stdout
+eq('[record csv] the date is the driver\'s day off the clock: 03:30 EST on 1 Nov is 31 Oct, '
+   '04:30 EDT on 8 Mar is 8 Mar, as advice.js dayKeyOf says',
+   ([_dstrow(ms) for ms in _dst], json.loads(_dstjs or b'null')),
+   (['2026-10-31', '2026-03-08', '2026-03-10', '2026-03-11'],) * 2)
 # ...and defuses what a spreadsheet would run as the page does (journal.html
 # csvCell, trends.js safeCell): this file wrote a pickup of =HYPERLINK(...)
 # raw. One order's places and notes made to open the way a misread card can.

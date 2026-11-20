@@ -340,6 +340,21 @@ def day_window(day):
     return start * 1000.0, end * 1000.0
 
 
+def driver_day(ms):
+    """The driver's day of a moment, 'YYYY-MM-DD': the local date, the day
+    before when the local hour is before DAY_STARTS_AT. advice.js dayKeyOf's
+    rule, 4 hours off the CLOCK. This file took 4 hours of REAL time off
+    (localtime(t - 4h)), which is the same except across a clock change:
+    03:30 EST on 1 Nov 2026, an hour after the fall back, was 00:30 EDT four
+    real hours earlier and came out 1 Nov, where the offers page and the
+    report say 31 Oct; 04:30 EDT on 8 Mar 2026 came out 7 Mar."""
+    lt = time.localtime(ms / 1000.0)
+    if lt.tm_hour >= day_starts_at():
+        return time.strftime('%Y-%m-%d', lt)
+    return time.strftime('%Y-%m-%d', time.localtime(
+        time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday - 1, 12, 0, 0, 0, 0, -1))))
+
+
 # --- the journal ----------------------------------------------------------
 
 def read_journal(path):
@@ -1283,8 +1298,7 @@ def _alongside(out):
             if minutes:
                 o['last'] = o['took'] + hold_span(minutes)
             else:
-                d = time.localtime(o['took'] / 1000.0 - day_starts_at() * 3600)
-                o['last'] = day_window(time.strftime('%Y-%m-%d', d))[1]
+                o['last'] = day_window(driver_day(o['took']))[1]
     for o in out:
         if o['took'] is None:
             o['alongside'] = '?'
@@ -2380,8 +2394,7 @@ def _stamp(ms):
 def record_cells(o):
     """One order as RECORD_COLUMNS' values, strings."""
     when = o['took'] if o['took'] is not None else o.get('offered')
-    day = '' if when is None else time.strftime(
-        '%Y-%m-%d', time.localtime(when / 1000.0 - day_starts_at() * 3600))
+    day = '' if when is None else driver_day(when)
     pl = o.get('places') or {}
     return (day, o['app'] or '', _stamp(o.get('offered')), _stamp(o['took']),
             _stamp(o['end'] if o['end'] is not None else o.get('expiredAt')), o['how'] or '',

@@ -4358,6 +4358,8 @@ route() is 1,179 lines. Moved code is the old text dedented, with only the path'
 
 **report_check's "median gap" between re-offered pairs was the lower middle value (the tools review, Nov 2026).** `tools/report_check.js` `reofferedHow` took `g[floor((n - 1) / 2)]` of the sorted gaps, so an even count always read short: two pairs 5 and 10 min apart said 5, and the suite's own check asserted it as "the shorter". It is advice.js `median` now, the one copy. Checks: tests/reportcheck.test.js 22 → 22 (the pairs' check now wants 7.5; at the old line it fails).
 
+**The records CSV dated an order a day out at each clock change: 03:30 EST on 1 Nov 2026 came out 1 Nov (the tools review, Nov 2026).** `tools/shift_report.py` `record_cells`, and the end of a driver's day that bounds an order with no card minutes, took 4 hours of real time off (`localtime(t - 4h)`), where advice.js `dayKeyOf` and journal.html take 4 hours off the clock. The same but across a change: an hour after the fall back, four real hours earlier was 00:30 EDT the same date, so the order fell on 1 Nov where the offers page said 31 Oct; 04:30 EDT on 8 Mar 2026 fell on 7 Mar. Both are `driver_day` now, the local date, the day before when the local hour is before DAY_STARTS_AT. Checks: tools/test_shift_report.py 291 → 292 ('[record csv] the date is the driver\'s day off the clock ...', four instants against advice.js `dayKeyOf` run in node).
+
 ---
 
 ## Settled — do not re-propose
