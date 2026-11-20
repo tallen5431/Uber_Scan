@@ -1339,6 +1339,78 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
   var carried = A.usable([{ at: 1, id: 'keepme', pay: 10, minutes: 20,
                             perHour: 30, whole: true }]);
   eq('usable carries the id through', carried.length && carried[0].id, 'keepme');
+
+  /* The join's speed, and nothing else about it. busy() walked every other row
+     for every row, the unticked ones skipped inside the loop: rows² for a
+     question only the ticked rows can answer, 519 ms over 15,000 rows in node
+     and 2,059 ms over 30,000, on every range press of the offers page. It now
+     finds the ticked rows once. AUDITS.md's Settled forbids narrowing WHICH
+     rows it joins over, so the answer is held against the whole join written
+     out here, on journals with no ticks, every row ticked, long jobs
+     overlapping, rows sharing a stamp, rows with no id, and truthy ticks that
+     are not `true`; and the work against the rows, by counting how often a
+     row's tick is asked. */
+  function wholeJoin(rs) {
+    var out = {};
+    for (var i = 0; i < rs.length; i++) {
+      if (rs[i].id === undefined || rs[i].id === null) continue;
+      var into = [];
+      for (var j = 0; j < rs.length; j++) {
+        var w = rs[j];
+        if (j === i || !w.took) continue;
+        if (w.at < rs[i].at && rs[i].at < A.freeAgain(w)) {
+          into.push({ at: w.at, net: w.net, mins: w.mins, id: w.id });
+        }
+      }
+      if (into.length) out[rs[i].id] = { into: into, stacked: rs[i].took === true };
+    }
+    return out;
+  }
+  var seed = 11;
+  function rnd() { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; }
+  function journal(n, share, gap, oddIds) {
+    var rs = [], at = 1790000000000;
+    for (var i = 0; i < n; i++) {
+      at += Math.floor(rnd() * gap);
+      var r = { at: at, net: Math.round(rnd() * 3000) / 100, mins: Math.floor(rnd() * 60),
+                took: rnd() < share };
+      if (!oddIds || rnd() > 0.25) r.id = 'o' + i;
+      rs.push(r);
+    }
+    return rs;
+  }
+  var shapes = {
+    'no ticks': journal(300, 0, 300000),
+    'every row ticked': journal(300, 1, 300000),
+    'every row ticked, long jobs overlapping': journal(300, 1, 40000),
+    'a third ticked, rows with no id': journal(300, 0.33, 200000, true),
+    'stamps shared, out of order': journal(200, 0.4, 0).concat(journal(200, 0.4, 90000)).reverse(),
+    'truthy ticks that are not true': [
+      { at: 0, net: 9, mins: 30, id: 'one', took: 1 }, { at: MIN, net: 9, mins: 5, id: 'yes', took: 'yes' },
+      { at: 2 * MIN, net: 9, mins: 5, id: 'zero', took: 0 }, { at: 3 * MIN, net: 9, mins: 5, id: 'plain', took: true },
+      { at: 4 * MIN, net: 9, mins: 5, took: true }, { at: 5 * MIN, net: 9, mins: 5, id: null, took: false }]
+  };
+  Object.keys(shapes).forEach(function (k) {
+    eq('busy() is the whole join, row for row: ' + k,
+       JSON.stringify(A.busy(shapes[k])), JSON.stringify(wholeJoin(shapes[k])));
+  });
+  // 400 rows, 10 of them ticked: each row's tick is asked once to find the
+  // ticked ones, and then only by freeAgain for the ticked rows it tries. The
+  // walk over every pair asked it 160,000 times.
+  var asked = 0;
+  var counted = [];
+  for (var c = 0; c < 400; c++) {
+    (function (c) {
+      var r = { at: c * 2 * MIN, net: 9, mins: 25, id: 'c' + c };
+      Object.defineProperty(r, 'took', { enumerable: true,
+        get: function () { asked++; return c % 40 === 3; } });
+      counted.push(r);
+    })(c);
+  }
+  var heard = A.busy(counted);
+  ok_('busy() asks each row\'s tick about once a row, not once a pair (' + asked + ' for 400 rows)',
+      asked < 400 * 12);
+  eq('...and still finds the rows inside those ten jobs', Object.keys(heard).length, 120);
 })();
 
 /* ---- the figures beside the recommendation belong to the recommendation ---- */

@@ -2198,13 +2198,27 @@
    */
   function busy(rows) {
     var out = {};
+    // The ticked rows' places, found once. Every row used to walk every other
+    // row to skip the unticked ones inside the loop, so the join was rows²
+    // when only rows × ticks of it could ever count: 519 ms over 15,000 rows
+    // in node and 2,059 ms over 30,000 (54 and 229 now), on the offers page's
+    // every range press. The same rows are asked the same question in the same order —
+    // ascending place, the row itself skipped — so `into` and `stacked` come
+    // out as they did, byte for byte (tests/advice.test.js holds it against
+    // the whole join written out). Speed only: the window it joins over is
+    // the whole window, as AUDITS.md's Settled says it must stay.
+    var ticked = [];
+    for (var t = 0; t < rows.length; t++) {
+      if (rows[t].took) ticked.push(t);
+    }
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
       if (row.id === undefined || row.id === null) continue;
       var into = [];
-      for (var j = 0; j < rows.length; j++) {
+      for (var k = 0; k < ticked.length; k++) {
+        var j = ticked[k];
+        if (j === i) continue;
         var w = rows[j];
-        if (j === i || !w.took) continue;
         if (w.at < row.at && row.at < freeAgain(w)) {
           into.push({ at: w.at, net: w.net, mins: w.mins, id: w.id });
         }
