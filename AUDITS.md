@@ -4368,6 +4368,8 @@ route() is 1,179 lines. Moved code is the old text dedented, with only the path'
 
 **The test gate could pass with suites unreported (the tools review).** `tools/test.sh` printed in order and stopped at the first suite with no `.done`; the verdict counted only what it printed, so a runner killed with -9 gave "all 1 suites passed" and exit 0 over five stub suites. It now counts the suites scheduled, says one with no result and moves on (`flush all` once every runner has ended), and exits 1 naming any missing. Checks: tools/test_gate.py, new, 5, on stub suites.
 
+**The places report read every GPS log twice, once per question (the tools review).** `tools/report/io.js` `gpsFixes` and `gpsAt` each ran load_fixes. main now keeps one helper open (`gpsLog`), which keeps each log's fixes (`load_log`, split out of `tools/shift_report.py` `load_fixes`) and answers both windows; nothing is cached on disk. On invented logs of 992,105 usable fixes: the two questions 41.2 → 20.7 s, the build 64.3 and 67.7 → 44.6 and 45.8 s; all 43 CSVs byte for byte, index.html but for its stamp. Checks: tests/placesreport.test.js 523 → 524.
+
 ---
 
 ## Settled — do not re-propose

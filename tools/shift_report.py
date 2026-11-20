@@ -1432,20 +1432,9 @@ def _restamp(path):
     return add, len(steps)
 
 
-def load_fixes(directory, window=None):
-    """(fixes, info). `fixes` is [(t, lat, lon, speed)] for every fix gps.usable()
-    passed (speed in m/s, or None), sorted by t (seconds, the Pi's clock), or None when there is no
-    log at all. `info` counts what was read and what was refused, and why.
-
-    `window`, [lo, hi) in ms: read only the logs that can hold a fix in it, by
-    their names (_logs_for); `info['otherDays']` counts the ones left unread.
-    Every log, as before, without it. A `.jsonl` beside its own `.jsonl.gz`
-    is not read (`info['twins']` counts them): the same log, held twice."""
-    info = {'files': 0, 'positions': 0, 'passed': 0, 'refused': collections.Counter(),
-            'unstamped': 0, 'beforeClock': 0, 'otherDays': 0,
-            'clockSteps': 0, 'restamped': 0, 'twins': 0}
-    if not directory or not os.path.isdir(directory):
-        return None, info
+def log_names(directory):
+    """(names, twins): the GPS logs in `directory` load_fixes reads, sorted,
+    and how many `.jsonl` were left for the `.jsonl.gz` beside them."""
     names = sorted(n for n in os.listdir(directory)
                    if n.endswith('.jsonl') or n.endswith('.jsonl.gz'))
     # A `.jsonl` with its own `.jsonl.gz` beside it is one log held twice, and
@@ -1458,8 +1447,76 @@ def load_fixes(directory, window=None):
     # once it has read it back byte for byte, so it is the whole log, while
     # the `.jsonl` may be a copy taken mid-shift.
     packed = set(n for n in names if n.endswith('.jsonl.gz'))
-    info['twins'] = sum(1 for n in names if n + '.gz' in packed)
-    names = [n for n in names if n + '.gz' not in packed]
+    twins = sum(1 for n in names if n + '.gz' in packed)
+    return [n for n in names if n + '.gz' not in packed], twins
+
+
+def load_log(directory, name):
+    """(fixes, counts) of ONE log: its fixes in the order read, and what
+    load_fixes adds into its info. Every log stands alone (its own Phone, its
+    own clock steps), so a log's fixes are the same whichever others are read
+    beside it, and the places report keeps them by log (tools/report/io.js's
+    helper) to answer two windows off one read."""
+    counts = {'positions': 0, 'passed': 0, 'refused': collections.Counter(),
+              'unstamped': 0, 'beforeClock': 0, 'clockSteps': 0, 'restamped': 0}
+    fixes = []
+    now = [0.0]
+    # One Phone per file: one gpspipe run is one stream, and the hold
+    # bookkeeping (`heldFor`) is about consecutive fixes of one stream.
+    phone = G.Phone('gpspipe-log', clock=lambda: now[0])
+    # The log read once for its clock's steps (CLOCK_STEP_S), and again
+    # for its fixes, each stamp moved by what the first read found.
+    add, steps = _restamp(os.path.join(directory, name))
+    counts['clockSteps'] += steps
+    k = -1
+    with _open(os.path.join(directory, name)) as fh:
+        for line in fh:
+            m = _STAMP.match(line.strip())
+            if not m:
+                if line.lstrip().startswith('{'):
+                    counts['unstamped'] += 1
+                continue
+            k += 1
+            got = G.parse_line(m.group(2))
+            if got is None:
+                continue
+            t = float(m.group(1))
+            if k < len(add) and add[k]:
+                t += add[k]
+                counts['restamped'] += 1
+            if t < CLOCK_FLOOR:
+                counts['beforeClock'] += 1
+                continue
+            counts['positions'] += 1
+            now[0] = t
+            phone.take(got)
+            fix = phone.latest()
+            if fix['ok']:
+                counts['passed'] += 1
+                # The TPV's own speed rides along for the shift's moving
+                # and stopped minutes (totals); None when it gave none.
+                fixes.append((t, fix['lat'], fix['lon'], _num(fix.get('speed'))))
+            else:
+                counts['refused'][fix['why']] += 1
+    return fixes, counts
+
+
+def load_fixes(directory, window=None):
+    """(fixes, info). `fixes` is [(t, lat, lon, speed)] for every fix gps.usable()
+    passed (speed in m/s, or None), sorted by t (seconds, the Pi's clock), or None when there is no
+    log at all. `info` counts what was read and what was refused, and why.
+
+    `window`, [lo, hi) in ms: read only the logs that can hold a fix in it, by
+    their names (_logs_for); `info['otherDays']` counts the ones left unread.
+    Every log, as before, without it. A `.jsonl` beside its own `.jsonl.gz`
+    is not read (`info['twins']` counts them): the same log, held twice
+    (log_names)."""
+    info = {'files': 0, 'positions': 0, 'passed': 0, 'refused': collections.Counter(),
+            'unstamped': 0, 'beforeClock': 0, 'otherDays': 0,
+            'clockSteps': 0, 'restamped': 0, 'twins': 0}
+    if not directory or not os.path.isdir(directory):
+        return None, info
+    names, info['twins'] = log_names(directory)
     if window is not None:
         keep = _logs_for(names, window)
         info['otherDays'] = len(names) - len(keep)
@@ -1467,44 +1524,10 @@ def load_fixes(directory, window=None):
     fixes = []
     for name in names:
         info['files'] += 1
-        now = [0.0]
-        # One Phone per file: one gpspipe run is one stream, and the hold
-        # bookkeeping (`heldFor`) is about consecutive fixes of one stream.
-        phone = G.Phone('gpspipe-log', clock=lambda: now[0])
-        # The log read once for its clock's steps (CLOCK_STEP_S), and again
-        # for its fixes, each stamp moved by what the first read found.
-        add, steps = _restamp(os.path.join(directory, name))
-        info['clockSteps'] += steps
-        k = -1
-        with _open(os.path.join(directory, name)) as fh:
-            for line in fh:
-                m = _STAMP.match(line.strip())
-                if not m:
-                    if line.lstrip().startswith('{'):
-                        info['unstamped'] += 1
-                    continue
-                k += 1
-                got = G.parse_line(m.group(2))
-                if got is None:
-                    continue
-                t = float(m.group(1))
-                if k < len(add) and add[k]:
-                    t += add[k]
-                    info['restamped'] += 1
-                if t < CLOCK_FLOOR:
-                    info['beforeClock'] += 1
-                    continue
-                info['positions'] += 1
-                now[0] = t
-                phone.take(got)
-                fix = phone.latest()
-                if fix['ok']:
-                    info['passed'] += 1
-                    # The TPV's own speed rides along for the shift's moving
-                    # and stopped minutes (totals); None when it gave none.
-                    fixes.append((t, fix['lat'], fix['lon'], _num(fix.get('speed'))))
-                else:
-                    info['refused'][fix['why']] += 1
+        got, counts = load_log(directory, name)
+        fixes.extend(got)
+        for key, n in counts.items():
+            info[key] += n
     # By time, then place, as before the speed was added: a speed is never
     # what orders two fixes, and None does not compare with a number.
     fixes.sort(key=lambda f: f[:3])

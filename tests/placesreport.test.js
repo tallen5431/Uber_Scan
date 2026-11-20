@@ -948,6 +948,25 @@ function nbx() {
   var gf = P.gpsFixes(logDir, at(3, 18, 0), at(3, 21, 0), 10);
   ok('the GPS log thinned to one fix per 10 s through the gate (' + gf.fixes.length + ')', gf.fixes.length >= 28 && gf.fixes.length <= 31);
   eq('...and the five minutes parked in it are one spell', P.spellsOf(gf.fixes, []).length, 1);
+  // ...and the report's two questions of the log off ONE read (io.js gpsLog):
+  // one helper for both, the log moved away between them and the second
+  // still answered from what the first read, as gpsFixes and gpsAt answer
+  // alone. Each was its own read of every log: 24 s and 23.7 s of 80.
+  var CP = require('child_process'), spawned = 0, spawn0 = CP.spawn, both = null;
+  var logFile = path.join(logDir, '2026-03-03_1900.jsonl');
+  CP.spawn = function () { spawned += 1; return spawn0.apply(CP, arguments); };
+  try {
+    var gl = P.gpsLog(logDir);
+    both = [await gl.fixes(at(3, 18, 0), at(3, 21, 0), 10)];
+    fs.renameSync(logFile, logFile + '.away');
+    both.push(await gl.at([at(3, 19, 2), at(3, 19, 30), at(3, 19, 10)]));
+    gl.close();
+  } finally {
+    CP.spawn = spawn0;
+    if (fs.existsSync(logFile + '.away')) fs.renameSync(logFile + '.away', logFile);
+  }
+  eq('[gps] both questions of the log from one helper and one read, answered as gpsFixes and gpsAt answer',
+     [spawned, both], [1, [gf, g]]);
 
   // The town of a spell's cell: the NucBox's reverse answer for the cell's
   // centre, asked once and kept.

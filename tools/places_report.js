@@ -477,7 +477,7 @@ module.exports = {
   realOf: TB.realOf, takesTable: TB.takesTable, waitsTable: TB.waitsTable, strandTable: TB.strandTable,
   busyTable: TB.busyTable, appsTable: TB.appsTable, ppmTable: TB.ppmTable, stackTable: TB.stackTable,
   quietTable: TB.quietTable, trendTable: TB.trendTable, spellsOf: TB.spellsOf, heldOf: TB.heldOf,
-  gpsFixes: IO.gpsFixes, cellTownOf: IO.cellTownOf, tableCsv: CSV.tableCsv, inside: IO.inside,
+  gpsFixes: IO.gpsFixes, gpsLog: IO.gpsLog, cellTownOf: IO.cellTownOf, tableCsv: CSV.tableCsv, inside: IO.inside,
   realish: IO.realish, outingOf: ST.outingOf, main: IO.main, printedTown: PL.printedTown,
   regionOf: PL.regionOf, wordsOf: PL.wordsOf, WHY: PL.WHY, isPoint: PL.isPoint, gridOk: PL.gridOk,
   PLACE_APPROX_MI: PL.PLACE_APPROX_MI, REGION_MARGIN_MI: PL.REGION_MARGIN_MI, quantile: TB.quantile,
