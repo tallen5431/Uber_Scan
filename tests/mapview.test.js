@@ -89,6 +89,34 @@ eq('a usable fix is not a refusal',
 eq('...and a row with no coordinate is not one either: it did not know',
    MV.fixRefused({ pay: 12 }), null);
 
+/* ---- where a map opens (openingView, newestFix; 20 Nov 2026) --------------
+ *
+ * The three maps opened on one metro written into each page. They open on
+ * the first position the page has, best first, and on the neutral view (the
+ * lower 48, zoom 4) only with none. */
+eq('a map with nothing to open on opens on the neutral view',
+   JSON.stringify(MV.openingView([null, null], 12)), '{"center":[39.8,-98.6],"zoom":4}');
+eq('...and with no candidates at all',
+   JSON.stringify(MV.openingView()), JSON.stringify(MV.NEUTRAL_VIEW));
+eq('...a copy, so a page moving its centre cannot move the neutral view',
+   MV.openingView([]).center !== MV.NEUTRAL_VIEW.center, true);
+eq('the first position wins, in either shape, at the zoom asked',
+   JSON.stringify([MV.openingView([null, { lat: 33.95, lon: -44.55 }, [10, 20]], 12),
+                   MV.openingView([[33.96, -44.54]], 13)]),
+   JSON.stringify([{ center: [33.95, -44.55], zoom: 12 }, { center: [33.96, -44.54], zoom: 13 }]));
+eq('...and something that is not a position is passed over, not opened on',
+   JSON.stringify(MV.openingView([{ lat: NaN, lon: 1 }, [120, 0], { lat: 'x' }, [33.9, -44.5]])),
+   JSON.stringify({ center: [33.9, -44.5], zoom: 12 }));
+eq('the newest fix is the newest row the gate passed, by its time',
+   JSON.stringify(MV.newestFix([
+     { at: 3000, lat: 33.97, lon: -44.53, gpsOk: false, gpsWhy: 'rough' },
+     { at: 2000, lat: 33.96, lon: -44.54, gpsOk: true },
+     { at: 1000, lat: 33.95, lon: -44.55, gpsOk: true },
+     { lat: 33.94, lon: -44.56, gpsOk: true }])),
+   JSON.stringify({ lat: 33.96, lon: -44.54 }));
+eq('...and none for rows that carry none', MV.newestFix([{ at: 1, pay: 9 }]), null);
+eq('...nor for no rows', MV.newestFix(null), null);
+
 /* ---- you are here --------------------------------------------------------
  *
  * The beat's newest fix, as both maps draw it. Harrowen Square, a public

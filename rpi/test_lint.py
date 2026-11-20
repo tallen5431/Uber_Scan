@@ -411,6 +411,37 @@ else:
     eq('no tracked file names a place of the metro the suites used to use, '
        'or a coordinate in it (hashed list; look at the line)', _gone[:20], [])
 
+# --- a map opens on what the page holds, never on a written place -----------
+#
+# journal.html, live.html and map.html each opened Leaflet on the same metro,
+# written as a literal: the owner's, and wrong for any other driver. They open
+# on a fix or the pins (MV.openingView) and, with nothing, on the neutral view,
+# which is the one coordinate a shipped page may write. Any Leaflet call handed
+# a literal position, or a `center:` written as numbers, is that again.
+_neutral = 'center: [39.8, -98.6]'
+_mapcall = re.compile(r'\b(?:setView|panTo|flyTo|latLng|setLatLng|fitBounds)\(\s*\[\s*\[?\s*-?\d')
+_centre = re.compile(r'\bcenter\s*:\s*\[\s*-?\d')
+_shipped = sorted(glob.glob(os.path.join(ROOT, '*.html')) + glob.glob(os.path.join(ROOT, '*.js'))
+                  + glob.glob(os.path.join(ROOT, 'lite', '*.html'))
+                  + glob.glob(os.path.join(ROOT, 'lite', '*.js')))
+_written = []
+for fp in _shipped:
+    src = open(fp, encoding='utf-8').read()
+    for n, line in enumerate(src.split('\n'), 1):
+        if _mapcall.search(line) or (_centre.search(line) and _neutral not in line):
+            _written.append('%s:%d' % (os.path.relpath(fp, ROOT), n))
+ok_('there are shipped pages and scripts to read (%d)' % len(_shipped), len(_shipped) > 10)
+eq('no map in a shipped page opens on, pans to or fits a written coordinate',
+   _written, [])
+_mv = open(os.path.join(ROOT, 'map-view.js'), encoding='utf-8').read()
+eq('the neutral view is written once, in map-view.js',
+   sum(open(fp, encoding='utf-8').read().count('39.8, -98.6') for fp in _shipped), 1)
+ok_('...and it is the one MV.openingView falls back on',
+    'var NEUTRAL_VIEW = { ' + _neutral + ', zoom: 4 };' in _mv)
+for _page in ('journal.html', 'live.html', 'map.html'):
+    _src = open(os.path.join(ROOT, _page), encoding='utf-8').read()
+    ok_('%s opens its map through MV.openingView' % _page, 'MV.openingView(' in _src)
+
 # The NucBox's Nominatim, as the README tells the driver to start it, is the
 # command the driver ran: with --shm-size=1g, which the README first left out
 # (Docker's 64 MB of shared memory is not enough for PostgreSQL's import).

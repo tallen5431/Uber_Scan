@@ -201,6 +201,53 @@
     return o.gpsWhy || 'unjudged';
   }
 
+  /* --- where a map opens ---------------------------------------------------
+   *
+   * Leaflet wants a centre the moment a map is made, before a single place is
+   * looked up. All three maps used to open on one metro, written into each
+   * page: a real place in a public repository, and the wrong place for any
+   * driver who is not that one. They open on what the page already holds
+   * instead (the owner, 20 Nov 2026): the newest fix the gate passed, or the
+   * ends of what it is about to draw. Only with nothing at all, a wide neutral
+   * view, the whole of the lower 48: a picture of "nothing here yet" rather
+   * than a guess at a city. Every page fits to its pins or its dot right after,
+   * as it always did; this is only the frame before that.
+   *
+   * No home is stored for it. A remembered position would be the same metro
+   * again, written into a browser rather than a file. */
+  var NEUTRAL_VIEW = { center: [39.8, -98.6], zoom: 4 };
+
+  // The first of `candidates` that is a position, at `zoom`; or the neutral
+  // view. A candidate is { lat, lon } (fixOf's shape), [lat, lon] (Leaflet's),
+  // or null for "the page has none of this kind".
+  function openingView(candidates, zoom) {
+    var list = candidates || [];
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      if (!c) continue;
+      var lat = Array.isArray(c) ? c[0] : c.lat;
+      var lon = Array.isArray(c) ? c[1] : c.lon;
+      if (typeof lat === 'number' && typeof lon === 'number' && isFinite(lat)
+          && isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+        return { center: [lat, lon], zoom: zoom || 12 };
+      }
+    }
+    return { center: NEUTRAL_VIEW.center.slice(), zoom: NEUTRAL_VIEW.zoom };
+  }
+
+  // The newest row's position, by its `at`, among those fixOf passes; null for
+  // none. A row with no `at` loses to one with any.
+  function newestFix(rows) {
+    var best = null, bestAt = -Infinity;
+    (rows || []).forEach(function (o) {
+      var at = fixOf(o);
+      if (!at) return;
+      var t = typeof o.at === 'number' && isFinite(o.at) ? o.at : -Infinity;
+      if (best === null || t > bestAt) { best = at; bestAt = t; }
+    });
+    return best;
+  }
+
   /* --- you are here --------------------------------------------------------
    *
    * The heartbeat's newest fix, drawn as a dot with a circle the size of its
@@ -5911,6 +5958,7 @@
            civilTwilight: civilTwilight, nightFor: nightFor,
            detour: detour, detourThrough: detourThrough, stopOrder: stopOrder,
            fixOf: fixOf, fixRefused: fixRefused,
+           NEUTRAL_VIEW: NEUTRAL_VIEW, openingView: openingView, newestFix: newestFix,
            cardFix: cardFix, fixLine: fixLine, cardYardstick: cardYardstick,
            againstCard: againstCard, cardRefuses: cardRefuses,
            SLACK_MI: SLACK_MI, roughCentre: roughCentre,

@@ -8417,7 +8417,17 @@
       if (viewMode !== 'map' || mapFor !== key) return;
 
       if (!theMap) {
-        theMap = L.map(liveMap, { zoomControl: true }).setView([33.94, -44.58], 11);
+        // Opened on where this card was read, else the car's newest dot, else
+        // the neutral view (MV.openingView); drawMap fits to the pins and the
+        // car the moment it has them. A map-view.js older than this page (sw.js
+        // can hand one over) has no openingView: the whole world, then the fit.
+        var here0 = MV.hereDot && gpsNow ? MV.hereDot(gpsNow.fix, Date.now() - gpsAt) : null;
+        var opening = MV.openingView
+          ? MV.openingView([MV.cardFix(want.card).at, here0 && !here0.line ? here0 : null], 12)
+          : null;
+        theMap = L.map(liveMap, { zoomControl: true });
+        if (opening) theMap.setView(opening.center, opening.zoom);
+        else theMap.fitWorld();
         watchHands(theMap);
         // A tapped mark's words go when the map itself is tapped: on a touch
         // panel there is no pointer to leave the mark. drawHow's marks do not

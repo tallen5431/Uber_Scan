@@ -607,6 +607,9 @@
         var body = both[0], lostLookups = both[1];
         if (body && body.unreadable) throw new Error('the journal could not be read (' + body.unreadable + ')');
         offers = (body && body.offers) || [];
+        // A map that opened on the neutral view for want of anywhere goes to
+        // the newest of these that carries a fix (openOnWhatIsHere).
+        openOnWhatIsHere();
         // A fresh window; nothing in the old answer describes it.
         lastRun = null;
         var sub = shown();
@@ -806,6 +809,27 @@
     box.textContent = words;
   }
 
+  // Where this page can say the car is or was, best first: the heartbeat's
+  // dot (MV.hereDot, nothing when the gate refused it), then the newest offer
+  // in the window that carries a fix (MV.newestFix).
+  function whatIsHere() {
+    var d = gpsFix ? MV.hereDot(gpsFix, Date.now() - gpsAt) : null;
+    return [d && !d.line ? d : null, MV.newestFix ? MV.newestFix(offers) : null];
+  }
+
+  // True while the map is on the neutral view because the page had nowhere to
+  // open it: the offers arriving then move it, once. Any fit of the page's own
+  // since (the pins, the dot) is a frame with something in it, and clears it.
+  var openedNeutral = false;
+
+  function openOnWhatIsHere() {
+    if (!map || !openedNeutral) return;
+    var at = whatIsHere().filter(Boolean)[0];
+    if (!at) return;
+    openedNeutral = false;
+    map.setView([at.lat, at.lon], 12);
+  }
+
   function ensureMap() {
     if (map) return true;
     if (typeof L === 'undefined') {
@@ -816,7 +840,16 @@
       return false;
     }
     mapSays(null);
-    map = L.map(el.map, { zoomControl: true }).setView([33.94, -44.58], 10);
+    // Opened on the car's newest dot, else the newest offer that carries a
+    // fix, else the neutral view (MV.openingView). A map opened before either
+    // had arrived is moved once they do (openOnWhatIsHere); the pins' own fit
+    // is unchanged. A map-view.js older than this page has no openingView:
+    // the whole world, then the fit.
+    var opening = MV.openingView ? MV.openingView(whatIsHere(), 12) : null;
+    map = L.map(el.map, { zoomControl: true });
+    if (opening) map.setView(opening.center, opening.zoom);
+    else map.fitWorld();
+    openedNeutral = !whatIsHere().some(Boolean);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19, attribution: '© OpenStreetMap'
     }).addTo(map);
@@ -978,6 +1011,7 @@
     // The dot's position when it first appeared joins the pins in the view,
     // and never its position since: see drawHere.
     if (bounds.length) {
+      openedNeutral = false;
       map.fitBounds(hereAnchor ? bounds.concat([hereAnchor]) : bounds,
                     { padding: [30, 30] });
     }
@@ -1301,6 +1335,7 @@
                  + ' m</span>').addTo(hereLayer);
     if (hereWanted && !hereAnchor) {
       hereAnchor = [d.lat, d.lon];
+      openedNeutral = false;
       if (pinBounds.length) {
         map.fitBounds(pinBounds.concat([hereAnchor]), { padding: [30, 30] });
       } else {

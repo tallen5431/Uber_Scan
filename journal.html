@@ -6491,7 +6491,18 @@
       return;
     }
     if (!sheetMap) {
-      sheetMap = L.map(el.sheetMap, { zoomControl: true }).setView([33.94, -44.58], 10);
+      // Opened on where the car was when this job's offer was read (the
+      // anchor its lookups are boxed round), else the newest fix on the page,
+      // else the neutral view (MV.openingView); the pins are fitted below.
+      // A map-view.js older than this page has no openingView: the world.
+      var rows = (lastData && lastData.offers) || [];
+      var opening = MV.openingView
+        ? MV.openingView(want.filter(Boolean).map(function (q) { return MV.anchorFor(rows, q); })
+                           .concat([MV.newestFix(rows)]), 12)
+        : null;
+      sheetMap = L.map(el.sheetMap, { zoomControl: true });
+      if (opening) sheetMap.setView(opening.center, opening.zoom);
+      else sheetMap.fitWorld();
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19, attribution: '© OpenStreetMap'
       }).addTo(sheetMap);
