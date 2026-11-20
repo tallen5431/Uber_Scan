@@ -285,7 +285,24 @@ self.addEventListener('fetch', function (e) {
   }).catch(function () {}));
   e.respondWith(
     fresh.catch(function () {
-      return caches.match(e.request).then(function (hit) {
+      /* A page is looked up without its query; nothing else is.
+       *
+       * keepShell stores no query, so the cache holds `live.html` and never
+       * `live.html?route` — and a plain match compares the whole URL, query
+       * and all. `?route` is the phone's way into the panel (README, and the
+       * ⤳ Route links on index.html and the offers page), so the
+       * one address a phone uses offline was the one answered "No network,
+       * and this page is not saved" while the page sat in the cache: the
+       * reviewer's script, offline with the worker in control, had
+       * live.html 200 and live.html?route 503. The same miss came online
+       * whenever the rig took longer than SHELL_WAIT_MS. A page reads its
+       * own query (live.html's ROUTE_VIEW reads location.search), so the
+       * cached document opened under that address is the page asked for,
+       * route view and all. A script or a
+       * picture keeps the exact match: a query there is a cache-buster, and
+       * an answer for a different one is a stranger failure than none. */
+      var page = e.request.mode === 'navigate';
+      return caches.match(e.request, { ignoreSearch: page }).then(function (hit) {
         // Nothing cached and no network. A navigation can still be answered
         // with the app shell; anything else has to fail as itself, because
         // handing back index.html in place of a script is a stranger failure
