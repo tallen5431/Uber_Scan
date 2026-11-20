@@ -5,7 +5,7 @@ Run ON THE NUCBOX (Ubuntu 24.04), where the extract is:
 
     sudo apt install osmium-tool
     python3 tools/street_index.py ~/osrm/georgia-latest.osm.pbf ~/streets.json \
-        --bbox W,S,E,N
+        --bbox=W,S,E,N
 
 and set NUCBOX_STREETS_FILE=~/streets.json in the environment of the NucBox's
 own server.js (README, "The NucBox at home"). Nothing here downloads
@@ -21,7 +21,7 @@ and each way as its names and its nodes. Coordinates are integers of a
 millionth of a degree, each the difference from the one before, which is what
 keeps the file small. Python's standard library only.
 
-    --bbox W,S,E,N   the area, in degrees: the driver's metro, every town the
+    --bbox=W,S,E,N   the area, in degrees: the driver's metro, every town the
                      cards name with a margin (required)
     --opl FILE       read osmium's OPL from FILE instead of running osmium
                      (the suites use it where osmium is not installed)

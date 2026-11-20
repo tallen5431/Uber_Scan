@@ -267,7 +267,7 @@ NucBox, `tools/street_index.py` keeps every **named** way a car is driven on
 (motorway down to residential and living_street, the `_link`s, and named
 `service` drives — an apartment complex's or a shopping centre's own drive,
 where dropoffs often are; never a footway, path, track or building) inside the
-box `--bbox W,S,E,N` names, in degrees: the driver's own metro, every town the
+box `--bbox=W,S,E,N` names, in degrees: the driver's own metro, every town the
 cards name with a margin, since a card's disc reaches its own distance past
 where the car was. The box is the driver's to give and is written nowhere in
 this repository. It writes one JSON file. `osmium-tool` cuts the file (apt,
@@ -276,7 +276,7 @@ repo on the NucBox:
 
 ```sh
 sudo apt install osmium-tool
-python3 tools/street_index.py ~/osrm/georgia-latest.osm.pbf ~/streets.json --bbox W,S,E,N
+python3 tools/street_index.py ~/osrm/georgia-latest.osm.pbf ~/streets.json --bbox=W,S,E,N   # the "=" matters: a western W starts with "-"
 ```
 
 It prints what it kept and dropped, how long osmium and the index took, and
