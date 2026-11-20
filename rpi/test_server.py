@@ -16094,6 +16094,42 @@ finally:
     stop(proc)
 shutil.rmtree(_frdir, ignore_errors=True)
 
+# /api/today kept its answer under a stat taken BEFORE its read, and the read
+# it joined could be older than that stat: an offer appended between the two
+# was in the key and not in the answer, and the cache served the answer one
+# offer short until the next append (todaySummary). The poll here joins the
+# offers page's read, held after its stat, with a second offer appended in
+# between; once it is answered, the same poll with nothing appended must
+# agree with a `since` the cache has never seen.
+_tddir = tempfile.mkdtemp()
+_tdj = os.path.join(_tddir, 'offers.jsonl')
+_tdsince = NOW - 3600000
+write(_tdj, [offer(i, NOW - 1800000 + i * 1000) for i in range(5)])
+proc, base, _tdlog = _logged({'SCANNER': '0', 'HOLD_DIR': _tddir}, _tdj, preload=_HOLD)
+try:
+    _tdw = get(base, '/api/today?since=%d' % _tdsince)['offers']
+    open(os.path.join(_tddir, 'hold'), 'w').close()
+    write(_tdj, [offer(50, NOW - 60000)], 'a')
+    _tdt1, _ = _in_thread(get, base, '/api/journal?days=1')
+    ok_('[today] the offers page\'s read is held after its stat', _hold_saw(_tddir, 'held'))
+    write(_tdj, [offer(51, NOW - 30000)], 'a')
+    _tdn = sum(1 for e in _held_events(_tddir) if e == 'stat')
+    _tdt2, _tdr2 = _in_thread(get, base, '/api/today?since=%d' % _tdsince)
+    ok_('[today] ...and the panel\'s poll, its stat taken after the second offer, joins it',
+        _hold_saw(_tddir, 'stat', _tdn))
+    os.remove(os.path.join(_tddir, 'hold'))
+    _tdt2.join(20)
+    _tdt1.join(20)
+    _tda = (_tdr2.get('got') or {}).get('offers')
+    _tdb = get(base, '/api/today?since=%d' % _tdsince)['offers']
+    _tdc = get(base, '/api/today?since=%d' % (_tdsince + 1))['offers']
+    eq('[today] a poll answered off an older read is not kept under a newer stat: '
+       'warm, joined, the same poll after, a since never asked',
+       (_tdw, _tda, _tdb, _tdc), (5, 6, 7, 7))
+finally:
+    stop(proc)
+shutil.rmtree(_tddir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

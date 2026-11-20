@@ -4352,6 +4352,11 @@ route() is 1,179 lines. Moved code is the old text dedented, with only the path'
 
 Checks: rpi/test_server.py `[fresh]` 3 — a `-r` preload holds the journal's reads after their stat and says what the server did, so the order is the server's, not a sleep's: the offers page's read held, the first upload's rows written while it waits, the same batch posted again. Before: `added: 60`, 120 copies; after: `added: 0`, 60.
 
+**The driving screen's /api/today kept an answer one offer short under a stat newer than its rows (the server review's second round, Nov 2026).** todaySummary keyed its cache on a stat taken before its read, and readJournal can hand back a read already in flight, begun before that stat; an offer appended between the two was in the key and not in the answer, and the poll served the short answer until the next append moved the file. Measured over a slow card: the joined poll said 401, and the same poll a second later, nothing appended, still said 401 where a `since` never asked said 402.
+  - The answer is kept only when its rows are `journalCache.rows`, under that cache's own size and mtime: what was read, not what was statted. Anything else is answered and not kept.
+
+Checks: rpi/test_server.py `[today]` 3, through the `[fresh]` preload: the offers page's read held, a second offer appended, the poll's stat seen to land before it joins. Warm, joined, the same poll after, a fresh `since`: 5, 6, 6, 7 before; 5, 6, 7, 7 after.
+
 ---
 
 ## Settled — do not re-propose

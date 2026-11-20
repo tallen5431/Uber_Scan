@@ -10859,8 +10859,22 @@ function todaySummary(since, done, failed) {
       // An unreadable journal is not cached. It is a transient the next request
       // may not hit, and keying it on a size and mtime that did not change
       // would hold the failure up until the file did.
-      if (size >= 0 && rows) {
-        shiftCache = { size: size, stamp: stamp, since: since, answer: answer };
+      //
+      // ...and an answer is kept under the size and mtime of the file ITS rows
+      // were read from, which is not the stat above (the server review's
+      // second round, Nov 2026). readJournal may hand back a read that was
+      // already in flight, begun before that stat — an offer appended between
+      // the two is in the stat and not in the rows — and keyed on the stat,
+      // the answer one offer short was served from the cache until the next
+      // append moved the file again. Measured over a slow card: a poll that
+      // joined the offers page's read said 2 offers, and the same poll a
+      // second later, with nothing appended, still said 2 where an uncached
+      // `since` said 3. journalCache records what was read; when these rows
+      // are its rows its size and mtime describe them exactly, and anything
+      // else (a cache dropped by a failed read) is answered and not kept.
+      var c = journalCache;
+      if (rows && c && c.rows === rows) {
+        shiftCache = { size: c.size, stamp: c.mtime, since: since, answer: answer };
       }
       answered(answer);
     }, failed);
