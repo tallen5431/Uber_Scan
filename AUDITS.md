@@ -4366,6 +4366,8 @@ route() is 1,179 lines. Moved code is the old text dedented, with only the path'
 
 **A GPS log the NucBox held as both `.jsonl` and `.jsonl.gz` was read twice (the tools review).** places_nightly.sh never deletes, so a log copied before the rig gzipped it stays beside the `.gz`. `tools/shift_report.py` `load_fixes`, the places report's reader too, now skips such a `.jsonl` and counts it (`twins`). Checks: tools/test_shift_report.py 292 → 294.
 
+**The test gate could pass with suites unreported (the tools review).** `tools/test.sh` printed in order and stopped at the first suite with no `.done`; the verdict counted only what it printed, so a runner killed with -9 gave "all 1 suites passed" and exit 0 over five stub suites. It now counts the suites scheduled, says one with no result and moves on (`flush all` once every runner has ended), and exits 1 naming any missing. Checks: tools/test_gate.py, new, 5, on stub suites.
+
 ---
 
 ## Settled — do not re-propose
