@@ -158,6 +158,13 @@ ok_('a paired read builds an engine per reader', after_one <= 2)
 for _ in range(5):
     paired.read_many([CARDS[0][1], CARDS[0][1]])
 eq('...and five more build no others', len(PL._TESS_OPEN), after_one)
+# ...and a single frame is read on those threads too, not on the caller's.
+# look_many read one frame on the calling thread (scan_pi's reader), which
+# built an engine of its own beside the pool's two: three engines on the lite
+# edition, whose README promised two.
+paired.read_many([CARDS[0][1]])
+eq('a single-frame read after them builds no engine of its own (%d after the paired '
+   'reads)' % after_one, len(PL._TESS_OPEN), after_one)
 
 # And the backstop under it, for any caller that threads differently than this
 # one does. The cost of hitting it is a slow read; the cost of not having it is

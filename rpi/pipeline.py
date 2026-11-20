@@ -2716,8 +2716,15 @@ class Scanner:
         """
         frames = list(frames)
         geom = self.geometry() if geom is None else geom
-        if len(frames) == 1:
-            return [self._look(frames[0], now, geom)]
+        # A single frame goes through the pool too. It was read here, on the
+        # calling thread — scan_pi's reader — and the engine belongs to the
+        # thread, so the first single-frame read built a third engine beside
+        # the pool's two: measured, 1 after a single read, 3 after a paired
+        # one, lite and full alike, where lite's README and AUDITS said two.
+        # ~10-14MB of model on a Pi Zero 2 W's 512MB for nothing a pool
+        # thread could not read. The hop costs 0.1-0.3 ms of an 80 ms read on
+        # the development box (a single read's median 80-83 ms before and
+        # after, lite and full); rpi/test_tesseract.py holds the count.
         # The pool outlives the call. It used to be built per read and shut down
         # at the end of it, which was free when a read spawned a process and is
         # not now: the engine belongs to the thread, so a fresh pair of threads
