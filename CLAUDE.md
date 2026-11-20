@@ -52,6 +52,11 @@ Rules:
   Tailscale IPs. Invented fixtures only (the suites' invented places).
 - **Branches.** Work lands on experimental; `main` moves only through the
   release gate. Do not commit to `main` directly.
+- **Hands free (the owner, Nov 2026).** Prefer automation wherever it is safe:
+  a timer, a check that runs itself, a report that writes itself, over a step
+  the owner has to remember. Anything automatic must fail safe (skip, roll
+  back, say so in a log or status line) and never act during a shift or touch
+  the phone.
 - **Tests.** `bash tools/test.sh` runs everything and must end "all N suites
   passed". It sets `TZ=America/New_York`, the rig's zone.
 
