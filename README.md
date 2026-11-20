@@ -598,7 +598,7 @@ used. A one-line key across the map's foot names the marks on it.
 | `tools/install-sync.sh` | Puts the rig's journal on a timer to the machine at home; see the rig's README |
 | `tools/places_report.js`, `tools/places_nightly.sh` | The NucBox's offline report of where good offers start, and its nightly rebuild; see *Where the good offers start* |
 | `tools/report_check.js` | The reports checked against the real journal on the NucBox, aggregates only; see *Checking the reports against the real journal* |
-| `tools/autoupdate.sh`, `tools/install-autoupdate.sh` | The nightly update of the rig and the NucBox — fetch the gated branch, fast-forward, restart, check, roll back — and the timer that runs it; see *Updating itself at night* |
+| `tools/autoupdate.sh`, `tools/install-autoupdate.sh` | The update of the rig (hourly, when quiet, once a driver day) and the NucBox (nightly) — fetch the gated branch, fast-forward, restart, check, roll back — and the timer that runs it; see *Updating itself* |
 | `tools/strategy.js` | What $/hr to expect and what holding out for a line paid, off the record: one computation for the report's Strategy tab and `tools/shift_report.py --strategy`; see *The Strategy tab* |
 | [`lite/`](lite/README.md) | The lite edition: the camera, the reader and one big card on a display with nothing to touch, on at boot — the full rig with its experimental half switched off by one flag (`LITE=1`), not a copy of it. Its page, its server switch, its installer and kiosk, and its parts list; see [lite/README.md](lite/README.md) |
 | [`CLAUDE.md`](CLAUDE.md) | What a new working session needs before it starts: the lite decision and its rules, the standing conventions (twin parsers, signed commits, privacy, branches) and the settled list. Short on purpose; AUDITS.md has the reasons |
@@ -1202,20 +1202,43 @@ marked them, and whether its same-trip pairs agree on miles and minutes), how
 many days old the newest offer is, and how long the main computations took. Nothing
 is written; nothing on the rig runs it.
 
-## Updating itself at night: the rig and the NucBox
+## Updating itself: the rig hourly, the NucBox at night
 
 Every change used to reach the two machines only when somebody remembered to
 `git pull` and restart each one. `tools/autoupdate.sh` does that pull itself,
-from a systemd timer at **04:20** (plus up to ten minutes), just after the 4am
-driver-day turn and long before the places report at 05:17 — and every way it
-can go wrong ends in a skip or a rollback, said in one line:
+from a systemd timer, and every way it can go wrong ends in a skip or a
+rollback, said in one line. **The NucBox** runs it at **04:20** (plus up to ten
+minutes), just after the 4am driver-day turn and long before the places report
+at 05:17. **The rig** runs it **every hour** (at a random minute in the first
+twenty), because a Pi in a car is off at 04:20 nearly every night.
+
+**What "hands free" means for a rig that is only on while driving:** it
+updates when it has been powered, quiet and still for the whole window —
+parked with the engine running, on a charger at home, left on in the drive —
+inside its hours, and at most once a driver day. A rig that is never on while
+quiet never updates itself, and says so in nothing worse than a skip: then the
+hand pull still works exactly as before (`git pull`, then `sudo systemctl
+restart uberscan`). The restart is the cost: the panel and the scanner are gone
+while uberscan.service comes back (its server answers in under a tenth of a
+second on a desktop; the Pi's camera and reader take longer), which is why a
+quiet window and not a clock is what lets it act.
 
 * **Never during a shift.** On the rig it asks its own server first and
   skips on an order held, an offer or a reading in the last `QUIET_MIN`
-  minutes (60), an offer in the journal that recent, or the car moving; a
-  server that does not answer is a skip too, the cautious side. A Pi booted
-  less than 30 minutes ago is a shift starting and is left alone. On the
-  NucBox, which has no scanner, the question is only whether it answers.
+  minutes, an offer in the journal that recent, the car moving, or a server
+  up for less than the window (it forgets every age when it restarts, so a
+  rig booted for a shift with no offer yet would otherwise look quiet). The
+  window is **90 minutes**, not 60: a driver online can wait longer than an
+  hour between offers with the phone in the mount. A server that does not
+  answer is a skip too, the cautious side, and so is a Pi booted less than 30
+  minutes ago. On the NucBox, which has no scanner, the question is only
+  whether it answers.
+* **The rig's hours, and once a day.** `UPDATE_HOURS` (default `22-10,14-16`:
+  everything but the lunch rush, 11:00–13:59, and the dinner rush,
+  17:00–21:59; a list of hours and ranges that may wrap midnight, empty for
+  any hour) and `DAILY_CAP`: after an update, none until the next 4am turn.
+  These two are only the clock, so they are said in the journal and leave the
+  status file showing what last happened.
 * **Fast-forward only, on a clean tree.** Tracked changes, a local commit, a
   checkout on another branch, an untracked file the update would overwrite:
   skipped and said, never stashed, reset or cleaned. Only the configured
@@ -1255,7 +1278,8 @@ sudo bash tools/install-autoupdate.sh nucbox --restart-cmd 'THE RESTART COMMAND'
 The NucBox's unit runs as the checkout's owner, so the restart command runs as
 the account that pressed the button (`--root` if it must be root). Both
 installs run the update once with `--dry-run` to show the fetch works from a
-timer: a key with a passphrase cannot fetch at 4am, and it says so.
+timer: a key with a passphrase cannot fetch unattended, and it says so. On the
+rig, `--quiet-min N` and `--hours LIST` set the window and the hours.
 
 **The last outcome:** `bash tools/autoupdate.sh --status`, the file
 `rpi/update-status.json` (gitignored), `journalctl -u uberscan-update`, or the
@@ -1266,8 +1290,8 @@ display only, nothing on the driving bar.
 `/etc/uberscan/autoupdate.env`). **Pinning a branch:** `--branch NAME`, with
 the checkout on that branch — `experimental` takes ungated work as the hand
 pull did; a lite rig can follow `lite` once that branch exists. The settings
-file also holds `PORT`, `QUIET_MIN`, `RESTART_CMD` and `LOCK`, and is read
-fresh every night. **Signed commits only:** `--verify-signed` takes a commit
+file also holds `PORT`, `QUIET_MIN`, `UPDATE_HOURS`, `DAILY_CAP`,
+`RESTART_CMD` and `LOCK`, and is read fresh on every run. **Signed commits only:** `--verify-signed` takes a commit
 only when `git verify-commit` passes on it, which needs git's signature
 checking set up for the account that runs the update (for SSH signatures, a
 `gpg.ssh.allowedSignersFile`); it is off by default.

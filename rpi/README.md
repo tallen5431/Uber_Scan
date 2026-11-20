@@ -169,14 +169,20 @@ of the `rpi/` scripts by hand: `sudo systemctl stop uberscan`.
 
 The rig's services, then: `uberscan.service` (this), `uberscan-sync.timer`
 (the copy, below), `uberscan-kiosk.service` on a lite rig without a desktop,
-and **`uberscan-update.timer`**, the nightly update — fetch the gated branch at
-04:20, fast-forward, restart, check, roll back — which skips whenever a shift
-could be on (an order held, an offer or reading in the last hour, the car
-moving, a boot under half an hour old, the server not answering):
+and **`uberscan-update.timer`**, the update — fetch the gated branch,
+fast-forward, restart, check, roll back — tried every hour the Pi is on, since
+a Pi in a car is off at night. It skips whenever a shift could be on (an order
+held, an offer or reading in the last 90 minutes, a server up for less than
+that, the car moving, a boot under half an hour old, the server not
+answering), outside `UPDATE_HOURS` (not in the lunch or dinner rush), and after
+one update until the next 4am turn. So it updates when the rig has been on,
+quiet and still for the window — parked with the engine running, on a charger
+at home — or never, if it never is; `git pull` and a restart by hand still
+work as they always did:
 
 ```sh
-sudo bash tools/install-autoupdate.sh rig    # README.md, "Updating itself at night"
-bash tools/autoupdate.sh --status            # what the last night did
+sudo bash tools/install-autoupdate.sh rig    # README.md, "Updating itself"
+bash tools/autoupdate.sh --status            # what the last run did
 ```
 
 ## Why the fixed mount changes everything
@@ -9444,10 +9450,12 @@ python3 rpi/test_loop.py        # 401 on the scan loop re-telling a card once
                                 #     the rest of it arrives, going quiet when
                                 #     a read never returns, and saying so when
                                 #     a button press is refused
-python3 tools/test_autoupdate.py    # 117 on the nightly update on a real git: a
-                                    #     shift, a dirty tree, a diverged branch,
-                                    #     the lock and a dependency change each a
-                                    #     skip; a bad build rolled back to the
+python3 tools/test_autoupdate.py    # 136 on the update on a real git: a shift,
+                                    #     a dirty tree, a diverged branch, the
+                                    #     lock and a dependency change each a
+                                    #     skip; the rig's hours and its one
+                                    #     update a driver day, across the 4am
+                                    #     turn; a bad build rolled back to the
                                     #     exact commit; and the nightly's
                                     #     diagnostics never failing the night
 python3 tools/test_gpslog_tidy.py   #  45 on tidying the GPS logs unattended
