@@ -57,8 +57,12 @@ COPY="${COPY:-}"
 LITE="${LITE:-0}"
 
 # node, found the way the driver's own shell finds it — nvm installs live in
-# the home directory and root's PATH does not see them.
-NODE="$(command -v node || true)"
+# the home directory and root's PATH does not see them. A NODE given in the
+# environment comes first: the advice printed below says to pass one, and the
+# line here used to overwrite it with root's own lookup, so a driver who did
+# what it said got the same refusal again — or, with a system node on root's
+# PATH, a unit running a node they had just said not to use.
+NODE="${NODE:-$(command -v node || true)}"
 if [ -z "$NODE" ]; then
   NODE="$(sudo -u "$RUN_USER" -i sh -c 'command -v node' 2>/dev/null || true)"
 fi
@@ -124,15 +128,36 @@ fi
 #   audio video   speech needs the driver's audio devices. The copy machine
 #                 says nothing and has no camera, so the grants are dropped
 #                 rather than granted to something that cannot use them.
+#
+# Every value from outside goes into the unit quoted and with its % doubled,
+# as tools/install-sync.sh writes its own: systemd reads Environment= as a
+# space-separated list of assignments and expands %-specifiers even inside
+# quotes. COPY went in bare, so `COPY="/srv/copy here/journal.jsonl"` set
+# JOURNAL=/srv/copy and logged "Invalid environment assignment, ignoring:
+# here/journal.jsonl", and a % in it failed the specifier and dropped the line
+# — the copy then landed in the clone, the one place COPY exists to avoid.
+pct() { printf '%s' "${1//%/%%}"; }
+# One word of a command line: quoted, with \ and " escaped inside the quotes,
+# % doubled (a specifier) and $ doubled (ExecStart= expands $VAR). ExecStart
+# had both paths bare, so a checkout under "/home/driver/Uber Scan" ran node
+# on `/home/driver/Uber` with `Scan/server.js` after it, node exited on a
+# module it could not find, and the unit restarted it every five seconds.
+word() {
+  local s="${1//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//%/%%}"
+  s="${s//\$/\$\$}"
+  printf '"%s"' "$s"
+}
 if [ -n "$COPY" ]; then
   DESCRIPTION="Uber Scan — the copy of the journal, and the pages that read it"
   UNIT_ENV="Environment=SCANNER=0
-Environment=JOURNAL=$COPY"
+Environment=\"JOURNAL=$(pct "$COPY")\""
   UNIT_GROUPS=""
 else
   DESCRIPTION="Uber Scan — the panel, and the scanner that reads offers off the phone"
-  UNIT_ENV="Environment=SCANNER_SPEAK=$SPEAK
-Environment=\"SCANNER_ARGS=$ARGS\""
+  UNIT_ENV="Environment=SCANNER_SPEAK=$(pct "$SPEAK")
+Environment=\"SCANNER_ARGS=$(pct "$ARGS")\""
   if [ "$LITE" = "1" ]; then
     DESCRIPTION="Uber Scan lite — the offer card, read off the phone"
     UNIT_ENV="$UNIT_ENV
@@ -156,7 +181,7 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 User=$RUN_USER
-WorkingDirectory=$PROJECT
+WorkingDirectory=$(pct "$PROJECT")
 # On the rig: aims, calibrates if it has to, then becomes the scanner — see the
 # note above — and whether the verdicts are spoken, plus any flags, reach the
 # autopilot through the server that spawns it. SCANNER_ARGS is quoted, because
@@ -168,7 +193,7 @@ WorkingDirectory=$PROJECT
 #
 # On the copy machine: SCANNER=0 and where to keep the journal. See above.
 $UNIT_ENV
-ExecStart=$NODE $PROJECT/server.js
+ExecStart=$(word "$NODE") $(word "$PROJECT/server.js")
 # The camera and calibration are not always ready the instant the Pi is, so let
 # it retry rather than giving up after the default burst of fast restarts.
 Restart=on-failure

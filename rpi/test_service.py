@@ -26,6 +26,7 @@ Nothing here touches the real /etc, and nothing needs systemd to be installed.
 import getpass
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -120,7 +121,17 @@ def section_of(key):
 # --- what it starts --------------------------------------------------------
 start = re.search(r'^ExecStart=(.*)$', unit, re.M)
 ok_('the unit has an ExecStart', start is not None)
+
+
+def words_of(line):
+    """An ExecStart= command line as systemd splits it: quoted words, with %%
+    and $$ each one character again. shlex's quoting is systemd's for every
+    word this installer writes."""
+    return [w.replace('%%', '%').replace('$$', '$') for w in shlex.split(line)]
+
+
 command = start.group(1) if start else ''
+argv = words_of(command)
 # The unit runs the web server, which spawns the autopilot. It used to run
 # the autopilot alone, and a rig booted that way had a driving screen that
 # could never show a verdict: readings reach the panel only through the
@@ -129,9 +140,9 @@ ok_('it starts the web server, which is where the panel gets its verdicts',
     'server.js' in command)
 ok_('...and not the scanner directly', 'scan_pi.py' not in command
     and 'autopilot.py' not in command)
-ok_('...with node found on this machine (%s)' % command.split()[0],
-    os.path.exists(command.split()[0]) if command else False)
-named = [word for word in command.split() if word.endswith('.js')]
+ok_('...with node found on this machine (%s)' % (argv[:1] or [''])[0],
+    os.path.exists(argv[0]) if argv else False)
+named = [word for word in argv if word.endswith('.js')]
 eq('...naming exactly one script', len(named), 1)
 ok_('...that exists in this checkout (%s)' % (os.path.basename(named[0]) if named else ''),
     bool(named) and os.path.exists(os.path.join(ROOT, os.path.basename(named[0]))))
@@ -160,8 +171,7 @@ ok_('it runs as the invoking user rather than root',
 ok_('...from wherever the script was run, not a path baked in at authoring time',
     re.search(r'^WorkingDirectory=' + re.escape(project) + '$', unit, re.M) is not None)
 ok_('...and starts the copy that lives there',
-    re.search(r'^ExecStart=\S+ ' + re.escape(project) + r'/server\.js$', unit, re.M)
-    is not None)
+    argv[1:] == [project + '/server.js'])
 
 # --- SPEAK=0 is the other supported way to run it -------------------------
 os.remove(unit_path)
@@ -415,10 +425,10 @@ try:
     # Left at the default the copy lands in rpi/journal.jsonl inside the
     # clone, which works and stands the only backup next to a `git clean`.
     ok_('...and where to keep the copy, outside the checkout',
-        re.search(r'^Environment=JOURNAL=' + re.escape(copy_journal) + r'$',
+        re.search(r'^Environment="JOURNAL=' + re.escape(copy_journal) + r'"$',
                   copy_unit, re.M) is not None)
     ok_('...which the rig does not set, keeping its own default',
-        re.search(r'^Environment=JOURNAL=', unit, re.M) is None)
+        re.search(r'^Environment="?JOURNAL=', unit, re.M) is None)
     # Speech needs the driver's audio devices. The copy machine says nothing
     # and has no camera, so the grants are dropped rather than handed to
     # something that cannot use them.
@@ -445,6 +455,80 @@ try:
         rel.returncode != 0 and 'absolute path' in (rel.stderr or ''))
 finally:
     shutil.rmtree(copy_work, ignore_errors=True)
+
+# --- a NODE given, and a checkout whose path has a space or a % in it ----------
+#
+# The script said "run this again as: NODE=/path/to/node sudo -E bash $0" and
+# then overwrote NODE with root's own lookup on its first line about node, so
+# the advice did nothing. And three values went into the unit bare: COPY's
+# Environment=JOURNAL= (systemd splits an assignment list on spaces and expands
+# %-specifiers even in quotes, tools/install-sync.sh's fault, here too), and
+# both paths on ExecStart=, so a checkout under a directory with a space in its
+# name ran node on the first half of the path.
+odd_work = tempfile.mkdtemp()
+try:
+    odd_stub = os.path.join(odd_work, 'bin')
+    os.makedirs(odd_stub)
+    for _name, _body in (('id', '#!/bin/sh\necho 0\n'), ('systemctl', '#!/bin/sh\nexit 0\n'),
+                         ('logname', '#!/bin/sh\necho driver\n')):
+        _p = os.path.join(odd_stub, _name)
+        with open(_p, 'w') as fh:
+            fh.write(_body)
+        os.chmod(_p, 0o755)
+    # A node of the driver's own, in a directory with a space in its name: an
+    # nvm install under a home directory, as far as this script can tell.
+    own_node = os.path.join(odd_work, 'my node', 'node')
+    os.makedirs(os.path.dirname(own_node))
+    with open(own_node, 'w') as fh:
+        fh.write('#!/bin/sh\nexit 0\n')
+    os.chmod(own_node, 0o755)
+    odd_units = os.path.join(odd_work, 'units')
+    os.makedirs(odd_units)
+    odd_project = os.path.join(odd_work, 'Uber Scan 50%')
+    os.makedirs(os.path.join(odd_project, 'rpi'))
+    odd_script = os.path.join(odd_project, 'rpi', 'install-service.sh')
+    with open(odd_script, 'w') as fh:
+        fh.write(open(SCRIPT).read().replace('/etc/systemd/system/uberscan.service',
+                                             os.path.join(odd_units, 'rig.service')))
+
+    def odd_unit(name, **env):
+        path = os.path.join(odd_units, 'rig.service')
+        if os.path.exists(path):
+            os.remove(path)
+        p = subprocess.run(['bash', odd_script],
+                           env=dict(os.environ, PATH=odd_stub + os.pathsep + os.environ.get('PATH', ''),
+                                    SUDO_USER=getpass.getuser(), NODE=own_node, **env),
+                           capture_output=True, text=True, timeout=60)
+        eq('%s: the installer runs (%r)' % (name, p.stderr[-90:]), p.returncode, 0)
+        out = os.path.join(odd_units, name + '.service')
+        if os.path.exists(path):
+            os.replace(path, out)
+        return out, (open(out).read() if os.path.exists(out) else '')
+
+    rig_path, rig_unit = odd_unit('rig', SPEAK='1', ARGS='--screen-fps 6')
+    _exec = re.search(r'^ExecStart=(.*)$', rig_unit, re.M)
+    _argv = words_of(_exec.group(1)) if _exec else []
+    eq('the NODE given is the node the unit runs, and both paths are one word each',
+       _argv, [own_node, odd_project + '/server.js'])
+    ok_('...and the working directory has its % doubled, since systemd expands it',
+        ('\nWorkingDirectory=%s\n' % odd_project.replace('%', '%%')) in rig_unit)
+    copy_at = os.path.join(odd_work, 'copy 50%', 'journal.jsonl')
+    copy_path, copy_unit = odd_unit('copy', COPY=copy_at)
+    ok_('the copy\'s journal is ONE quoted assignment, its % doubled',
+        ('\nEnvironment="JOURNAL=%s"\n' % copy_at.replace('%', '%%')) in copy_unit)
+    if shutil.which('systemd-analyze'):
+        for _what, _path in (('rig', rig_path), ('copy', copy_path)):
+            _v = subprocess.run(['systemd-analyze', 'verify', _path],
+                                capture_output=True, text=True, timeout=60)
+            _said = _v.stdout + _v.stderr
+            ok_('systemd keeps the %s unit\'s assignments whole and finds its node (%r)'
+                % (_what, _said.strip()[:120]),
+                'Invalid environment assignment' not in _said
+                and 'is not executable' not in _said and 'Failed to resolve' not in _said)
+    else:
+        print('  (no systemd-analyze here, so systemd was not asked directly)')
+finally:
+    shutil.rmtree(odd_work, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d service checks passed' % ok)
