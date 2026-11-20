@@ -1212,6 +1212,19 @@ const TEXT = (sel) => {
       name === 'in the car 24h' ? { locale: 'en-GB' } : {}));
     const page = await ctx.newPage();
     await page.addInitScript(STUB(feed));
+    // [clock formatters] Every date formatter the page builds, counted: a
+    // new Intl.DateTimeFormat, and a toLocaleTimeString, which builds one
+    // inside on each call. clock12 did that once per row's time.
+    await page.addInitScript(() => {
+      window.__fmtBuilt = 0;
+      const F = Intl.DateTimeFormat;
+      const W = function () { window.__fmtBuilt++; return new F(...arguments); };
+      W.prototype = F.prototype;
+      W.supportedLocalesOf = F.supportedLocalesOf.bind(F);
+      Intl.DateTimeFormat = W;
+      const T = Date.prototype.toLocaleTimeString;
+      Date.prototype.toLocaleTimeString = function () { window.__fmtBuilt++; return T.apply(this, arguments); };
+    });
     await page.goto(base + '/journal.html#all', { waitUntil: 'domcontentloaded' })
               .catch(() => {});
     await page.waitForTimeout(1500);
@@ -1220,6 +1233,8 @@ const TEXT = (sel) => {
       const list = (s) => [].slice.call(document.querySelectorAll(s))
         .map((e) => (e.textContent || '').replace(/\s+/g, ' ').trim());
       return {
+        // First, before anything below opens a row.
+        fmtBuilt: window.__fmtBuilt,
         headline: text('#headline'),
         // Every row's clock, for the 12-hour check (clock12).
         whens: list('.offer .when'),
@@ -2518,6 +2533,19 @@ try:
     ok_('[12 hr clock] ...the same rows the en-US page shows (%r)' % _w[:3],
         _w and [re.sub(r'\s', '', w.upper()) for w in _w12]
         == [re.sub(r'\s', '', w.upper()) for w in _w])
+
+    # [clock formatters] ...and the clock made once, not once a row. Each
+    # toLocaleTimeString with options built its own Intl.DateTimeFormat, and
+    # pressing All on an invented 15,000-offer journal made 1,405 of them
+    # (clock12 and each row's "Read at"): the press's longest task at 4x
+    # throttle was 1,213 ms with them and 840 without. The words are held
+    # above; this holds the count, which a per-row formatter puts at twice
+    # the rows or more.
+    _lm = got.get('a line that moves') or {}
+    ok_('[clock formatters] %d rows build %r date formatters, not one a row'
+        % (_lm.get('rows') or 0, _lm.get('fmtBuilt')),
+        (_lm.get('rows') or 0) >= 100 and isinstance(_lm.get('fmtBuilt'), int)
+        and _lm['fmtBuilt'] * 10 < _lm['rows'])
 
     # --- the order record (the owner, 7 Nov) -----------------------------------
     # [reread] The payout the server's fold read again, said small beside it:

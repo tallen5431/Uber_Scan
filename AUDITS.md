@@ -4161,6 +4161,8 @@ The last two rows are the honest cost: on a record whose nights swing like the o
 
 **Dead weight on the pages, and a comment that put map-view.js at "a few kB" when it is over 300 kB (the review of the pages).** journal.html's `rateStat()` was called by nothing; `.empty-msg` in its parked-reading rule styles an element only ui.js makes, on the keypad page (the rule in styles.css that ui.js uses stays); map.html's `.pin-label` and styles.css's `.key.flash` matched nothing any page writes. Each re-grepped across every page, script and suite before it went. The comment over journal.html's `<script src="map-view.js">` now says what the file costs: over 300 kB, the largest script the page loads, parsed on every open.
 
+**The offers page made a new date formatter for every clock time it printed (the review of the pages, round 2).** `clock12` and each row's "Read at" called `toLocaleTimeString` with options, which builds an `Intl.DateTimeFormat` per call: 1,405 on pressing All over an invented 15,000-offer journal. Now three are made once (`CLOCK12`, `READ_AT_DAY`, `READ_AT_TIME`); the words are identical over 90,072 instants in six locales and three zones, and a stamp no clock can read still says "Invalid Date" (`clockWords`: `format()` throws on it, and the first try blanked the page). The All press's longest task at 4x throttle: 1,213 ms → 840. Check: rpi/test_offerspage.py '[clock formatters]', every formatter counted over 120 rows; the old page fails it.
+
 ### The advice
 
 **The page said where to draw the line and never what holding one costs.**

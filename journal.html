@@ -1980,9 +1980,32 @@
   // hour blocks above (Advice.BLOCK_NAMES, "12–3pm") and the cards themselves
   // all speak AM/PM. One helper, so no row of the page keeps the other clock.
   // Words only: every sort, key and day boundary here reads the stamp itself.
-  function clock12(d) {
-    return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+  //
+  // One formatter, made once. toLocaleTimeString with options builds a new
+  // Intl.DateTimeFormat on every call — the locale resolved, the pattern
+  // compiled — and pressing All on an invented 15,000-offer journal made
+  // 1,405 of them, here and in each row's "Read at", every one the same.
+  // Made once, the press's longest task at 4x throttle went from 1,213 ms
+  // to 840. Same options, same undefined locale, so the words are the same
+  // (checked over 90,000 instants in six locales and three zones); only the
+  // building is not done again.
+  //
+  // Except where there is no time to write. toLocaleTimeString answers a
+  // stamp no clock can read with "Invalid Date"; format() throws, and the
+  // throw took the whole render with it — rpi/test_offerspage.py's row
+  // "stamped past the end of time" turned the page into "Cannot reach the
+  // scanner". `clockWords` keeps the old answer for it.
+  var CLOCK12 = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+  function clockWords(f, d) {
+    return isNaN(d) ? 'Invalid Date' : f.format(d);
   }
+  function clock12(d) {
+    return clockWords(CLOCK12, d);
+  }
+  // ...and the row's "Read at", which keeps its seconds and its date.
+  var READ_AT_DAY = new Intl.DateTimeFormat();
+  var READ_AT_TIME = new Intl.DateTimeFormat(undefined,
+    { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
 
   var unitTags = document.querySelectorAll('.stats .unit');
 
@@ -2481,8 +2504,7 @@
       + '<h3>How it was read</h3>'
       + '<dl class="facts">'
       + row('Seen as', read.join(', ') || null, 'quiet')
-      + row('Read at', when.toLocaleDateString() + ', ' + when.toLocaleTimeString(undefined,
-          { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }), 'quiet')
+      + row('Read at', clockWords(READ_AT_DAY, when) + ', ' + clockWords(READ_AT_TIME, when), 'quiet')
       + row('Time to read', typeof r.ms === 'number' ? r.ms + ' ms' : null, 'quiet')
       + (flags.length ? row('Worth knowing', flags.join('; '), 'quiet') : '')
       + '</dl>'
