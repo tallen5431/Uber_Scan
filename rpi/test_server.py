@@ -15994,6 +15994,279 @@ finally:
     stop(proc)
 shutil.rmtree(_skdir, ignore_errors=True)
 
+# --- a read held still, for the races between one read and the next --------
+#
+# The faults below live in the moment between a journal read's stat and its
+# bytes, a few milliseconds on a fast disk. A preload holds every read of the
+# journal's bytes while HOLD_DIR/hold exists, and writes to HOLD_DIR/events
+# what the server did — `held` once a read is waiting, `stat` after each
+# stat of the journal is answered, `end <method> <url>` a tick after a body
+# has arrived — so each check orders what happens by what the server says it
+# did, never by sleeping and hoping. The suite's seam, not the server's.
+_HOLD = r"""
+var fs = require('fs'), http = require('http'), J = process.env.JOURNAL, D = process.env.HOLD_DIR;
+var fds = new Set(), open = fs.open, read = fs.read, close = fs.close, stat = fs.stat;
+function note(w) { fs.appendFileSync(D + '/events', w + '\n'); }
+fs.open = function (p) { var a = [].slice.call(arguments), cb = a.pop();
+  return open.apply(fs, a.concat([function (e, fd) { if (!e && p === J) fds.add(fd); cb(e, fd); }])); };
+fs.read = function (fd) { var a = [].slice.call(arguments), cb = a.pop(), said = false;
+  if (!fds.has(fd)) return read.apply(fs, a.concat([cb]));
+  (function go() {
+    if (fs.existsSync(D + '/hold')) { if (!said) { said = true; note('held'); } return setTimeout(go, 5); }
+    read.apply(fs, a.concat([cb]));
+  })(); };
+fs.close = function (fd) { fds.delete(fd); return close.apply(fs, arguments); };
+fs.stat = function (p) { var a = [].slice.call(arguments), cb = a.pop();
+  return stat.apply(fs, a.concat([function () { cb.apply(null, arguments); if (p === J) note('stat'); }])); };
+var emit = http.Server.prototype.emit;
+http.Server.prototype.emit = function (ev, req) {
+  if (ev === 'request') req.on('end', function () { setImmediate(function () { note('end ' + req.method + ' ' + req.url); }); });
+  return emit.apply(this, arguments);
+};
+"""
+
+
+def _held_events(d):
+    try:
+        return open(os.path.join(d, 'events')).read().split('\n')
+    except IOError:
+        return []
+
+
+def _hold_saw(d, what, more_than=0, seconds=10.0):
+    end = time.time() + seconds
+    while time.time() < end:
+        if sum(1 for e in _held_events(d) if e == what) > more_than:
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def _in_thread(fn, *args):
+    out = {}
+
+    def run():
+        try:
+            out['got'] = fn(*args)
+        except Exception as e:                     # noqa: BLE001 - reported by the check
+            out['got'] = repr(e)
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    return t, out
+
+
+def _ingest(base, body):
+    req = urllib.request.Request(base + '/api/journal/ingest', data=body,
+                                 headers={'Content-Type': 'application/x-ndjson'})
+    return json.loads(urllib.request.urlopen(req, timeout=20).read().decode('utf-8'))
+
+
+# An upload joined the read in flight (readJournal's readNext). If that read
+# began before the last upload's rows were appended, it took every one of
+# them as new and appended them again: two posts of the same 60 rows, both
+# `added: 60`, 120 copies on disk, with the ingest lock in place. Here the
+# read in flight is the offers page's, held after its stat; the first
+# upload's append is written while it waits, and the same batch is posted
+# again. It must read again, after the held read, and find all 60 there.
+_frdir = tempfile.mkdtemp()
+_frj = os.path.join(_frdir, 'offers.jsonl')
+write(_frj, [offer(i, NOW - 3600000 + i * 1000) for i in range(20)])
+proc, base, _frlog = _logged({'SCANNER': '0', 'HOLD_DIR': _frdir}, _frj, preload=_HOLD)
+try:
+    get(base, '/api/journal/newest')
+    _frbatch = [offer(300 + i, NOW - 60000 + i * 100, id='sync%d' % i) for i in range(60)]
+    open(os.path.join(_frdir, 'hold'), 'w').close()
+    write(_frj, [{'v': 1, 'kind': 'seen', 'at': NOW, 'saw': 1, 'kept': 1}], 'a')
+    _frt1, _frr1 = _in_thread(get, base, '/api/journal?days=1')
+    ok_('[fresh] the offers page\'s read is held after its stat', _hold_saw(_frdir, 'held'))
+    write(_frj, _frbatch, 'a')
+    _frt2, _frr2 = _in_thread(_ingest, base, ('\n'.join(json.dumps(r) for r in _frbatch) + '\n').encode('utf-8'))
+    ok_('[fresh] ...the same batch posted again while it waits',
+        _hold_saw(_frdir, 'end POST /api/journal/ingest'))
+    os.remove(os.path.join(_frdir, 'hold'))
+    _frt2.join(20)
+    _frt1.join(20)
+    _frkeys = [json.loads(l).get('id') for l in open(_frj) if l.strip()]
+    eq('[fresh] an upload reads after the read in flight, not with it: nothing added, each row once',
+       ((_frr2.get('got') or {}).get('added'), sum(1 for k in _frkeys if str(k).startswith('sync'))),
+       (0, 60))
+finally:
+    stop(proc)
+shutil.rmtree(_frdir, ignore_errors=True)
+
+# /api/today kept its answer under a stat taken BEFORE its read, and the read
+# it joined could be older than that stat: an offer appended between the two
+# was in the key and not in the answer, and the cache served the answer one
+# offer short until the next append (todaySummary). The poll here joins the
+# offers page's read, held after its stat, with a second offer appended in
+# between; once it is answered, the same poll with nothing appended must
+# agree with a `since` the cache has never seen.
+_tddir = tempfile.mkdtemp()
+_tdj = os.path.join(_tddir, 'offers.jsonl')
+_tdsince = NOW - 3600000
+write(_tdj, [offer(i, NOW - 1800000 + i * 1000) for i in range(5)])
+proc, base, _tdlog = _logged({'SCANNER': '0', 'HOLD_DIR': _tddir}, _tdj, preload=_HOLD)
+try:
+    _tdw = get(base, '/api/today?since=%d' % _tdsince)['offers']
+    open(os.path.join(_tddir, 'hold'), 'w').close()
+    write(_tdj, [offer(50, NOW - 60000)], 'a')
+    _tdt1, _ = _in_thread(get, base, '/api/journal?days=1')
+    ok_('[today] the offers page\'s read is held after its stat', _hold_saw(_tddir, 'held'))
+    write(_tdj, [offer(51, NOW - 30000)], 'a')
+    _tdn = sum(1 for e in _held_events(_tddir) if e == 'stat')
+    _tdt2, _tdr2 = _in_thread(get, base, '/api/today?since=%d' % _tdsince)
+    ok_('[today] ...and the panel\'s poll, its stat taken after the second offer, joins it',
+        _hold_saw(_tddir, 'stat', _tdn))
+    os.remove(os.path.join(_tddir, 'hold'))
+    _tdt2.join(20)
+    _tdt1.join(20)
+    _tda = (_tdr2.get('got') or {}).get('offers')
+    _tdb = get(base, '/api/today?since=%d' % _tdsince)['offers']
+    _tdc = get(base, '/api/today?since=%d' % (_tdsince + 1))['offers']
+    eq('[today] a poll answered off an older read is not kept under a newer stat: '
+       'warm, joined, the same poll after, a since never asked',
+       (_tdw, _tda, _tdb, _tdc), (5, 6, 7, 7))
+finally:
+    stop(proc)
+shutil.rmtree(_tddir, ignore_errors=True)
+
+# targetsOut and goldAnswer were worked out afresh on every request, most of
+# each request's time, and the same answer every time while the file stood
+# (keptAnswer). Counted by a preload that wraps Advice.targets and
+# strategy.analyse: once per journal state and per set of rows handed in,
+# again when the window's rows differ, when the file changes, when a row
+# stamped ahead of the clock comes due and moves the line, and when the
+# store has had to let the answer go.
+_KEPT_COUNT = r"""
+var fs = require('fs'), path = require('path'), D = process.env.HOLD_DIR;
+var root = path.dirname(process.argv[1]);
+function note(w) { fs.appendFileSync(D + '/events', w + '\n'); }
+var A = require(path.join(root, 'advice.js')), S = require(path.join(root, 'tools', 'strategy.js'));
+var targets = A.targets, analyse = S.analyse;
+A.targets = function () { note('targets'); return targets.apply(this, arguments); };
+S.analyse = function () { note('analyse'); return analyse.apply(this, arguments); };
+"""
+_kpdir = tempfile.mkdtemp()
+_kpj = os.path.join(_kpdir, 'offers.jsonl')
+_kpdue = int(time.time() * 1000) + 6000
+write(_kpj, [offer(i, NOW - 7200000 + i * 60000) for i in range(40)]
+      + [offer(90, _kpdue, target=31)])
+proc, base, _kplog = _logged({'SCANNER': '0', 'HOLD_DIR': _kpdir}, _kpj, preload=_KEPT_COUNT)
+
+
+def _kpn(what):
+    return sum(1 for e in _held_events(_kpdir) if e == what)
+
+
+try:
+    _kp1 = get(base, '/api/journal?days=30')
+    _kp2 = get(base, '/api/journal?days=30')
+    eq('[kept] the Targets box twice over one file: worked out once, the same answer, '
+       'its line off the newest row already due',
+       (_kpn('targets'), _kp1['targets'] == _kp2['targets'], _kp1['targets']['target']), (1, True, 25))
+    get(base, '/api/journal?days=30&limit=5')
+    get(base, '/api/journal?days=30')
+    eq('[kept] ...other rows handed in (limit=5) are worked out; back to 30 days is kept',
+       _kpn('targets'), 2)
+    for _kpl in (6, 7, 8, 9):
+        get(base, '/api/journal?days=30&limit=%d' % _kpl)
+    get(base, '/api/journal?days=30')
+    eq('[kept] ...four answers kept at most: 30 days, let go behind four others, is worked out again',
+       _kpn('targets'), 7)
+    _kpg1 = get(base, '/api/gold')
+    _kpg2 = get(base, '/api/gold')
+    eq('[kept] the Gold card twice over one file: analysed once, the same answer',
+       (_kpn('analyse'), _kpg1 == _kpg2), (1, True))
+    eq('[kept] ...its settings changed (a gold row appended): analysed again, and it says so',
+       (post(base, '/api/gold', {'goal': 40})[0], get(base, '/api/gold')['settings']['goal'], _kpn('analyse')),
+       (200, 0.4, 2))
+    write(_kpj, [offer(91, NOW - 1000)], 'a')
+    get(base, '/api/journal?days=30')
+    eq('[kept] ...an offer appended: the Targets box worked out again', _kpn('targets'), 8)
+    while time.time() * 1000 < _kpdue + 200:
+        time.sleep(0.1)
+    _kp3 = get(base, '/api/journal?days=30')
+    eq('[kept] ...nothing appended, but the row stamped ahead has come due: the line moves '
+       'and the answer is worked out again, not kept off the clock it was worked out at',
+       (_kpn('targets'), _kp3['targets']['target']), (9, 31))
+finally:
+    stop(proc)
+shutil.rmtree(_kpdir, ignore_errors=True)
+
+# DELETE /api/places (map.html's "Forget lookups") ran outside the lock the
+# save holds, so a save already under way put every forgotten place back with
+# its rename. A preload holds that rename while HOLD_DIR/hold exists; the
+# Forget is sent while it waits and given two seconds to answer on its own,
+# which it did before, and cannot now: it queues behind the save. The place
+# file after both is what Forget left or what the save added, never the 3,000.
+_HOLD_RENAME = r"""
+var fs = require('fs'), path = require('path'), D = process.env.HOLD_DIR;
+var rename = fs.rename;
+fs.rename = function (from, to, cb) {
+  if (path.basename(to) !== 'places.json') return rename.apply(fs, arguments);
+  var said = false;
+  (function go() {
+    if (fs.existsSync(D + '/hold')) {
+      if (!said) { said = true; fs.appendFileSync(D + '/events', 'held\n'); }
+      return setTimeout(go, 5);
+    }
+    rename.call(fs, from, to, cb);
+  })();
+};
+"""
+_pfdir = tempfile.mkdtemp()
+_pfj = os.path.join(_pfdir, 'offers.jsonl')
+open(_pfj, 'w').close()
+with open(os.path.join(_pfdir, 'places.json'), 'w') as _fh:
+    json.dump({'Invented Place %d, Springfield' % _i: {'lat': 33 + _i / 1e4, 'lon': -84.0}
+               for _i in range(3000)}, _fh)
+proc, base, _pflog = _logged({'SCANNER': '0', 'HOLD_DIR': _pfdir}, _pfj, preload=_HOLD_RENAME)
+try:
+    open(os.path.join(_pfdir, 'hold'), 'w').close()
+    _pft1, _pfr1 = _in_thread(post, base, '/api/places', {'New Place, Shelbyville': {'lat': 34.0, 'lon': -84.0}})
+    ok_('[forget] a save of one new place is held at its rename', _hold_saw(_pfdir, 'held'))
+    _pft2, _pfr2 = _in_thread(delete, base, '/api/places')
+    _pft2.join(2)
+    _pfwaited = _pft2.is_alive()
+    os.remove(os.path.join(_pfdir, 'hold'))
+    _pft1.join(20)
+    _pft2.join(20)
+    eq('[forget] Forget lookups waits for the save under way, and is not undone by it: '
+       'queued, the save said, Forget said, the file after',
+       (_pfwaited, (_pfr1.get('got') or [None])[0], (_pfr2.get('got') or [None, {}])[1].get('removed'),
+        get(base, '/api/places')['stored']),
+       (True, 200, 3001, 0))
+finally:
+    stop(proc)
+shutil.rmtree(_pfdir, ignore_errors=True)
+
+# Two special days added at once kept one: each POST took the list as it
+# stood and wrote the lot. The same held rename, on special-days.json: the
+# first add waits there, the second is given two seconds to reach its own
+# rename (which it did, from the list without the first day) and now queues.
+_sdpre = _HOLD_RENAME.replace("'places.json'", "'special-days.json'")
+_sddir = tempfile.mkdtemp()
+_sdj = os.path.join(_sddir, 'offers.jsonl')
+open(_sdj, 'w').close()
+proc, base, _sdlog = _logged({'SCANNER': '0', 'HOLD_DIR': _sddir}, _sdj, preload=_sdpre)
+try:
+    open(os.path.join(_sddir, 'hold'), 'w').close()
+    _sdt1, _sdr1 = _in_thread(post, base, '/api/specialdays', {'add': '2026-07-04'})
+    ok_('[specialdays] the first add is held at its rename', _hold_saw(_sddir, 'held'))
+    _sdt2, _sdr2 = _in_thread(post, base, '/api/specialdays', {'add': '2026-11-26'})
+    _sdreached = _hold_saw(_sddir, 'held', 1, seconds=2.0)
+    os.remove(os.path.join(_sddir, 'hold'))
+    _sdt1.join(20)
+    _sdt2.join(20)
+    eq('[specialdays] two days added at once: the second waits for the first, and both are kept',
+       (_sdreached, (_sdr1.get('got') or [None])[0], (_sdr2.get('got') or [None])[0],
+        get(base, '/api/specialdays')['days'],
+        json.load(open(os.path.join(_sddir, 'special-days.json')))['days']),
+       (False, 200, 200, ['2026-07-04', '2026-11-26'], ['2026-07-04', '2026-11-26']))
+finally:
+    stop(proc)
+shutil.rmtree(_sddir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

@@ -1,7 +1,8 @@
 # Working on this repository
 
-Read first: [AUDITS.md](AUDITS.md) — **Done** (fixed, with the commit), **Settled**
-(proposals checked and refused: do not re-propose), **Open** (known, not done).
+Read first: [AUDITS.md](AUDITS.md) — **Settled** (proposals checked and refused:
+do not re-propose) and **Open** (known, not done); **Done** (fixed, with the
+commit) is [AUDITS-DONE.md](AUDITS-DONE.md), where new Done entries go.
 The rig itself is explained in [rpi/README.md](rpi/README.md); the site and the
 NucBox in [README.md](README.md).
 
@@ -44,8 +45,9 @@ Rules:
   cards the same way, over one corpus, `tests/fixtures/cases.json`. A change to
   one is a change to both, with a case.
 - **Comments say why**, in the existing voice: what was measured, what broke,
-  what was refused. AUDITS.md entries in its existing style
-  (`rpi/test_lint.py` rejects an entry whose opening is too like another's).
+  what was refused. AUDITS entries in the existing style
+  (`rpi/test_lint.py` rejects an entry whose opening is too like another's,
+  across both files).
 - **Commits** are signed (`git commit -S`). No model names anywhere in the
   repo.
 - **Privacy.** Never commit real addresses, names, coordinates, hostnames or

@@ -5451,7 +5451,7 @@ function refigured(offers, taken) {
  * report's rule; no geocoding). Descriptive: no verdict, state, target or
  * panel reads it. See Advice.targets for the floors and what each part
  * reuses. Aggregates and town names only. */
-function targetsOut(offers, taken) {
+function targetsOut(offers, taken, rows) {
   var now = Date.now(), line = null;
   for (var i = (offers || []).length - 1; i >= 0; i--) {
     var o = offers[i];
@@ -5460,15 +5460,70 @@ function targetsOut(offers, taken) {
       break;
     }
   }
-  try {
-    return Advice.targets(offers, taken, {
-      target: line === null ? 25 : line,
-      key: townOfCard
-    });
-  } catch (e) {
-    console.error('targets: ' + e.message);
-    return null;
+  var target = line === null ? 25 : line;
+  // The line is worked out above on every request and is part of the key, so
+  // the one way the clock reaches this answer — a row stamped ahead of it
+  // coming due — is a different key, not a stale answer (keptAnswer).
+  return keptAnswer(targetsKept, rows, offers, JSON.stringify([target, taken]), function () {
+    try {
+      return Advice.targets(offers, taken, { target: target, key: townOfCard });
+    } catch (e) {
+      console.error('targets: ' + e.message);
+      return null;
+    }
+  });
+}
+
+/* An answer over the journal's rows, kept until the journal changes.
+ *
+ * targetsOut and goldAnswer were worked out afresh on every request, and they
+ * were most of their requests (the server review's second round, Nov 2026):
+ * on an invented 15,000-offer journal, /api/journal?days=30 spent 218 ms of
+ * 270-370 in Advice.targets, and /api/gold 160 ms of 130-220 in
+ * strategy.analyse — identical answers, load after load, while the file did
+ * not change. Kept as latestCache keeps the fold: thrown away whole when
+ * readJournal hands back another array.
+ *
+ * KEYED ON WHAT THE ANSWER IS WORKED OUT FROM, not on the request that asked.
+ * `offers` is compared row object by row object — latestPerOffer hands back
+ * the same objects while the file and the day floor stand, and the window,
+ * `until`, `limit` and `hidden` only choose among them — so two requests share
+ * an answer exactly when they hand the same rows in the same order, and a
+ * `days=30` floor that moves by the millisecond is a new key the moment an
+ * offer falls out of it. `also` is everything else the answer reads, as JSON:
+ * the orders taken (takenRuns, which has a floor of its own), the line, the
+ * Gold settings. Neither Advice.targets nor strategy.analyse reads the clock;
+ * the one place `now` reaches either is in what is handed in, and so in the
+ * key. A null — a throw, logged — is not kept, so it is logged again.
+ *
+ * ANSWERS_KEPT per store: the offers page's ranges and the Gold card's 90
+ * days, without growing past a handful however many windows are asked. */
+var ANSWERS_KEPT = 4;
+var targetsKept = { rows: null, n: 0, list: [] };
+var goldKept = { rows: null, n: 0, list: [] };
+
+function sameRows(a, b) {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function keptAnswer(store, rows, offers, also, work) {
+  if (store.rows !== rows || store.n !== (rows ? rows.length : 0)) {
+    store.rows = rows;
+    store.n = rows ? rows.length : 0;
+    store.list = [];
   }
+  for (var i = 0; i < store.list.length; i++) {
+    var e = store.list[i];
+    if (e.also === also && sameRows(e.offers, offers)) return e.answer;
+  }
+  var answer = work();
+  if (answer === null) return null;
+  store.list.push({ offers: offers, also: also, answer: answer });
+  if (store.list.length > ANSWERS_KEPT) store.list.shift();
+  return answer;
 }
 
 /* MV.townFor with Advice.area, remembered by its input: the card's dropoff and
@@ -10404,6 +10459,28 @@ function nextLocked(name) {
 }
 
 var readWaiters = null;
+/* ...and the callers who may not join the read in flight: they wait for it to
+ * end and go together in the next one, which begins after it (readJournal's
+ * `fresh`).
+ *
+ * The ingest lock above serialises two uploads, and it was not enough (the
+ * server review's second round, Nov 2026). An upload joined whatever read was
+ * already in flight, and that read could have begun BEFORE the previous
+ * upload's rows were appended: the offers page's load, or the sync's own
+ * /api/journal/newest, landing in the moment between the first upload's read
+ * and its append. The second upload then saw none of the first one's rows,
+ * took every one of them as new, and appended them again. Measured on a real
+ * server over a slow card (journal reads 300 ms late): two posts of the same
+ * 60 rows, one after the other, both answered `added: 60`, and the file held
+ * 120 copies — the very fault the lock was written for, by a door it did not
+ * watch. "A waiter that joined during the read can be one append behind" is
+ * safe for a reader; for a caller that decides what to WRITE off the rows it
+ * is the duplicate.
+ *
+ * Fresh costs one stat when nothing changed: readJournalNow's cache answers
+ * the same size and mtime with the rows as they are, and only bytes appended
+ * since are read. */
+var readNext = null;
 
 /* `failed(e)`, where given, is told of a throw in `done` instead of the
  * process. Every request that reads the journal gives one (failedRequest,
@@ -10412,14 +10489,34 @@ var readWaiters = null;
  * that caused it was never answered — the handler's own catch (handler)
  * cannot see into a callback — so the page waited on it until the browser
  * gave up. Measured with an invented fault in Advice.trustworthy: /api/today
- * and /api/journal answered nothing for as long as the client would wait. */
-function readJournal(done, failed) {
+ * and /api/journal answered nothing for as long as the client would wait.
+ *
+ * `opts.fresh`: rows read by a read that BEGAN after this call — never one
+ * already in flight — for every caller that appends off what it read (ingest,
+ * the Gold card's save, earningsFile). See readNext. */
+function readJournal(done, failed, opts) {
   var w = { done: done, failed: failed };
-  if (readWaiters) { readWaiters.push(w); return; }
-  readWaiters = [w];
+  if (!readWaiters) return startRead([w]);
+  if (opts && opts.fresh) {
+    (readNext || (readNext = [])).push(w);
+    return;
+  }
+  readWaiters.push(w);
+}
+
+function startRead(waiters) {
+  readWaiters = waiters;
   readJournalNow(function (rows, err, torn) {
     var waiting = readWaiters;
     readWaiters = null;
+    // The next read begins now, before anyone waiting on this one is answered:
+    // a caller answered here that reads again (earningsFile after a pick) then
+    // joins a read that began after this one ended, which is what fresh asks.
+    if (readNext) {
+      var next = readNext;
+      readNext = null;
+      startRead(next);
+    }
     waiting.forEach(function (one) {
       // A throw in one caller must not starve the others now that they share a
       // read. Rethrown on its own tick so it still reaches the process the way
@@ -10829,8 +10926,22 @@ function todaySummary(since, done, failed) {
       // An unreadable journal is not cached. It is a transient the next request
       // may not hit, and keying it on a size and mtime that did not change
       // would hold the failure up until the file did.
-      if (size >= 0 && rows) {
-        shiftCache = { size: size, stamp: stamp, since: since, answer: answer };
+      //
+      // ...and an answer is kept under the size and mtime of the file ITS rows
+      // were read from, which is not the stat above (the server review's
+      // second round, Nov 2026). readJournal may hand back a read that was
+      // already in flight, begun before that stat — an offer appended between
+      // the two is in the stat and not in the rows — and keyed on the stat,
+      // the answer one offer short was served from the cache until the next
+      // append moved the file again. Measured over a slow card: a poll that
+      // joined the offers page's read said 2 offers, and the same poll a
+      // second later, with nothing appended, still said 2 where an uncached
+      // `since` said 3. journalCache records what was read; when these rows
+      // are its rows its size and mtime describe them exactly, and anything
+      // else (a cache dropped by a failed read) is answered and not kept.
+      var c = journalCache;
+      if (rows && c && c.rows === rows) {
+        shiftCache = { size: c.size, stamp: c.mtime, since: since, answer: answer };
       }
       answered(answer);
     }, failed);
@@ -14480,6 +14591,8 @@ function journalRoute(req, res, p) {
         sendJson(res, 200, body);
       };
       if (err) return fail(err.message);
+      // Fresh: a read that began after the last upload's append, never one
+      // already in flight (readNext says what joining one did).
       readJournal(function (existing, readErr) {
         // Without the rows already here there is no de-duplication, and
         // appending anyway turns every re-send into a copy. Refusing is the
@@ -14545,7 +14658,7 @@ function journalRoute(req, res, p) {
                    have: existing.length + fresh.length });
           });
         });
-      }, failedRequest(req, res, release));
+      }, failedRequest(req, res, release), { fresh: true });
       });
     });
   }
@@ -14886,7 +14999,7 @@ function journalRoute(req, res, p) {
                                       // time of day, the replay's line, the
                                       // towns (targetsOut). Over the offers
                                       // listed, as the page's own replay is.
-                                      targets: targetsOut(offers, taken),
+                                      targets: targetsOut(offers, taken, rows),
                                       // The rig's "keepPlaces" as the
                                       // scanner last said it (null where it
                                       // has not: the copy at home), for the
@@ -14979,7 +15092,7 @@ function journalRoute(req, res, p) {
 function route(req, res) {
   // The path as asked, worked out once for every door below that is asked
   // by it; the GET doors after the gate ask the decoded `pathname`.
-  var p = req.url.split('?')[0];
+  var p = Lite.askedPath(req.url);
   // Noting what happened to an offer, which ones were taken and which to
   // hide: see markRoute.
   if (req.method === 'POST' && p === '/api/offers/mark') return markRoute(req, res);
@@ -15430,8 +15543,17 @@ function route(req, res) {
     // Whole-file and not per key. Correcting ONE place was proposed twice and
     // refused twice — see AUDITS — and this is not that: it is the wholesale
     // wipe the page already offered and could not deliver.
+    //
+    // Under the same lock as the save (the server review's second round, Nov
+    // 2026). Outside it, a POST already holding the lock had read the file,
+    // and the rename that ended it put back every place this had just
+    // removed, the new one added: "Forget lookups" pressed while map.html was
+    // saving a batch was undone, and said `removed: 3000` over a file that
+    // held 3,001 a moment later. Ten runs of the two at once: ten undone.
     if (req.method === 'DELETE') {
-      return fs.readFile(placesPath, 'utf8', function (readErr, text) {
+      return fileLock('places', function (release) {
+      var forgot = function (code, body) { release(); placesReply(code, body); };
+      fs.readFile(placesPath, 'utf8', function (readErr, text) {
         var had = 0;
         if (!readErr) {
           try {
@@ -15448,10 +15570,11 @@ function route(req, res) {
           // endpoint exists to end.
           if (rmErr && rmErr.code !== 'ENOENT') {
             console.error('places: ' + rmErr.message);
-            return placesReply(500, { ok: false, error: rmErr.code });
+            return forgot(500, { ok: false, error: rmErr.code });
           }
-          placesReply(200, { ok: true, removed: had });
+          forgot(200, { ok: true, removed: had });
         });
+      });
       });
     }
     if (req.method === 'POST') {
@@ -15857,28 +15980,36 @@ function route(req, res) {
       if (keys.length !== 1) return spReply(400, { ok: false, error: 'one of add or remove, with one date' });
       var day = specialDate(body[keys[0]]);
       if (!day) return spReply(400, { ok: false, error: 'a date as YYYY-MM-DD, a real one from 2020 to 2099' });
+      // From the list to the rename, one at a time (the server review's second
+      // round, Nov 2026). Each POST took the list as it stood, added its day
+      // and wrote the lot; two adds at once both started from the list before
+      // either was saved, and whichever renamed last threw the other's day
+      // away while both answered `ok: true`. Every exit below is a `done`.
+      return fileLock('specialdays', function (release) {
+      var done = function (code, b) { release(); spReply(code, b); };
       var list = specialDaysList().filter(function (d) { return d !== day; });
       if (keys[0] === 'add') {
-        if (list.length >= SPECIAL_MAX) return spReply(400, { ok: false, error: 'at most ' + SPECIAL_MAX + ' days' });
+        if (list.length >= SPECIAL_MAX) return done(400, { ok: false, error: 'at most ' + SPECIAL_MAX + ' days' });
         list.push(day);
       }
       list.sort();
       var tmp = partName(SPECIAL_PATH);
-      return withDirectory(SPECIAL_PATH, function (dirErr) {
-        if (dirErr) return spReply(500, { ok: false, error: 'could not save' });
+      withDirectory(SPECIAL_PATH, function (dirErr) {
+        if (dirErr) return done(500, { ok: false, error: 'could not save' });
         fs.writeFile(tmp, JSON.stringify({ v: 1, days: list }), function (writeErr) {
           var failed = function (e) {
             fs.unlink(tmp, function () {});
             console.error('special days: ' + e.message);
-            spReply(500, { ok: false, error: 'could not save' });
+            done(500, { ok: false, error: 'could not save' });
           };
           if (writeErr) return failed(writeErr);
           fs.rename(tmp, SPECIAL_PATH, function (renameErr) {
             if (renameErr) return failed(renameErr);
             specialCache = list;
-            spReply(200, { ok: true, days: list.slice() });
+            done(200, { ok: true, days: list.slice() });
           });
         });
+      });
       });
     });
   }
@@ -15898,7 +16029,8 @@ function route(req, res) {
   var wantView = '';
   try {
     var parsed = url.parse(req.url, true);
-    pathname = decodeURIComponent(parsed.pathname);
+    // The one rule lite/lite.js shuts its doors by (Lite.decodedPath).
+    pathname = Lite.decodedPath(req.url);
     // Node hands back an array for a repeated key. Only the frame endpoints
     // look at this, and only ever for one of two known words, so anything
     // else — an array, a number, a novel — falls through to the scene.
@@ -16646,7 +16778,9 @@ function earningsMatchSays(m) {
  * however often it is seen; a tip settling kept with when), match every
  * entry of each day touched — or of `alsoDays` — again, and append a row for
  * each entry that is new or changed. Under the earnings lock (earningsRoute),
- * so two uploads cannot both decide a trip is new. `done(err, summary)`. */
+ * so two uploads cannot both decide a trip is new — and off a fresh read
+ * (readNext), since the lock alone let the second join a read begun before
+ * the first one's rows were on disk. `done(err, summary)`. */
 function earningsFile(parses, alsoDays, pick, now, done) {
   readJournal(function (rows, readErr) {
     if (!rows) return done(new Error('the journal could not be read (' + (readErr && readErr.code || 'unknown') + ')'));
@@ -16732,7 +16866,7 @@ function earningsFile(parses, alsoDays, pick, now, done) {
     // caller as an error, which answers it and gives back the earnings lock.
     console.error('earnings: ' + ((e && e.stack) || e));
     done(e);
-  });
+  }, { fresh: true });
 }
 
 /* The earnings route, every method. One lock over all of it ('earnings'):
@@ -16934,6 +17068,9 @@ function earningsRoute(req, res, pathname) {
       }
       fileLock('earnings', function (release) {
         var reply = function (code, b) { release(); answer(code, b); };
+        // Fresh (readNext), as earningsFile's: a trip the upload before this
+        // one filed, under this same lock, is on disk and must be found, not
+        // answered "no such entry" off a read begun before it was written.
         readJournal(function (rows) {
           var e = rows ? Earnings.fold(rows).filter(function (r) { return r.key === body.key; })[0] : null;
           if (!e) return reply(404, { ok: false, error: 'no such entry' });
@@ -16966,7 +17103,7 @@ function earningsRoute(req, res, pathname) {
             if (fileErr) return reply(500, { ok: false, error: fileErr.message });
             reply(200, { ok: true, entries: summary.entries });
           });
-        }, failedRequest(req, res, release));
+        }, failedRequest(req, res, release), { fresh: true });
       });
     });
   }
@@ -17016,6 +17153,7 @@ function earningsRoute(req, res, pathname) {
             });
           };
           var filed = function () {
+            // Fresh, for the days of a trip just filed (see the pick above).
             readJournal(function (rows) {
               var floor = now - EARNINGS_REMATCH_DAYS * 86400000;
               var days = {};
@@ -17030,7 +17168,7 @@ function earningsRoute(req, res, pathname) {
                              undated: parses.filter(function (p) { return !(p.picked || p.day); }).length,
                              added: summary.added, changed: summary.changed });
               });
-            }, failedRequest(req, res, release));
+            }, failedRequest(req, res, release), { fresh: true });
           };
           next(0);
         });
@@ -17131,17 +17269,25 @@ function goldOrders(runs) {
   });
 }
 
+// Kept until the journal changes (keptAnswer): the offers and orders of the
+// 90 days and the settings are the key; whether tesseract is installed is
+// asked on every request, outside it, since it changes without the journal.
 function goldAnswer(rows, now) {
   var S = goldStrategy();
   var floor = now - GOLD_DAYS * 86400000;
   var offers = shownOffers(windowOffers(latestPerOffer(rows, floor), floor).kept);
   var settings = goldSettings(rows);
-  var res = S.analyse({ offers: offers, orders: goldOrders(takenRuns(rows, floor, offers)),
-                        earnings: Earnings.fold(rows), light: true,
-                        gold: { goal: settings.goal, uber: settings.uber } });
-  return { ok: true, days: GOLD_DAYS, settings: settings, gold: res.gold,
-           lines: S.goldLines(res.gold, res.floors), floors: { curveOffers: res.floors.curveOffers },
-           tesseract: !!earningsTesseract() };
+  var orders = goldOrders(takenRuns(rows, floor, offers));
+  var kept = keptAnswer(goldKept, rows, offers, JSON.stringify([orders, settings]), function () {
+    var res = S.analyse({ offers: offers, orders: orders, earnings: Earnings.fold(rows), light: true,
+                          gold: { goal: settings.goal, uber: settings.uber } });
+    return { ok: true, days: GOLD_DAYS, settings: settings, gold: res.gold,
+             lines: S.goldLines(res.gold, res.floors), floors: { curveOffers: res.floors.curveOffers } };
+  });
+  var out = {};
+  Object.keys(kept).forEach(function (k) { out[k] = kept[k]; });
+  out.tesseract = !!earningsTesseract();
+  return out;
 }
 
 function goldRoute(req, res, pathname) {
@@ -17220,6 +17366,9 @@ function goldRoute(req, res, pathname) {
         }
       }
       fileLock('gold', function (release) {
+        // Fresh (readNext): the setting kept is the newest `gold` row plus
+        // what this POST changes, so a read begun before the last save landed
+        // would put that save's goal or figures back as they were.
         readJournal(function (rows) {
           var now = Date.now();
           var was = goldSettings(rows || []);
@@ -17235,7 +17384,7 @@ function goldRoute(req, res, pathname) {
             if (appendErr) return answer(500, { ok: false, error: 'could not save' });
             answer(200, { ok: true, settings: goldSettings([row]) });
           });
-        }, failedRequest(req, res, release));
+        }, failedRequest(req, res, release), { fresh: true });
       });
     });
   }

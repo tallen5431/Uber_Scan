@@ -514,8 +514,8 @@ for _page in ('journal.html', 'map.html'):
 # it as "5.7MB a week" beside that name, so a reader can find where it came
 # from. What is held here is that every such quotation agrees with the
 # constant, points at it, and that the retired wording has not come back.
-# AUDITS.md is left out: it is a ledger of what was found, and quotes the old
-# figures on purpose.
+# AUDITS.md and AUDITS-DONE.md are left out: they are a ledger of what was
+# found, and quote the old figures on purpose.
 _jr_src = open(os.path.join(ROOT, 'rpi', 'journal.py')).read()
 _wb = re.search(r'(?m)^WEEK_BYTES\s*=\s*([0-9_]+)\s*$', _jr_src)
 ok_('WEEK_BYTES is a named constant in the journal', _wb is not None)
@@ -527,7 +527,7 @@ for _dir, _subdirs, _names in os.walk(ROOT):
         if not _name.endswith(('.py', '.js', '.html', '.md', '.sh', '.css')):
             continue
         _rel = os.path.relpath(os.path.join(_dir, _name), ROOT)
-        if _rel in ('AUDITS.md', os.path.join('rpi', 'test_lint.py')):
+        if _rel in ('AUDITS.md', 'AUDITS-DONE.md', os.path.join('rpi', 'test_lint.py')):
             continue
         with open(os.path.join(_dir, _name), encoding='utf-8',
                   errors='replace') as _fh:
@@ -1064,7 +1064,12 @@ for _code, _says in (('taken = CX.take_request()', 'A box drawn on the live view
 # Neither check below can tell whether the PROSE is still true — nothing can —
 # but both catch the way it actually rots, which is a file being renamed or
 # added underneath it.
-_audits = open(os.path.join(ROOT, 'AUDITS.md')).read()
+# Two files read as one ledger: the Done half moved to AUDITS-DONE.md when
+# AUDITS.md reached the one-megabyte cap above (Nov 2026), and an entry
+# claimed in both, or opening like one in the other, is the same rot as two
+# in one file.
+_audits = (open(os.path.join(ROOT, 'AUDITS.md')).read() + '\n'
+           + open(os.path.join(ROOT, 'AUDITS-DONE.md')).read())
 _readme = open(os.path.join(ROOT, 'README.md')).read()
 
 ok_('the record of what has been audited is readable', len(_audits) > 500)
@@ -1440,8 +1445,13 @@ eq('server.js hands send() the JSON Content-Type in one place, sendJson',
    (len(_json_sends), bool(_json_sends) and 'JSON.stringify(obj)' in _json_sends[0]), (1, True))
 # ...and the path as asked worked out once, in route(): it was read off the
 # URL 26 times, once a door, and again by four of the routes it hands off to.
-eq("server.js works out the path as asked once (req.url.split('?')[0])",
-   len(re.findall(r"req\.url\.split\('\?'\)\[0\]", _srv_code)), 1)
+# Through lite/lite.js's askedPath since lite and route() worked it out
+# differently (Nov 2026), so the spelling is counted there too.
+_lite_code = open(os.path.join(ROOT, 'lite', 'lite.js'), encoding='utf-8').read()
+eq("server.js works out the path as asked once (Lite.askedPath, lite/lite.js's req.url up to its '?')",
+   (len(re.findall(r"req\.url\.split\('\?'\)\[0\]", _srv_code)),
+    len(re.findall(r"Lite\.askedPath\(req\.url\)", _srv_code)),
+    len(re.findall(r"\.split\('\?'\)\[0\]", _lite_code))), (0, 1, 1))
 # ...and route()'s order, which the split out of markRoute and journalRoute had
 # to keep: every door that takes a POST is asked before the gate that refuses
 # all but GET and HEAD, the journal's sync doors with them, and the journal's
@@ -1450,7 +1460,7 @@ eq("server.js works out the path as asked once (req.url.split('?')[0])",
 _route = _srv_code[_srv_code.index('function route(req, res) {'):]
 _route = _route[:_route.index('\n}\n')]
 _gate = _route.find("if (req.method !== 'GET' && req.method !== 'HEAD')")
-_decode = _route.find('decodeURIComponent(parsed.pathname)')
+_decode = _route.find('pathname = Lite.decodedPath(req.url)')
 eq('route() asks every POST door, and the journal\'s sync doors, before its GET-only gate, '
    'and the journal\'s pages after the decode',
    (_gate > 0 and all(_m.start() < _gate for _m in re.finditer(r"req\.method === 'POST'", _route)),
