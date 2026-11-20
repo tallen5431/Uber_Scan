@@ -4165,6 +4165,8 @@ The last two rows are the honest cost: on a record whose nights swing like the o
 
 **Pressing All rebuilt all 300 offer rows whole, folded details and all (the review of the pages, round 2).** 16,584 of the page's 40,600 elements sat in rows nobody had opened. `offerRow` now writes the summary and `offerBody` the rest when a row first opens (`fillOffer`): in the summary's click, before it opens; on a `toggle` caught on `#log`; at once in `openOffer` where the page reopens one. Nothing reads a folded body (chips, search and CSV read the offers). Opened rows are byte-identical to the old ones; opening costs about 1 ms. All press: 24,016 elements, longest task 840 ms → 700. The pairs list is left eager: suites read it right after `open = true`. Lost: find-in-page no longer opens a folded row. Check: rpi/test_offerspage.py '[lazy rows]' (no folded body; a script-opened row built once on its toggle); that suite now opens rows by a press on the summary. The eager page fails it.
 
+**A folded offer row's tags could push the page sideways on a phone (the review of the pages, round 2).** `.offer .tag` was `flex: none`: at 360px a "during a job" row ran 11px past its summary, and at 390px two tags made the page 397px wide. A tag now shrinks with an ellipsis, and `.meta` shrinks a thousand times faster, so a row that fitted is drawn as before, its tag whole. Check: rpi/test_layout.py '[row tags]', the widest invented rows at 360 and 390px: no sideways scroll, clocks whole, ✓ 52px, tags drawn; the old CSS draws them 420px wide. Seen, not done: at 360px the Strategy tab's `#ppm` table makes the All view 378px wide.
+
 ### The advice
 
 **The page said where to draw the line and never what holding one costs.**
