@@ -15994,6 +15994,106 @@ finally:
     stop(proc)
 shutil.rmtree(_skdir, ignore_errors=True)
 
+# --- a read held still, for the races between one read and the next --------
+#
+# The faults below live in the moment between a journal read's stat and its
+# bytes, a few milliseconds on a fast disk. A preload holds every read of the
+# journal's bytes while HOLD_DIR/hold exists, and writes to HOLD_DIR/events
+# what the server did — `held` once a read is waiting, `stat` after each
+# stat of the journal is answered, `end <method> <url>` a tick after a body
+# has arrived — so each check orders what happens by what the server says it
+# did, never by sleeping and hoping. The suite's seam, not the server's.
+_HOLD = r"""
+var fs = require('fs'), http = require('http'), J = process.env.JOURNAL, D = process.env.HOLD_DIR;
+var fds = new Set(), open = fs.open, read = fs.read, close = fs.close, stat = fs.stat;
+function note(w) { fs.appendFileSync(D + '/events', w + '\n'); }
+fs.open = function (p) { var a = [].slice.call(arguments), cb = a.pop();
+  return open.apply(fs, a.concat([function (e, fd) { if (!e && p === J) fds.add(fd); cb(e, fd); }])); };
+fs.read = function (fd) { var a = [].slice.call(arguments), cb = a.pop(), said = false;
+  if (!fds.has(fd)) return read.apply(fs, a.concat([cb]));
+  (function go() {
+    if (fs.existsSync(D + '/hold')) { if (!said) { said = true; note('held'); } return setTimeout(go, 5); }
+    read.apply(fs, a.concat([cb]));
+  })(); };
+fs.close = function (fd) { fds.delete(fd); return close.apply(fs, arguments); };
+fs.stat = function (p) { var a = [].slice.call(arguments), cb = a.pop();
+  return stat.apply(fs, a.concat([function () { cb.apply(null, arguments); if (p === J) note('stat'); }])); };
+var emit = http.Server.prototype.emit;
+http.Server.prototype.emit = function (ev, req) {
+  if (ev === 'request') req.on('end', function () { setImmediate(function () { note('end ' + req.method + ' ' + req.url); }); });
+  return emit.apply(this, arguments);
+};
+"""
+
+
+def _held_events(d):
+    try:
+        return open(os.path.join(d, 'events')).read().split('\n')
+    except IOError:
+        return []
+
+
+def _hold_saw(d, what, more_than=0, seconds=10.0):
+    end = time.time() + seconds
+    while time.time() < end:
+        if sum(1 for e in _held_events(d) if e == what) > more_than:
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def _in_thread(fn, *args):
+    out = {}
+
+    def run():
+        try:
+            out['got'] = fn(*args)
+        except Exception as e:                     # noqa: BLE001 - reported by the check
+            out['got'] = repr(e)
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    return t, out
+
+
+def _ingest(base, body):
+    req = urllib.request.Request(base + '/api/journal/ingest', data=body,
+                                 headers={'Content-Type': 'application/x-ndjson'})
+    return json.loads(urllib.request.urlopen(req, timeout=20).read().decode('utf-8'))
+
+
+# An upload joined the read in flight (readJournal's readNext). If that read
+# began before the last upload's rows were appended, it took every one of
+# them as new and appended them again: two posts of the same 60 rows, both
+# `added: 60`, 120 copies on disk, with the ingest lock in place. Here the
+# read in flight is the offers page's, held after its stat; the first
+# upload's append is written while it waits, and the same batch is posted
+# again. It must read again, after the held read, and find all 60 there.
+_frdir = tempfile.mkdtemp()
+_frj = os.path.join(_frdir, 'offers.jsonl')
+write(_frj, [offer(i, NOW - 3600000 + i * 1000) for i in range(20)])
+proc, base, _frlog = _logged({'SCANNER': '0', 'HOLD_DIR': _frdir}, _frj, preload=_HOLD)
+try:
+    get(base, '/api/journal/newest')
+    _frbatch = [offer(300 + i, NOW - 60000 + i * 100, id='sync%d' % i) for i in range(60)]
+    open(os.path.join(_frdir, 'hold'), 'w').close()
+    write(_frj, [{'v': 1, 'kind': 'seen', 'at': NOW, 'saw': 1, 'kept': 1}], 'a')
+    _frt1, _frr1 = _in_thread(get, base, '/api/journal?days=1')
+    ok_('[fresh] the offers page\'s read is held after its stat', _hold_saw(_frdir, 'held'))
+    write(_frj, _frbatch, 'a')
+    _frt2, _frr2 = _in_thread(_ingest, base, ('\n'.join(json.dumps(r) for r in _frbatch) + '\n').encode('utf-8'))
+    ok_('[fresh] ...the same batch posted again while it waits',
+        _hold_saw(_frdir, 'end POST /api/journal/ingest'))
+    os.remove(os.path.join(_frdir, 'hold'))
+    _frt2.join(20)
+    _frt1.join(20)
+    _frkeys = [json.loads(l).get('id') for l in open(_frj) if l.strip()]
+    eq('[fresh] an upload reads after the read in flight, not with it: nothing added, each row once',
+       ((_frr2.get('got') or {}).get('added'), sum(1 for k in _frkeys if str(k).startswith('sync'))),
+       (0, 60))
+finally:
+    stop(proc)
+shutil.rmtree(_frdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

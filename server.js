@@ -10392,6 +10392,28 @@ function nextLocked(name) {
 }
 
 var readWaiters = null;
+/* ...and the callers who may not join the read in flight: they wait for it to
+ * end and go together in the next one, which begins after it (readJournal's
+ * `fresh`).
+ *
+ * The ingest lock above serialises two uploads, and it was not enough (the
+ * server review's second round, Nov 2026). An upload joined whatever read was
+ * already in flight, and that read could have begun BEFORE the previous
+ * upload's rows were appended: the offers page's load, or the sync's own
+ * /api/journal/newest, landing in the moment between the first upload's read
+ * and its append. The second upload then saw none of the first one's rows,
+ * took every one of them as new, and appended them again. Measured on a real
+ * server over a slow card (journal reads 300 ms late): two posts of the same
+ * 60 rows, one after the other, both answered `added: 60`, and the file held
+ * 120 copies — the very fault the lock was written for, by a door it did not
+ * watch. "A waiter that joined during the read can be one append behind" is
+ * safe for a reader; for a caller that decides what to WRITE off the rows it
+ * is the duplicate.
+ *
+ * Fresh costs one stat when nothing changed: readJournalNow's cache answers
+ * the same size and mtime with the rows as they are, and only bytes appended
+ * since are read. */
+var readNext = null;
 
 /* `failed(e)`, where given, is told of a throw in `done` instead of the
  * process. Every request that reads the journal gives one (failedRequest,
@@ -10400,14 +10422,34 @@ var readWaiters = null;
  * that caused it was never answered — the handler's own catch (handler)
  * cannot see into a callback — so the page waited on it until the browser
  * gave up. Measured with an invented fault in Advice.trustworthy: /api/today
- * and /api/journal answered nothing for as long as the client would wait. */
-function readJournal(done, failed) {
+ * and /api/journal answered nothing for as long as the client would wait.
+ *
+ * `opts.fresh`: rows read by a read that BEGAN after this call — never one
+ * already in flight — for every caller that appends off what it read (ingest,
+ * the Gold card's save, earningsFile). See readNext. */
+function readJournal(done, failed, opts) {
   var w = { done: done, failed: failed };
-  if (readWaiters) { readWaiters.push(w); return; }
-  readWaiters = [w];
+  if (!readWaiters) return startRead([w]);
+  if (opts && opts.fresh) {
+    (readNext || (readNext = [])).push(w);
+    return;
+  }
+  readWaiters.push(w);
+}
+
+function startRead(waiters) {
+  readWaiters = waiters;
   readJournalNow(function (rows, err, torn) {
     var waiting = readWaiters;
     readWaiters = null;
+    // The next read begins now, before anyone waiting on this one is answered:
+    // a caller answered here that reads again (earningsFile after a pick) then
+    // joins a read that began after this one ended, which is what fresh asks.
+    if (readNext) {
+      var next = readNext;
+      readNext = null;
+      startRead(next);
+    }
     waiting.forEach(function (one) {
       // A throw in one caller must not starve the others now that they share a
       // read. Rethrown on its own tick so it still reaches the process the way
@@ -14468,6 +14510,8 @@ function journalRoute(req, res, p) {
         sendJson(res, 200, body);
       };
       if (err) return fail(err.message);
+      // Fresh: a read that began after the last upload's append, never one
+      // already in flight (readNext says what joining one did).
       readJournal(function (existing, readErr) {
         // Without the rows already here there is no de-duplication, and
         // appending anyway turns every re-send into a copy. Refusing is the
@@ -14533,7 +14577,7 @@ function journalRoute(req, res, p) {
                    have: existing.length + fresh.length });
           });
         });
-      }, failedRequest(req, res, release));
+      }, failedRequest(req, res, release), { fresh: true });
       });
     });
   }
@@ -16634,7 +16678,9 @@ function earningsMatchSays(m) {
  * however often it is seen; a tip settling kept with when), match every
  * entry of each day touched — or of `alsoDays` — again, and append a row for
  * each entry that is new or changed. Under the earnings lock (earningsRoute),
- * so two uploads cannot both decide a trip is new. `done(err, summary)`. */
+ * so two uploads cannot both decide a trip is new — and off a fresh read
+ * (readNext), since the lock alone let the second join a read begun before
+ * the first one's rows were on disk. `done(err, summary)`. */
 function earningsFile(parses, alsoDays, pick, now, done) {
   readJournal(function (rows, readErr) {
     if (!rows) return done(new Error('the journal could not be read (' + (readErr && readErr.code || 'unknown') + ')'));
@@ -16720,7 +16766,7 @@ function earningsFile(parses, alsoDays, pick, now, done) {
     // caller as an error, which answers it and gives back the earnings lock.
     console.error('earnings: ' + ((e && e.stack) || e));
     done(e);
-  });
+  }, { fresh: true });
 }
 
 /* The earnings route, every method. One lock over all of it ('earnings'):
@@ -16922,6 +16968,9 @@ function earningsRoute(req, res, pathname) {
       }
       fileLock('earnings', function (release) {
         var reply = function (code, b) { release(); answer(code, b); };
+        // Fresh (readNext), as earningsFile's: a trip the upload before this
+        // one filed, under this same lock, is on disk and must be found, not
+        // answered "no such entry" off a read begun before it was written.
         readJournal(function (rows) {
           var e = rows ? Earnings.fold(rows).filter(function (r) { return r.key === body.key; })[0] : null;
           if (!e) return reply(404, { ok: false, error: 'no such entry' });
@@ -16954,7 +17003,7 @@ function earningsRoute(req, res, pathname) {
             if (fileErr) return reply(500, { ok: false, error: fileErr.message });
             reply(200, { ok: true, entries: summary.entries });
           });
-        }, failedRequest(req, res, release));
+        }, failedRequest(req, res, release), { fresh: true });
       });
     });
   }
@@ -17004,6 +17053,7 @@ function earningsRoute(req, res, pathname) {
             });
           };
           var filed = function () {
+            // Fresh, for the days of a trip just filed (see the pick above).
             readJournal(function (rows) {
               var floor = now - EARNINGS_REMATCH_DAYS * 86400000;
               var days = {};
@@ -17018,7 +17068,7 @@ function earningsRoute(req, res, pathname) {
                              undated: parses.filter(function (p) { return !(p.picked || p.day); }).length,
                              added: summary.added, changed: summary.changed });
               });
-            }, failedRequest(req, res, release));
+            }, failedRequest(req, res, release), { fresh: true });
           };
           next(0);
         });
@@ -17208,6 +17258,9 @@ function goldRoute(req, res, pathname) {
         }
       }
       fileLock('gold', function (release) {
+        // Fresh (readNext): the setting kept is the newest `gold` row plus
+        // what this POST changes, so a read begun before the last save landed
+        // would put that save's goal or figures back as they were.
         readJournal(function (rows) {
           var now = Date.now();
           var was = goldSettings(rows || []);
@@ -17223,7 +17276,7 @@ function goldRoute(req, res, pathname) {
             if (appendErr) return answer(500, { ok: false, error: 'could not save' });
             answer(200, { ok: true, settings: goldSettings([row]) });
           });
-        }, failedRequest(req, res, release));
+        }, failedRequest(req, res, release), { fresh: true });
       });
     });
   }
