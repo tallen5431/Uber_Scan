@@ -3,11 +3,11 @@
  * the file tools/street_index.py wrote; nothing else reads it.
  *
  * WHY THIS EXISTS. Uber prints most dropoffs as a corner, not a door —
- * "Foothill Trl & Northwoods Dr, Marietta": 403 of the week's 1,166 dropoffs,
+ * "Foothill Trl & Farrowdene Dr, Harrowen": 403 of the week's 1,166 dropoffs,
  * 390 different ones — to keep the customer's address off the card. Nominatim
- * answers ONE representative point for a whole street (Cobb Parkway NW came
+ * answers ONE representative point for a whole street (Vosk Parkway NW came
  * back as one result on the real install), so the corner of two streets cannot
- * be asked of it, and a numberless street ("Shadowood Pkwy SE, Atlanta") comes
+ * be asked of it, and a numberless street ("Gloamwood Pkwy SE, Solvane") comes
  * back as a point somewhere along it rather than the stretch that is inside
  * the card's disc. Both are questions about the street GRAPH, and the graph is
  * in the Georgia file the NucBox already holds. This answers them from that,
@@ -21,16 +21,16 @@
  *              (Trail/Trl, Parkway/Pkwy, Northwest/NW ...), on BOTH sides,
  *              so "Foxglove Trl" finds OSM's "Foxglove Trail" and "Bramble
  *              Court" finds an OSM name written "Bramble Ct".
- *   dir        a directional on one side only ("Peachtree St" against OSM's
- *              "Peachtree Street Northeast"); two names each with one the
- *              other lacks never match, wherever they stand — in Atlanta "NW"
+ *   dir        a directional on one side only ("Plumleigh St" against OSM's
+ *              "Plumleigh Street Northeast"); two names each with one the
+ *              other lacks never match, wherever they stand — in Solvane "NW"
  *              and "SE" are different streets, and "Main St NW" is not "S
  *              Main St" (see dirsAgree, and its own risk there).
  *   junk       the same two, after the OCR's litter is dropped: tokens of one
  *              or two letters that are not a street word after the street's
  *              last type, printed short ("Ct re ou NW", "Dr Ss R SW") — never
- *              a word before it, which is the name ("Ol Canton Rd" is not
- *              Canton Road), and never a digit (see cleaned).
+ *              a word before it, which is the name ("Ol Belvan Rd" is not
+ *              Belvan Road), and never a digit (see cleaned).
  *   ocr        one letter, in one word, read wrong — and only the letter the
  *              reader is seen to misread, i for l or l for i ("Tri" for Trl,
  *              "PI" for Pl, "Biue" for Blue; see OCR_LETTERS), so never a
@@ -123,22 +123,22 @@ function split(ws) {
 /* Directionals agree when neither name has one the other lacks a match for:
    before the name and after it, each the same or missing on one side, AND
    every one of one name's among the other's. So none against any agrees
-   ("Marietta Pkwy" against "N Marietta Pkwy NW"), and one more on one side
-   ("Lincoln Trace Ave SE" against "S Lincoln Trace Ave SE"; "North Ave"
+   ("Harrowen Pkwy" against "N Harrowen Pkwy NW"), and one more on one side
+   ("Hallett Trace Ave SE" against "S Hallett Trace Ave SE"; "North Ave"
    against "North Avenue Northwest", whose first word is a directional too).
    Before and after apart were the whole rule, and so "Main St NW" agreed
    with "S Main St" (one had nothing before, the other nothing after) and
-   "Peachtree Rd NW" with "NE Peachtree Rd"; the whole names apart were not
-   enough either, "Cobb Pkwy S" being inside "S Cobb Pkwy NW" by that alone.
+   "Plumleigh Rd NW" with "NE Plumleigh Rd"; the whole names apart were not
+   enough either, "Vosk Pkwy S" being inside "S Vosk Pkwy NW" by that alone.
    On the week's 1,197 distinct street names off the cards, each asked of
-   all the others, the old rule matched two that differ ("Peachtree Rd NW"
-   and "NE Peachtree Rd") and this does not.
+   all the others, the old rule matched two that differ ("Plumleigh Rd NW"
+   and "NE Plumleigh Rd") and this does not.
    ITS OWN RISK, kept: a directional on one side only is a street the card
    printed short, or another street. Of this rule's 112 pairs on those
-   names, 18 put a leading N, S, E or W against none — West Barrett Pkwy and
-   Barrett Pkwy, S Cobb Pkwy and Cobb Pkwy, N Roberts Rd and Roberts Rd, E
-   Stone Bridge Run and Stone Bridge Run among them — and in Atlanta that can
-   be a different street (West Paces Ferry Rd is not Paces Ferry Rd). What
+   names, 18 put a leading N, S, E or W against none — West Tallett Pkwy and
+   Tallett Pkwy, S Vosk Pkwy and Vosk Pkwy, N Wilbert Rd and Wilbert Rd, E
+   Stone Bridge Run and Stone Bridge Run among them — and in Solvane that can
+   be a different street (West Tolls Ferry Rd is not Tolls Ferry Rd). What
    stands between them and a pin is the card's disc: a corner is where the
    two names MEET inside it, and a stretch of two streets apart is refused. */
 function dirsOf(sp) {
@@ -166,9 +166,9 @@ function dirsAgree(x, y) {
  * two-letter tokens that are not street words, 23 come before the type and
  * 21 where there is no type at all — real initials among them ("J R Rd",
  * "Richard D Sailors Pkwy", "Hosea L Williams Dr") beside litter ("Gj
- * Cumberland Creek Way"), not to be told apart by their letters. Dropped
- * anyway, "Ol Canton Rd" (Old Canton Road misread) was asked as Canton Road,
- * a different street whose corner was a mile off; "La Vista Rd" as Vista
+ * Hollowmere Creek Way"), not to be told apart by their letters. Dropped
+ * anyway, "Ol Belvan Rd" (Old Belvan Road misread) was asked as Belvan Road,
+ * a different street whose corner was a mile off; "Le Marla Rd" as Vista
  * Rd, "Mc Donough Blvd" as Donough Blvd. The 17 after the type are litter
  * ("Ct re ou NW", "Rd ay tt ra NW", "Dr Ss R SW") but for two: "Orange Grove
  * PI SW" and "Cedar Ridge Or", the TYPE misread after a spelled-out word that
@@ -176,10 +176,10 @@ function dirsAgree(x, y) {
  * "Way") nothing is dropped. This drops litter from 9 of the 605 and nothing
  * else. A lone digit is never dropped: after the type it is the route's
  * number (5 of the 6 there, "Georgia State Route 9"), and the old rule, which
- * dropped it and every word after the last type, asked "Old Hwy 41 Kennesaw"
+ * dropped it and every word after the last type, asked "Old Hwy 41 Tellmoor"
  * as Old Hwy; before the type it is litter ("Twin Branch 4 Rd"), and the name
  * is refused for it. Words after the last type were dropped as a town the
- * reader glued on ("Westover Ln NW Kennesaw"): every one of those in the week
+ * reader glued on ("Tilmoore Ln NW Tellmoor"): every one of those in the week
  * is a dropoff with no comma, which map-view.js asks of Nominatim and never
  * of this, while on the dropoffs that do reach this the same rule hit 12
  * halves and 8 of them lost a route's number. */
@@ -212,13 +212,13 @@ function oneEdit(a, b) {
  * for another, and 177 of those are i/l ("Tri"/"Trl", "Bivd"/"Blvd",
  * "PI"/"Pl"); the other 13 are h/k 5, a/n 4 and four single ones, none in a
  * street's name. 39 put a digit for a letter (5 for S, 31) and 48 add or drop
- * one ("Smyrn" for Smyrna, 13), which is also how real streets differ (Oak
+ * one ("Pyrne" for Pyrnel, 13), which is also how real streets differ (Oak
  * and Oaks, Spring and Springs). Any letter for any letter matched real,
- * different streets the week's cards and frames carry — Beach St (Acworth)
- * and Beech St (Marietta), Olive St SW and Oliver St — and Pine/Pike,
+ * different streets the week's cards and frames carry — Beach St (Ivyhame)
+ * and Beech St (Harrowen), Olive St SW and Oliver St — and Pine/Pike,
  * Rose/Ross, Bell/Ball, Reed/Reid and Allen/Allan are all one letter apart.
  * A misread the reader makes the same way in every frame cannot be seen this
- * way ("Or" for Dr: "Cedar Ridge Or" and "Ottley Or NE" on the week's cards)
+ * way ("Or" for Dr: "Cedar Ridge Or" and "Pettle Or NE" on the week's cards)
  * and is refused. No two street words are one i/l apart, so St is never read
  * as Ct (tests/streets.test.js holds that). */
 var OCR_LETTERS = { il: true, li: true };
@@ -356,7 +356,7 @@ function match(ix, asked, box) {
 /* --- one street by its name as read, inside a box -------------------------
  *
  * THE FAULT (the owner, 19 Oct night). The Trip Planner's dropoff "1106
- * <Name> Ln, Marietta" was read off a dark grayscale frame as "L106 <Nam..>":
+ * <Name> Ln, Harrowen" was read off a dark grayscale frame as "L106 <Nam..>":
  * the street's type gone and the name's last word cut, with the letter at the
  * cut read wrong ("...ns Ln" came out "...r"). Filed as "1106 <Nam..>", the
  * NucBox's search found nothing, the street-type retry had no type word to

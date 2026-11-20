@@ -170,11 +170,11 @@ VERDICTS = [
     dict(offer(8, pay=10.0), typed=True),
 ]
 
-# Five offers through Chattanooga, of which four can be counted and three were
-# worked; one job on its own in Soddy Daisy; two in Dalton that were set aside
+# Five offers through Wennamocket, of which four can be counted and three were
+# worked; one job on its own in Tibby Lupin; two in Galmer that were set aside
 # and so have no rate to give at all.
 #
-# The fifth Chattanooga row is the point of the set: it was ticked — the driver
+# The fifth Wennamocket row is the point of the set: it was ticked — the driver
 # took that job — and the scanner misread it, so it is set aside. Every figure
 # in the sentence has to be over the four that could be counted and not over
 # the five that matched, and it is only a mixed set that can tell the two
@@ -183,20 +183,20 @@ VERDICTS = [
 # of two, and the money taken goes from $18.00 to $46.00.
 SEARCHABLE = [
     offer(0, accepted=True, pay=12.0, state='go',
-          places=['Chattanooga TN', 'Ringgold GA']),
+          places=['Wennamocket TN', 'Pinegold GA']),
     offer(1, accepted=True, pay=10.0, state='warn',
-          places=['Chattanooga TN', 'Fort Oglethorpe GA']),
-    offer(2, pay=12.0, state='go', places=['Chattanooga TN', 'Hixson TN']),
-    offer(3, pay=10.0, state='warn', places=['East Ridge TN', 'Chattanooga TN']),
-    offer(4, pay=14.0, state='go', places=['Soddy Daisy TN']),
-    offer(5, pay=10.0, state='no', places=['Dalton GA'], suspect=True),
-    offer(6, pay=10.0, state='no', places=['Dalton GA'], suspect=True),
+          places=['Wennamocket TN', 'Fort Ashlethorp GA']),
+    offer(2, pay=12.0, state='go', places=['Wennamocket TN', 'Brixom TN']),
+    offer(3, pay=10.0, state='warn', places=['East Ridge TN', 'Wennamocket TN']),
+    offer(4, pay=14.0, state='go', places=['Tibby Lupin TN']),
+    offer(5, pay=10.0, state='no', places=['Galmer GA'], suspect=True),
+    offer(6, pay=10.0, state='no', places=['Galmer GA'], suspect=True),
     offer(7, pay=10.0, state='no'),
     # ...and the misread one carries what the reader actually read, with a
     # '<' in it, because OCR off a photograph of a phone can contain anything
     # and this is the first card text to reach innerHTML on this page.
-    offer(8, accepted=True, pay=30.0, places=['Chattanooga TN'], suspect=True,
-          text='Deliver by 7:42 PM\n$30.00 <total>\n20 min\nChattanooga TN'),
+    offer(8, accepted=True, pay=30.0, places=['Wennamocket TN'], suspect=True,
+          text='Deliver by 7:42 PM\n$30.00 <total>\n20 min\nWennamocket TN'),
 ]
 
 # Four ordinary offers and one the rig stamped past the end of time. The four
@@ -211,7 +211,7 @@ for _i in range(4):
 NO_CLOCK[4]['at'] = NO_CLOCK[4]['firstAt'] = 1e20
 
 # Typed into the box on the page, in this order, against SEARCHABLE.
-QUERIES = ['chattanooga', 'soddy', 'dalton', 'nowhere at all']
+QUERIES = ['wennamocket', 'tibby', 'galmer', 'nowhere at all']
 
 # Three weeks, one offer a day at noon UTC — noon so that neither the 4am
 # shift boundary nor a browser in another zone can move a row to the next
@@ -330,9 +330,9 @@ BUSY_ROWS = [BUSY_JOB] + INSIDE + OUTSIDE
 # something other than the layout file.
 PAIR = {
     'v': 1, 'kind': 'pair', 'at': NOW - 300000, 'id': 'r0',
-    'held': {'pay': 12.0, 'minutes': 30, 'dropoff': 'Oak Ln, Marietta',
+    'held': {'pay': 12.0, 'minutes': 30, 'dropoff': 'Oak Ln, Harrowen',
              'scanned': True, 'heldMs': 600000},
-    'offer': {'pay': 9.0, 'minutes': 20, 'dropoff': 'Chastain Rd NW, Kennesaw',
+    'offer': {'pay': 9.0, 'minutes': 20, 'dropoff': 'Morvaine Rd NW, Tellmoor',
               'pickup': None},
     'stack': {'pay': 17.4, 'worst': 26.1, 'best': 34.8, 'leftMinutes': 20,
               'minMinutes': 20, 'maxMinutes': 40, 'state': 'go', 'sure': True,
@@ -503,25 +503,25 @@ KINDS = [
 # boxed around where the car actually was; the third deliberately does not, so the case of a place
 # with no anchor is on the page too.
 MAPPED = [
-    dict(offer(0, state='go', pickup='Chastain Rd NW, Kennesaw',
-               dropoff='Oak Ln, Marietta'), lat=34.02, lon=-84.61, gpsOk=True),
-    dict(offer(1, state='warn', pickup='Chastain Rd NW, Kennesaw'),
-         lat=34.02, lon=-84.61, gpsOk=True),
-    offer(2, state='no', pickup='Chastain Rd NW, Kennesaw',
+    dict(offer(0, state='go', pickup='Morvaine Rd NW, Tellmoor',
+               dropoff='Oak Ln, Harrowen'), lat=34.02, lon=-44.61, gpsOk=True),
+    dict(offer(1, state='warn', pickup='Morvaine Rd NW, Tellmoor'),
+         lat=34.02, lon=-44.61, gpsOk=True),
+    offer(2, state='no', pickup='Morvaine Rd NW, Tellmoor',
           dropoff='Zzqx Nowhere Blvd'),
     # A card that printed "Customer dropoff" and no address, whose destination
     # the driver revealed on their phone and had the rig read. The only reason
     # this row has an end at all.
-    dict(offer(3, state='go', pickup='Chastain Rd NW, Kennesaw',
-               dropoff='Oak Ln, Marietta', scanned=True),
-         lat=34.02, lon=-84.61, gpsOk=True),
+    dict(offer(3, state='go', pickup='Morvaine Rd NW, Tellmoor',
+               dropoff='Oak Ln, Harrowen', scanned=True),
+         lat=34.02, lon=-44.61, gpsOk=True),
     # The same two ends, three miles apart on the card and four and a half on
     # the map — which the sheet used to answer with "one of these pins is
     # wrong". This reading is `suspect`: the rig is not standing behind its own
     # figures, so three miles is not a distance a straight line can be measured
     # against, and losing that comparison says nothing about either pin.
-    dict(offer(4, state='no', pickup='Chastain Rd NW, Kennesaw',
-               dropoff='Oak Ln, Marietta', suspect=True),
+    dict(offer(4, state='no', pickup='Morvaine Rd NW, Tellmoor',
+               dropoff='Oak Ln, Harrowen', suspect=True),
          miles=3.0),
 ]
 
@@ -699,8 +699,8 @@ REVIEW = [
     asked('q8', 45, pay=13.0, state='no', accepted=True),
     asked('q4', 40, state='go', accepted=False),
     asked('q3', 30, state='go', accepted=True),
-    asked('q2', 20, pay=11.0, state='warn', pickup='Waffle House, Cobb Pkwy'),
-    asked('q1', 10, pay=14.0, minutes=25.0, state='go', pickup='Zaxbys, Canton Rd'),
+    asked('q2', 20, pay=11.0, state='warn', pickup='Waffle House, Vosk Pkwy'),
+    asked('q1', 10, pay=14.0, minutes=25.0, state='go', pickup='Zaxbys, Belvan Rd'),
     dict(asked('qz', 0, state='go'), at=4000000000000, firstAt=4000000000000),
 ]
 
@@ -726,7 +726,7 @@ FEEDS = {
                    'unreadable': None, 'pairs': [], 'offers': TOOK_SIX,
                    '__status': {'holding': {'holdId': 'r3@%d' % (NOW - 3 * 600000),
                                             'pay': 12.5, 'app': 'uber',
-                                            'dropoff': '4821 Kestrel Dr, Marietta, GA 30064',
+                                            'dropoff': '4821 Kestrel Dr, Harrowen, GA 90664',
                                             'endPinned': True, 'endBy': 'server',
                                             'drops': [{'line': 'a'}, {'line': 'b'}]},
                                 'scanner': {'enabled': True}}},
@@ -931,7 +931,7 @@ _TG_LINES = {
              'in that range earned within 5% of the best.',
              '9pm–12: not enough offers yet for percentiles (12 of 30); timed takes: 2 (5 needed for '
              'a median); 3 cleared your $25 line (8 needed for a $/mi).'],
-    'areas': ['All hours (hours held): Atlanta (+$2.00/hr vs the other towns in the same hours, 16% '
+    'areas': ['All hours (hours held): Solvane (+$2.00/hr vs the other towns in the same hours, 16% '
               'top-10% against their 9%); 3 others indistinguishable (p = 0.004, 4 towns).'],
     'notes': ['One $/hr line for all hours, not one per block.', '$/mi earned 24% less.']}
 FEEDS['targets'] = dict(FEEDS['took six'], targets={'target': 25, 'lines': _TG_LINES})
@@ -1085,8 +1085,8 @@ const STUB = (feed) => `
   // which is what a misread street really gets.
   window.__geo = [];
   const PLACES = {
-    'chastain': [34.010, -84.580],
-    'oak ln': [33.952, -84.549],
+    'morvaine': [34.010, -44.580],
+    'oak ln': [33.952, -44.549],
   };
   // Leaflet, faked before the page can fetch it from a CDN. Two jobs: prove
   // the page never blocks on a network library, and record what got drawn.
@@ -2085,7 +2085,7 @@ const TEXT = (sel) => {
         document.querySelector('#ranges button[data-days="7"]').click();
         await new Promise((r) => setTimeout(r, 400));
         const box = document.getElementById('find');
-        box.value = 'marietta';
+        box.value = 'harrowen';
         box.dispatchEvent(new Event('input', { bubbles: true }));
         await new Promise((r) => setTimeout(r, 400));
         const withRows = { pairs: !document.getElementById('pairsHead').hidden,
@@ -2259,13 +2259,13 @@ const TEXT = (sel) => {
         window.__dropOk = true;
         const was = window.fetch;
         const orders = [
-          { holdId: 'r1@1', pay: 9.5, app: 'doordash', dropoff: '12 Wren St, Roswell',
+          { holdId: 'r1@1', pay: 9.5, app: 'doordash', dropoff: '12 Wren St, Ruswold',
             endPinned: true, endBy: 'place' },
-          { holdId: 'r2@2', pay: 7, dropoff: '77 Birch Ln, Roswell', endPinned: true,
+          { holdId: 'r2@2', pay: 7, dropoff: '77 Birch Ln, Ruswold', endPinned: true,
             arrived: true },
           { holdId: 'r5@3', pay: 5, addOn: true, dropoff: null, endPinned: false,
             endWhy: 'no house number on the NucBox' },
-          { holdId: 'r0@4', pay: 4, dropoff: '306 Elm Ct, Marietta', endPinned: true,
+          { holdId: 'r0@4', pay: 4, dropoff: '306 Elm Ct, Harrowen', endPinned: true,
             endBy: 'street' }];
         window.fetch = function (url, opts) {
           if (String(url).indexOf('/api/delivered') === 0) {
@@ -3304,7 +3304,7 @@ try:
     _q1 = ((r1.get('rows') or [{}])[0].get('text')) or ''
     ok_('...each saying when, what it paid, how long, how far and where from (%r)'
         % _q1, all(s in _q1 for s in ((rv.get('clock') or ['?', '?'])[1], '$14.00',
-                                       '25 min', '6.0 mi', 'Zaxbys, Canton Rd')))
+                                       '25 min', '6.0 mi', 'Zaxbys, Belvan Rd')))
     # Each figure one unbreakable piece, so a narrow screen wraps the line
     # between figures and never leaves "25" at the end of one line and "min"
     # at the start of the next. (test_layout holds the figures to the box.)
@@ -3744,14 +3744,14 @@ try:
     # --- what the search found, and what it was worth ------------------------
     #
     # The figures at the top of the page are the whole window's and do not move
-    # when the box is typed into. "Do the Chattanooga runs pay?" is the question
+    # when the box is typed into. "Do the Wennamocket runs pay?" is the question
     # somebody types a place in to ask, and the answer used to be a filtered
     # list and nothing else.
     s = got['searchable']['searches']
-    chatt = s['chattanooga']['note'] or ''
-    eq('a search narrows the list', s['chattanooga']['rows'], 5)
+    chatt = s['wennamocket']['note'] or ''
+    eq('a search narrows the list', s['wennamocket']['rows'], 5)
     ok_('...and says how many of how many (%r)' % chatt[:60],
-        '5 of 9 offers match "chattanooga"' in chatt)
+        '5 of 9 offers match "wennamocket"' in chatt)
     # Over the four that could be counted, never the five that matched: with
     # the misread $84 back in, [$24, $24, $30, $30, $84] has a median of $30.
     ok_('...with the median of what it found, not the page\'s (%r)' % chatt[-90:],
@@ -3767,8 +3767,8 @@ try:
         'You marked 2 of them as taken, worth $18.00' in chatt)
     # A median of one offer is that offer. Calling it typical invites it to be
     # read as a pattern, which one job is not.
-    one = s['soddy']['note'] or ''
-    eq('a search matching one offer finds one', s['soddy']['rows'], 1)
+    one = s['tibby']['note'] or ''
+    eq('a search matching one offer finds one', s['tibby']['rows'], 1)
     ok_('...and names it as a single job rather than a typical one (%r)'
         % one[-70:],
         'The one of them that could be counted paid $36/hr' in one)
@@ -3776,8 +3776,8 @@ try:
     # Rows that were set aside are still listed — that is the whole reason the
     # log keeps them — but there is no rate to give for them, and "median --"
     # would be a figure where there is none.
-    none = s['dalton']['note'] or ''
-    eq('offers that were all set aside are still listed', s['dalton']['rows'], 2)
+    none = s['galmer']['note'] or ''
+    eq('offers that were all set aside are still listed', s['galmer']['rows'], 2)
     ok_('...and the note says there is no rate to give (%r)' % none[-70:],
         'not one of them could be counted' in none)
     no_('...rather than printing a dash as a rate', '--' in none)
@@ -4184,7 +4184,7 @@ try:
     _r3 = [c for c in (_m['said'] or []) if c.startswith('r3:')]
     ok_('an address read off the phone is shown on its row (%r)'
         % (_r3 or [''])[0][-90:],
-        _r3 and 'read off your phone' in _r3[0] and 'Oak Ln, Marietta' in _r3[0])
+        _r3 and 'read off your phone' in _r3[0] and 'Oak Ln, Harrowen' in _r3[0])
     # ...and said to have been read rather than printed. The two are different
     # degrees of evidence, and the difference is why this one is worth having.
     _r0 = [c for c in (_m['said'] or []) if c.startswith('r0:')]
@@ -4194,7 +4194,7 @@ try:
     _r = _m['route']
     ok_('pressing route opens the sheet in this page', _r['open'])
     ok_('...naming both ends (%r)' % _r['where'],
-        'Chastain' in _r['where'] and 'Oak Ln' in _r['where'])
+        'Morvaine' in _r['where'] and 'Oak Ln' in _r['where'])
     eq('...and looking up exactly those two', len(_r['asked']), 2)
     # Boxed around where the car was, which is the whole of the improvement:
     # "usually the pickup/restaurant is the closest one to me".
@@ -4228,7 +4228,7 @@ try:
     _half = _m['halfPlaced']
     eq('one end placed draws one pin', _half['pins'], 1)
     ok_('...and the caption names the pin that is actually there (%r)'
-        % _half['note'], 'Chastain' in _half['note'])
+        % _half['note'], 'Morvaine' in _half['note'])
     ok_('...by the colour it was actually drawn in', 'green pin' in _half['note'])
     no_('...and does not name a colour that is not on the map',
         'amber' in _half['note'])
@@ -4429,7 +4429,7 @@ _eat = int(_etime.time() * 1000) - 5 * 60000
 with open(os.path.join(_ework, 'holding.json'), 'w') as _fh:
     json.dump({'v': 2, 'orders': [{'id': 'e-1', 'pay': 14.25, 'minutes': 30,
                                    'acceptedAt': _eat, 'app': 'uber',
-                                   'dropoff': '77 Quarry Ln, Smyrna, GA 30080'}]}, _fh)
+                                   'dropoff': '77 Quarry Ln, Pyrnel, GA 90680'}]}, _fh)
 _eport = free_port()
 _eproc = subprocess.Popen(
     ['node', os.path.join(ROOT, 'server.js')],

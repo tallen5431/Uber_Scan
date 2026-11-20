@@ -563,7 +563,7 @@ eq('...and a card says it is not one',
 _nav = _OP.parse('Fable Grove Park\n40\nLIMIT\no= 3 min © 1.1 mi =\nExpected by 6:37 PM')
 eq('a read of the navigation goes out typed as the navigation',
    (emitted(_OP.rate(_nav), _nav, False).get('screen'), _nav['pay']), ('uber.nav', None))
-_card = _OP.parse('$9.10\nGuaranteed (incl. tip)\n18 min (5.2 mi) total\nFable Burger\nOak Ln, Marietta')
+_card = _OP.parse('$9.10\nGuaranteed (incl. tip)\n18 min (5.2 mi) total\nFable Burger\nOak Ln, Harrowen')
 eq('...and a card as a card, so the panel keeps its hedge for one',
    emitted(_OP.rate(_card), _card, False).get('screen'), 'uber.offer')
 
@@ -2063,11 +2063,11 @@ ok_('...carrying no verdict', 'ready' not in told)
 # searches the door for the pickup's pin. Invented store and street.
 _door = said(lambda: SP.emit_offer('x', SP.OP.parse(
     '$7.70 incl. tips\n2 stops (2.4 mi) - 18 min\n& Lark Owl Grill\n'
-    '2530 Kestrel Plains Road, Marietta, 30066 GA\n& Customer dropoff'),
+    '2530 Kestrel Plains Road, Harrowen, 90666 GA\n& Customer dropoff'),
     {'ready': True, 'perHour': 20.0, 'cardMinutes': 18.0}))['offer']
 eq('the offer carries the store\'s door off the card beside its name, and no dropoff',
    (_door.get('pickup'), _door.get('pickupLine'), _door.get('dropoff')),
-   ('Lark Owl Grill', '2530 Kestrel Plains Road, Marietta, GA 30066', None))
+   ('Lark Owl Grill', '2530 Kestrel Plains Road, Harrowen, GA 90666', None))
 eq('...and a one-store card lists no stores beyond what pickupLine says',
    (_door.get('stores'), _door.get('dropoffs'), _door.get('dropoffOrders')), ([], 1, None))
 # ...and on a two-store card (the owner's snaps of 31 Oct), every store with
@@ -2087,8 +2087,8 @@ eq('a two-store card\'s offer carries every store with its door, in the card\'s 
      {'name': 'Maple Run Creamery', 'door': '2516 Quillon Street, Brookvale'}], 1, 2, False,
     '4410 Fernhill Road Northwest'))
 _many = SP.OP.parse('$21.35 incl. tips\n4 stops (15.0 mi) - 53 min\n@ Wren Shack\n'
-                    '880 Wrenfield Highway, Brookvale, 30199 GA\n@ Lark Owl Burgers\n'
-                    '912 Wrenfield Highway, Brookvale, 30199 GA\n83 Multiple dropoffs (2 stops)')
+                    '880 Wrenfield Highway, Brookvale, 90799 GA\n@ Lark Owl Burgers\n'
+                    '912 Wrenfield Highway, Brookvale, 90799 GA\n83 Multiple dropoffs (2 stops)')
 eq('..."Multiple dropoffs (2 stops)" is two dropoffs, and many off the count alone',
    (_many['dropoffs'], SP.says_many_dropoffs({'dropoffs': 2}), SP.says_many_dropoffs({}),
     SP.says_many_dropoffs(dict(_many, text='$21.35'))), (2, True, False, True))
@@ -2168,9 +2168,9 @@ eq('an unrated card falls back to what it printed',
 
 # --- where the car was, and the card's own yardstick, on the offer line -------
 #
-# A fix as gps.Phone hands it out: judged on the way out. Marietta Square, a
+# A fix as gps.Phone hands it out: judged on the way out. Harrowen Square, a
 # public place, at the owner's receiver's indoor figure.
-_where = {'lat': 33.952612345, 'lon': -84.549912345, 'ageSeconds': 1.24,
+_where = {'lat': 33.952612345, 'lon': -44.549912345, 'ageSeconds': 1.24,
           'mode': 3, 'err': 27.8, 'ok': True, 'why': None, 'source': 'gpsd'}
 _card = {'pay': 7.09, 'minutes': 23.0, 'miles': 7.6, 'hasTotal': True,
          'legs': 1, 'toPickupMiles': None, 'milesUncertain': False,
@@ -2182,7 +2182,7 @@ _rated = {'ready': True, 'perHour': 18.5, 'cardMinutes': 23.0, 'miles': 7.6,
 placed = said(lambda: SP.emit_offer('x', _card, _rated, where=_where, whole=True))['offer']
 eq('the offer line carries where the car was, as the journal writes it',
    [placed.get(k, 'absent') for k in SP.JR.FIX_FIELDS],
-   [33.95261, -84.54991, 1.2, 27.8, 3, True, None])
+   [33.95261, -44.54991, 1.2, 27.8, 3, True, None])
 eq('...the same seven fields the row is built with',
    {k: placed.get(k, 'absent') for k in SP.JR.FIX_FIELDS}, SP.JR.fix_fields(_where))
 eq('...and the card\'s own yardstick fields',
@@ -2253,7 +2253,7 @@ for _text, _want in (('Early look • Order in progress', True),
                      ('Early took. Order in pr', True),
                      ('Est. delivery 4:15 PM • 8.6 mi', False),
                      ('Delivery $12.99 Guaranteed (incl. tips) 7.7 mi + 28 min', False),
-                     ('Nearly lookout point, Marietta', False)):
+                     ('Nearly lookout point, Harrowen', False)):
     eq('says_early_look(%r)' % _text[:34],
        SP.says_early_look({'scans': [], 'text': _text}), _want)
 
@@ -2389,15 +2389,15 @@ no_('a run with neither says nothing about them',
 for _txt, _want in (("'a sie ee 2 e. ° ray st 1%", False),
                     ('| ee rd .. Ii', False),
                     ('ST 3 = ~ ws Way', False),
-                    ('Turn right onto Cobb Pkwy NW', True),
+                    ('Turn right onto Vosk Pkwy NW', True),
                     ('1554 Ombre Hills Rd', True),
-                    ('Dropoff 3100 Esquire Dr N 14 min Start', True),
+                    ('Dropoff 3100 Elquine Dr N 14 min Start', True),
                     ('4 min 0.6 mi\nOak St & Elm Ave', True)):
     eq('[no address] %r is %s' % (_txt[:30], 'a screen a door could be on' if _want else 'litter'),
        SP.door_could_matter(_txt), _want)
 eq('[no address] ...and litter beside a planner\'s stops or Uber\'s sheet still counts, read or not',
    (SP.door_could_matter('| ee rd .. Ii', stops=[{'street': '9 Elm St'}]),
-    SP.door_could_matter('| ee rd .. Ii', sheet='9 Elm St, Faketown, GA 30060')), (True, True))
+    SP.door_could_matter('| ee rd .. Ii', sheet='9 Elm St, Faketown, GA 90660')), (True, True))
 eq('[no address] a screen typed as one that shows a door is counted, however littered its '
    'street line', (OP2.screen_type('4 min 0.6 mi\n| ee rd .. Ii')['screen'],
                    SP.door_could_matter('4 min 0.6 mi\n| ee rd .. Ii')), ('uber.nav', True))
@@ -3077,12 +3077,12 @@ class _Latest(object):
         return None                 # past twenty seconds fix() has nothing
 
 
-_stale_fix = {'lat': 33.9526, 'lon': -84.5499, 'ageSeconds': 45.0, 'mode': 3,
+_stale_fix = {'lat': 33.9526, 'lon': -44.5499, 'ageSeconds': 45.0, 'mode': 3,
               'err': 12.0, 'ok': False, 'why': 'stale', 'freshFor': 0.0,
               'drivingFor': 0.0}
 eq('the beat carries the newest fix even once it is stale, judged so',
    SP.beat_fix(_Latest(_stale_fix)),
-   {'lat': 33.9526, 'lon': -84.5499, 'gpsAge': 45.0, 'gpsErr': 12.0,
+   {'lat': 33.9526, 'lon': -44.5499, 'gpsAge': 45.0, 'gpsErr': 12.0,
     'gpsMode': 3, 'gpsOk': False, 'gpsWhy': 'stale', 'freshFor': 0.0,
     'speed': None, 'driving': False, 'drivingFor': 0.0})
 # ...and the speed and gps.py's word on whether the car is being driven, for
@@ -3800,16 +3800,16 @@ class _Catch(object):
 
 sys.stdout = _Catch()
 try:
-    SP.emit_dropoff({'line': '1234 Daffodil Ln, Powder Springs, GA 30127',
-                     'street': '1234 Daffodil Ln', 'city': 'Powder Springs',
-                     'state': 'GA', 'zip': '30127'}, ms=1200)
+    SP.emit_dropoff({'line': '1234 Daffodil Ln, Gorrel Springs, GA 90727',
+                     'street': '1234 Daffodil Ln', 'city': 'Gorrel Springs',
+                     'state': 'GA', 'zip': '90727'}, ms=1200)
 finally:
     sys.stdout = _was_stdout
 _msg = json.loads(''.join(_said).strip())
 eq('the destination goes out on its own line', 'dropoff' in _msg, True)
 eq('...carrying what the driver reads to check it',
-   _msg['dropoff']['line'], '1234 Daffodil Ln, Powder Springs, GA 30127')
-eq('...and what the geography is decided on', _msg['dropoff']['zip'], '30127')
+   _msg['dropoff']['line'], '1234 Daffodil Ln, Gorrel Springs, GA 90727')
+eq('...and what the geography is decided on', _msg['dropoff']['zip'], '90727')
 eq('...and nothing that could be mistaken for a verdict',
    [k for k in ('ready', 'state', 'perHour', 'pay') if k in _msg], [])
 eq('...and a press carries no label', _msg['dropoff']['labelled'], None)
@@ -3817,9 +3817,9 @@ eq('...and a press carries no label', _msg['dropoff']['labelled'], None)
 _said[:] = []
 sys.stdout = _Catch()
 try:
-    SP.emit_dropoff({'line': '12 Made Up Way, Acworth, GA 30101'}, asked=False,
+    SP.emit_dropoff({'line': '12 Made Up Way, Ivyhame, GA 90701'}, asked=False,
                     labelled=True)
-    SP.emit_dropoff({'line': '12 Made Up Way, Acworth, GA 30101'}, asked=True,
+    SP.emit_dropoff({'line': '12 Made Up Way, Ivyhame, GA 90701'}, asked=True,
                     labelled=True)
 finally:
     sys.stdout = _was_stdout
@@ -3835,9 +3835,9 @@ eq('an unpressed address under a Dropoff label goes out labelled \'dropoff\'; a 
 _said[:] = []
 sys.stdout = _Catch()
 try:
-    SP.emit_dropoff({'line': '1000 Quarry Rd NW, Acworth', 'street': '1000 Quarry Rd NW',
-                     'city': 'Acworth', 'place': 'Wrenfield Parking Deck'}, asked=True)
-    SP.emit_dropoff({'line': '12 Made Up Way, Acworth, GA 30101'}, asked=True)
+    SP.emit_dropoff({'line': '1000 Quarry Rd NW, Ivyhame', 'street': '1000 Quarry Rd NW',
+                     'city': 'Ivyhame', 'place': 'Wrenfield Parking Deck'}, asked=True)
+    SP.emit_dropoff({'line': '12 Made Up Way, Ivyhame, GA 90701'}, asked=True)
 finally:
     sys.stdout = _was_stdout
 eq('a press\'s dropoff line carries the stop\'s place, and None where the read gave none',
@@ -3875,7 +3875,7 @@ def _nav_then_address(self, frames, now=None, geom=None):
     """
     _nav_reads[0] += 1
     text = ('Home 22 min ETA 8:41 PM Navigate' if _nav_reads[0] <= 2 else
-            'Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 12 min Start')
+            'Dropoff 1234 Daffodil Ln, Gorrel Springs, GA 90727 12 min Start')
     parsed = OP2.parse(text)
     return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
              'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
@@ -3911,9 +3911,9 @@ eq('the button, pressed, gets a destination out of the loop',
 if run_drop['destinations']:
     _got = run_drop['destinations'][0][0]
     eq('...the one that was on the screen, not the one before it',
-       _got.get('line'), '1234 Daffodil Ln, Powder Springs, GA 30127')
+       _got.get('line'), '1234 Daffodil Ln, Gorrel Springs, GA 90727')
     eq('...with the geography the stacking advice is decided on',
-       (_got.get('city'), _got.get('zip')), ('Powder Springs', '30127'))
+       (_got.get('city'), _got.get('zip')), ('Gorrel Springs', '90727'))
 ok_('...found on a later read than the press, since a still picture '
     'produces none by itself', _nav_reads[0] >= 3)
 eq('...and said exactly once', len(run_drop['destinations']), 1)
@@ -3956,7 +3956,7 @@ def _address_after_two_seconds(self, frames, now=None, geom=None):
     _late_reads.append(time.time())
     text = ('Home 22 min ETA 8:41 PM Navigate'
             if time.time() - _late_reads[0] < 2.0 else
-            'Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 12 min Start')
+            'Dropoff 1234 Daffodil Ln, Gorrel Springs, GA 90727 12 min Start')
     parsed = OP2.parse(text)
     return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
              'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
@@ -4006,7 +4006,7 @@ eq('...and an address it finds there is a destination, unasked',
 if run_nodrop['destinations']:
     eq('...the one that was on the screen',
        run_nodrop['destinations'][0][0].get('line'),
-       '1234 Daffodil Ln, Powder Springs, GA 30127')
+       '1234 Daffodil Ln, Gorrel Springs, GA 90727')
     # Marked as a sighting rather than an answer. The receiving end treats the
     # two differently: a press is the driver saying "this screen is the
     # destination" and overrules what the card said; an unprompted sighting may
@@ -4055,9 +4055,9 @@ eq('...and nothing here was refused for carrying a payout either',
 #
 #   text on the screen                       pay   address  street-shaped  count
 #   'Home 22 min ETA 8:41 PM Navigate'       none  no       no             0
-#   'Dropoff 3100 Esquire Dr N ...'          none  no       YES            1
-#   '... Daffodil Ln, Powder Springs, GA'    none  YES      no             0
-#   '... Daffodil Ln Powder Springs, GA'     none  YES      YES            0
+#   'Dropoff 3100 Elquine Dr N ...'          none  no       YES            1
+#   '... Daffodil Ln, Gorrel Springs, GA'    none  YES      no             0
+#   '... Daffodil Ln Gorrel Springs, GA'     none  YES      YES            0
 #
 # The last row is the one nothing reached. A comma after the street suffix is
 # what STREET_ENDS is looking for the ABSENCE of — it exists to find where a
@@ -4076,7 +4076,7 @@ eq('a screen with neither a street nor an address is not counted',
    _drop_health and _drop_health.street_seen_no_address, 0)
 
 _both_reads = [0]
-_BOTH = 'Dropoff 1234 Daffodil Ln Powder Springs, GA 30127 12 min Start'
+_BOTH = 'Dropoff 1234 Daffodil Ln Gorrel Springs, GA 90727 12 min Start'
 
 
 def _street_and_address(self, frames, now=None, geom=None):
@@ -4133,7 +4133,7 @@ if run_drop['destinations']:
 #
 # A press is a question. A question asked twice gets answered twice.
 _asked_reads = [0]
-_ASKED_NAV = 'Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 12 min Start'
+_ASKED_NAV = 'Dropoff 1234 Daffodil Ln, Gorrel Springs, GA 90727 12 min Start'
 
 
 def _address_every_time(self, frames, now=None, geom=None):
@@ -4178,7 +4178,7 @@ eq('the button, pressed twice for one address, answers twice',
 if len(run_twice['destinations']) == 2:
     eq('...with the address both times, not a blank second answer',
        [(d[0] or {}).get('line') for d in run_twice['destinations']],
-       ['1234 Daffodil Ln, Powder Springs, GA 30127'] * 2)
+       ['1234 Daffodil Ln, Gorrel Springs, GA 90727'] * 2)
     eq('...both marked as asked for', [d[1].get('asked')
                                        for d in run_twice['destinations']],
        [True, True])
@@ -4216,7 +4216,7 @@ if len(run_twice['destinations']) == 2:
 # Verbatim off this driver's shift, and one of the five. Loaded rather than
 # retyped: a hand-copied card with the junk cleaned out of it would be a
 # different card, and the junk is why the reader sees what it sees.
-_CARD_WITH_ADDRESS = '; 0} Coy tree mL er\n3 ¥? Delivery § Exclusiv x :\n$8.40\n_ Guaranteed (incl. tip)\n© 21min (6.2 mi) total\nZaxbys (2603 E West Connector\nl Austell, GA 30106)\nPhillips Dr SW & Smith Ave SW,\n} Marietta\nmw Accept 4\n_—< ze'
+_CARD_WITH_ADDRESS = '; 0} Coy tree mL er\n3 ¥? Delivery § Exclusiv x :\n$8.40\n_ Guaranteed (incl. tip)\n© 21min (6.2 mi) total\nZaxbys (2603 E West Connector\nl Vantell, GA 90706)\nPhillips Dr SW & Smith Ave SW,\n} Harrowen\nmw Accept 4\n_—< ze'
 _shot = OP2.parse(_CARD_WITH_ADDRESS)
 ok_('the card really does yield an address, or this proves nothing',
     bool(_shot.get('address')))
@@ -4229,7 +4229,7 @@ def _offer_card_then_address(self, frames, now=None, geom=None):
     """The offer card twice, then the navigation screen."""
     _card_reads[0] += 1
     text = (_CARD_WITH_ADDRESS if _card_reads[0] <= 2 else
-            'Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 12 min Start')
+            'Dropoff 1234 Daffodil Ln, Gorrel Springs, GA 90727 12 min Start')
     parsed = OP2.parse(text)
     return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
              'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
@@ -4250,7 +4250,7 @@ eq('the destination is read, not the card that was still on the phone',
 if run_card['destinations']:
     eq('...and it is the address the driver brought up',
        run_card['destinations'][0][0].get('line'),
-       '1234 Daffodil Ln, Powder Springs, GA 30127')
+       '1234 Daffodil Ln, Gorrel Springs, GA 90727')
 ok_('...found past the card, so the card really was offered and refused',
     _card_reads[0] >= 3)
 
@@ -4258,15 +4258,15 @@ ok_('...found past the card, so the card really was offered and refused',
 # A screen with a PAYOUT on it is an offer, not a destination — with or without
 # a press. That test is the whole of what makes looking safe, and taking the
 # window away must not have taken it with it. Five of the 900 card texts on file
-# yield an address, off a merchant's branch: `800 Forrest St NW, Atlanta, GA
-# 30318` is a Delivery card, not a place anybody is going.
+# yield an address, off a merchant's branch: `800 Garrest St NW, Solvane, GA
+# 90818` is a Delivery card, not a place anybody is going.
 _paid_reads = [0]
 
 
 def _address_with_a_payout(self, frames, now=None, geom=None):
     _paid_reads[0] += 1
     text = ('$12.00 Guaranteed 23 min (4.6 mi) total Pickup '
-            'Wingstop 800 Forrest St NW, Atlanta, GA 30318')
+            'Wingstop 800 Garrest St NW, Solvane, GA 90818')
     parsed = OP2.parse(text)
     return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
              'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
@@ -4280,7 +4280,7 @@ run_paid = run(TC.uberx_screen(), seconds=8.0, appear_at=10_000.0,
                press_dropoff=False, until=_then(lambda st: _paid_reads[0] >= 2, 0.5))
 ok_('the card really did carry an address to be tempted by',
     OP2.parse('$12.00 Guaranteed 23 min (4.6 mi) total Pickup '
-              'Wingstop 800 Forrest St NW, Atlanta, GA 30318').get('address')
+              'Wingstop 800 Garrest St NW, Solvane, GA 90818').get('address')
     is not None)
 eq('...and a screen with a payout on it is never taken as a destination',
    len(run_paid['destinations']), 0)
@@ -4301,7 +4301,7 @@ ok_('...over a run that really did read it', _paid_reads[0] >= 2)
 # lost payout — a navigation screen names none.
 _lost_reads = [0]
 _LOST = ('Guaranteed 23 min (4.6 mi) total Pickup '
-         'Wingstop 800 Forrest St NW, Atlanta, GA 30318')
+         'Wingstop 800 Garrest St NW, Solvane, GA 90818')
 
 
 def _payout_lost_to_glare(self, frames, now=None, geom=None):
@@ -4361,11 +4361,11 @@ def _street_but_no_address(self, frames, now=None, geom=None):
     """A navigation screen whose label carries no town, state or ZIP.
 
     Which is exactly what the driver photographed: their own map label read
-    `3100 Esquire Dr N`. find_address refuses it, and should — `89 Shanty
+    `3100 Elquine Dr N`. find_address refuses it, and should — `89 Gristy
     Drive` is a background map label that would pass the same loose rule.
     """
     _bare_reads[0] += 1
-    text = 'Dropoff 3100 Esquire Dr N 14 min Start'
+    text = 'Dropoff 3100 Elquine Dr N 14 min Start'
     parsed = OP2.parse(text)
     return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
              'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
@@ -4375,7 +4375,7 @@ def _street_but_no_address(self, frames, now=None, geom=None):
 
 
 eq('the premise: a street with no town, state or ZIP is refused',
-   OP2.parse('Dropoff 3100 Esquire Dr N 14 min Start').get('address'), None)
+   OP2.parse('Dropoff 3100 Elquine Dr N 14 min Start').get('address'), None)
 run_bare = run(TC.uberx_screen(), seconds=8.0, extra_argv=['--no-parallel'],
                look=_street_but_no_address, press_dropoff=False,
                until=_then(lambda st: _bare_reads[0] >= 2 and st['health'] is not None
@@ -4418,7 +4418,7 @@ ok_('[no address] litter read through the loop is counted apart from the screens
 
 
 def _slow_address(self, frames, now=None, geom=None):
-    text = 'Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 12 min Start'
+    text = 'Dropoff 1234 Daffodil Ln, Gorrel Springs, GA 90727 12 min Start'
     parsed = OP2.parse(text)
     # _REAL_SLEEP, not time.sleep. run() replaces time.sleep with one that caps
     # every wait at 10ms — that is how the loop is driven quickly — and a stub
@@ -4449,7 +4449,7 @@ eq('a destination found by a read that outlived its window is still the answer',
 if run_slow['destinations']:
     eq('...and it is the address that was read',
        run_slow['destinations'][0][0].get('line'),
-       '1234 Daffodil Ln, Powder Springs, GA 30127')
+       '1234 Daffodil Ln, Gorrel Springs, GA 90727')
 
 
 # --- ⌖ over Uber's Trip Planner ----------------------------------------------
@@ -4466,7 +4466,7 @@ def _stop(kind, street=None, city=None, line=None):
             'zip': None, 'line': line}
 
 
-_KESTREL = _stop('dropoff', '4821 Kestrel Dr', 'Marietta', '4821 Kestrel Dr, Marietta')
+_KESTREL = _stop('dropoff', '4821 Kestrel Dr', 'Harrowen', '4821 Kestrel Dr, Harrowen')
 _was_stdout, sys.stdout = sys.stdout, io.StringIO()
 try:
     SP2.emit_planner([_KESTREL], keep=True, ms={'total': 5}, at=1234)
@@ -4538,13 +4538,13 @@ run_planner = run(TC.planner_screen(), seconds=SP2.DROPOFF_WINDOW + 4.0,
 eq('a drawn Trip Planner read through the real reader answers ⌖ with its stop',
    [[(s['kind'], s['expectedBy'], s['line']) for s in p[0]]
     for p in run_planner['planners']],
-   [[('dropoff', 978, '4821 Kestrel Dr, Marietta')]])
+   [[('dropoff', 978, '4821 Kestrel Dr, Harrowen')]])
 _asp = assembled(run_planner['sightings'])
 eq('...both ends of its list read, so nothing is left unfiled',
    [_asp['byAt'].get(str(p[1].get('at')), '<no verdict>')
     for p in run_planner['planners']][:1], [None])
 eq('...and its one dropoff goes out as the order\'s destination, asked for',
-   [tuple(d) for d in _asp['dropoffs']][:1], [('4821 Kestrel Dr, Marietta', True)])
+   [tuple(d) for d in _asp['dropoffs']][:1], [('4821 Kestrel Dr, Harrowen', True)])
 eq('...and nothing on the screen was taken for an offer',
    (run_planner['ready'], run_planner['announced'],
     [r for r in run_planner['rows'] if not r.get('kind')]), ([], [], []))
@@ -4561,7 +4561,7 @@ eq('a drawn Trip Planner with its title off the top of the frame answers ⌖ wit
    [([(s['kind'], s['line']) for s in p[0]],
      assembled(run_cut['sightings'])['byAt'].get(str(p[1].get('at'))))
     for p in run_cut['planners']],
-   [([('dropoff', '4821 Kestrel Dr, Marietta')], 'list')])
+   [([('dropoff', '4821 Kestrel Dr, Harrowen')], 'list')])
 eq('...and gives the order in the car no destination off it',
    ([(d[0] or {}).get('line') for d in run_cut['destinations']],
     assembled(run_cut['sightings'])['dropoffs']), ([], []))
@@ -4575,9 +4575,9 @@ eq('...and gives the order in the car no destination off it',
 # says which app's card it is, which screen (Uber's add-on card is held as
 # part of the trip it joins) and its "Deliver by". Invented street.
 _nav_text = ('Deliver to Pat Q.\n4 min © 0.6 mi\nExpected by 8:20 PM\n'
-             '4821 Kestrel Dr, Marietta, GA 30060')
-_nav = said(lambda: SP.emit_dropoff({'line': '4821 Kestrel Dr, Marietta, GA 30060',
-                                     'street': '4821 Kestrel Dr', 'city': 'Marietta'},
+             '4821 Kestrel Dr, Harrowen, GA 90660')
+_nav = said(lambda: SP.emit_dropoff({'line': '4821 Kestrel Dr, Harrowen, GA 90660',
+                                     'street': '4821 Kestrel Dr', 'city': 'Harrowen'},
                                     asked=True, text=_nav_text))['dropoff']
 eq('a dropoff line says the app, the screen and the one time the screen prints',
    (_nav.get('app'), _nav.get('screen'), _nav.get('expectedBy')),
@@ -4607,9 +4607,9 @@ eq('...and the parser\'s word that the card is Uber\'s add-on, which the screen 
    ((_aw.get('screen'), _aw.get('addon')), _dd.get('addon')), (('uber.offer', True), False))
 # ...and a navigation screen's sighting carries that time on its one stop, so
 # the assembler can attribute a navigation destination read with no press.
-_nav_seen = SP.sighting(_nav_text, None, {'line': '4821 Kestrel Dr, Marietta, GA 30060',
-                                          'street': '4821 Kestrel Dr', 'city': 'Marietta',
-                                          'state': 'GA', 'zip': '30060'}, False, True)
+_nav_seen = SP.sighting(_nav_text, None, {'line': '4821 Kestrel Dr, Harrowen, GA 90660',
+                                          'street': '4821 Kestrel Dr', 'city': 'Harrowen',
+                                          'state': 'GA', 'zip': '90660'}, False, True)
 eq('a navigation screen\'s sighting carries the screen\'s one "Expected by" on its stop',
    [(s['kind'], s['expectedBy']) for s in _nav_seen['stops']], [('dropoff', 20 * 60 + 20)])
 
@@ -4633,12 +4633,12 @@ def _framed(text):
 
 
 eq('screen_address: Uber\'s bar over the opened sheet is not an offer, and the sheet '
-   'is read', _framed(_SHEET_BAR), (False, None, '4416 Wrenfield Dr NW, Kennesaw'))
+   'is read', _framed(_SHEET_BAR), (False, None, '4416 Wrenfield Dr NW, Tellmoor'))
 eq('screen_address: ...and an address straight under the bar is read without the bar '
-   'in its street', _framed('o= 6 min © 1.7 mi —\n2950 Kestrel Dr\nWoodstock, GA 30188'),
-   (False, '2950 Kestrel Dr, Woodstock, GA 30188', None))
+   'in its street', _framed('o= 6 min © 1.7 mi —\n2950 Kestrel Dr\nMarrowick, GA 90788'),
+   (False, '2950 Kestrel Dr, Marrowick, GA 90788', None))
 eq('screen_address: a payout is an offer, navigation or not',
-   _framed('o= 6 min © 1.7 mi —\nDeliver to\n2950 Kestrel Dr\nWoodstock, GA 30188\n'
+   _framed('o= 6 min © 1.7 mi —\nDeliver to\n2950 Kestrel Dr\nMarrowick, GA 90788\n'
            '$12.50\nAccept')[0], True)
 eq('screen_address: a frame with a payout reads no sheet',
    _framed(_SHEET_BAR + '\n$12.50\nAccept'), (True, None, None))
@@ -4646,32 +4646,32 @@ eq('screen_address: a frame with a payout reads no sheet',
 # can carry the bar too; it is typed by its own furniture, and its merchant
 # still makes it an offer. Taken out with the bar, the merchant's door would go
 # out as a destination.
-_CARD_OVER_BAR = ('o= 6 min © 1.7 mi —\nFable Grill\n1200 Lantern Rd, Acworth, GA 30101\n'
+_CARD_OVER_BAR = ('o= 6 min © 1.7 mi —\nFable Grill\n1200 Lantern Rd, Ivyhame, GA 90701\n'
                   'Exclusive')
 ok_('the premise: that card is typed an offer, and without the bar it shows no place',
     OP2.screen_type(_CARD_OVER_BAR)['screen'] == 'uber.offer'
     and OP2.parse(OP2.nav_without_bar(_CARD_OVER_BAR))['places'] == [])
 eq('screen_address: a card over the navigation bar that lost its payout is still an offer',
-   _framed(_CARD_OVER_BAR), (True, '1200 Lantern Rd, Acworth, GA 30101', None))
+   _framed(_CARD_OVER_BAR), (True, '1200 Lantern Rd, Ivyhame, GA 90701', None))
 eq('screen_address: a card that lost its payout is still an offer by its merchant',
    _framed('Guaranteed (incl. tip)\n© 29 min (8.7 mi) total\nFable Grill (3295 Lantern '
-           'Pkwy Nw)\n| Birch Dr NW & Kestrel Ln NW, Acworth'), (True, None, None))
+           'Pkwy Nw)\n| Birch Dr NW & Kestrel Ln NW, Ivyhame'), (True, None, None))
 _sheet_seen = SP.sighting(_SHEET_BAR, None, None, False, True,
                           sheet=OP2.sheet_dropoff(_SHEET_BAR))
 eq('the opened sheet\'s sighting types its address a dropoff, under the label it printed',
    [(s['kind'], s['label'], s['line']) for s in _sheet_seen['stops']],
-   [('dropoff', 'dropoff type', '4416 Wrenfield Dr NW, Kennesaw')])
+   [('dropoff', 'dropoff type', '4416 Wrenfield Dr NW, Tellmoor')])
 # ...and the navigation banner's door, read on its own (pipeline's `banner`;
 # the owner's snaps of 12 Nov, places invented): a dropoff, labelled by the
 # band, with the bar's "Expected by"; the screen's own read had marks for it.
 _NAV_UNDER = 'GEE @ oe «ae\nKroger\n40\nLIMIT\no= 3 min © 1.1 mi =\nExpected by 6:37 PM'
 _banner_seen = SP.sighting(_NAV_UNDER, None, None, False, True,
-                           banner=OP2.nav_banner('Fable Mill Rd\n9 2716 Larkspur Ln\nMarietta, GA',
+                           banner=OP2.nav_banner('Fable Mill Rd\n9 2716 Larkspur Ln\nHarrowen, GA',
                                                  _NAV_UNDER))
 eq('the navigation banner\'s door goes on the sighting as a dropoff, labelled by the band',
    [(s['kind'], s['label'], s['line'], s['expectedBy']) for s in _banner_seen['stops']]
    + [_banner_seen['screen']],
-   [('dropoff', 'banner', '2716 Larkspur Ln, Marietta', 18 * 60 + 37), 'uber.nav'])
+   [('dropoff', 'banner', '2716 Larkspur Ln, Harrowen', 18 * 60 + 37), 'uber.nav'])
 eq('...and a sighting with no banner door carries none',
    SP.sighting(_NAV_UNDER, None, None, False, True)['stops'], [])
 # ...and the customer sheet, the same sheet pulled all the way up (17 Oct, the
@@ -4682,7 +4682,7 @@ eq('...and a sighting with no banner door carries none',
 _CSHEET = next(t for n, t in _SHEETS.items()
                if n.startswith('Measured: the customer sheet pulled all the way up'))
 eq('screen_address: the customer sheet is no offer, and its address is read',
-   _framed(_CSHEET), (False, None, '283 Quillon St NW, Smyrna'))
+   _framed(_CSHEET), (False, None, '283 Quillon St NW, Pyrnel'))
 _csheet_seen = SP.sighting(_CSHEET, OP2.find_planner(_CSHEET), None, True, True,
                            sheet=OP2.sheet_dropoff(_CSHEET))
 eq('the customer sheet\'s sighting is navigation with the sheet\'s one dropoff, its place '
@@ -4691,7 +4691,7 @@ eq('the customer sheet\'s sighting is navigation with the sheet\'s one dropoff, 
     [(s['kind'], s['label'], s['line'], s['place'], s['expectedBy'])
      for s in _csheet_seen['stops']]),
    ('uber.nav', None,
-    [('dropoff', 'dropoff type', '283 Quillon St NW, Smyrna', 'Fable Parking Deck', 30)]))
+    [('dropoff', 'dropoff type', '283 Quillon St NW, Pyrnel', 'Fable Parking Deck', 30)]))
 # The 16 Oct shift's planner, its title read "ny. mS" (the shared case; names
 # invented): the sighting says its layout proves it a planner, which the
 # assembler takes in place of the title on an unpressed read.
@@ -4750,7 +4750,7 @@ eq('the 26 Oct card-box read of the trip\'s last stop: a footed, unpressed plann
     [(x['kind'], x['line'], x['place'], x['label']) for x in _box26_seen['stops']],
     SP.auto_read_for(_BOX26, SP.planner_stops(_box26_stops))),
    (True, False, False, 'uber.planner',
-    [('dropoff', '412 Brindle Ave NE, Kennesaw', 'Wrenfield Lofts', 'dropoff')], 'planner'))
+    [('dropoff', '412 Brindle Ave NE, Tellmoor', 'Wrenfield Lofts', 'dropoff')], 'planner'))
 
 # --- what in the card box asks for an unpressed whole-screen read ------------
 #
@@ -4759,17 +4759,17 @@ eq('the 26 Oct card-box read of the trip\'s last stop: a footed, unpressed plann
 # The navigation bar and the store's screen are the 12 Oct shift's layouts;
 # every name and street is invented.
 eq('auto_read_for: the planner in the card box asks as the planner',
-   SP.auto_read_for('Address\n1625 Heron Blvd NW, Kennesaw, GA\n30152\nView details\n'
+   SP.auto_read_for('Address\n1625 Heron Blvd NW, Tellmoor, GA\n90752\nView details\n'
                     'Dropoff • 1 order\nStop New Requests'), 'planner')
 eq('auto_read_for: Uber\'s navigation bar asks as navigation',
    SP.auto_read_for('45\nLIMIT v\no= 6 min © 1.7 mi —\nDeliver to Pat Q.'), 'nav')
 eq('auto_read_for: DoorDash\'s "Dropoff" over an address asks as a label',
-   SP.auto_read_for('Dropoff\n61 Saddlebrook Ln, Acworth, GA 30101\n12 min Start'), 'label')
+   SP.auto_read_for('Dropoff\n61 Haddlecombe Ln, Ivyhame, GA 90701\n12 min Start'), 'label')
 eq('auto_read_for: a store\'s navigation, an address under no label, and the idle map ask '
    'nothing',
-   [SP.auto_read_for('2 Arriving soon =\nFable Grill\n1840 Lantern Dr, Woodstock,\n'
-                     'GA 30189\nNote from business\nPick up in store'),
-    SP.auto_read_for('77 Made Up Ct, Acworth, GA 30101\n12 min Start'),
+   [SP.auto_read_for('2 Arriving soon =\nFable Grill\n1840 Lantern Dr, Marrowick,\n'
+                     'GA 90789\nNote from business\nPick up in store'),
+    SP.auto_read_for('77 Made Up Ct, Ivyhame, GA 90701\n12 min Start'),
     SP.auto_read_for('© Trip Radar @\n5 Finding trips =')], [None, None, None])
 
 # --- the scanner's save keeps what it did not write --------------------------
@@ -4962,7 +4962,7 @@ eq('...cut by the screen\'s left edge, the street alone and said clipped',
 # The card's own store is never the customer's end.
 _ml = _dd_map('2471 Fable Pkwy')
 eq('...a label naming the card\'s own store\'s door is refused',
-   SP.read_map_label(_ml, _MapGeom(_ml), store=['Lark Owl Grill', '2471 Fable Pkwy, Smyr']),
+   SP.read_map_label(_ml, _MapGeom(_ml), store=['Lark Owl Grill', '2471 Fable Pkwy, Pyrn']),
    None)
 # Bounded: low light, a dark-mode map, a whole-screen read and a screen with
 # no corners are not looked at; the clock is held to the cap between reads.
@@ -4996,7 +4996,7 @@ eq('...the band stops at the top of a card box drawn inside it',
 
 # Which readings it is asked for: DoorDash's offer card, its dropoff unknown.
 _dd_card = SP.OP.parse('$12.35 incl. tips\n2 stops (11.2 mi) - 38 min\nLark Owl Grill\n'
-                       '2471 Fable Parkway Southeast, Smyr...\nCustomer dropoff')
+                       '2471 Fable Parkway Southeast, Pyrn...\nCustomer dropoff')
 eq('wants_map_label: DoorDash\'s card with "Customer dropoff", and not an Uber card',
    (SP.wants_map_label(_dd_card),
     SP.wants_map_label(SP.OP.parse('UberX $16.05 3 mins (1.1 mi) away 20 mins (7.3 mi) trip'))),
@@ -5041,7 +5041,7 @@ eq('...and under --no-thread it reads in submit, answering none found', _inline.
 # up.
 _ml = _dd_map('2900 Kestrel Plains Pkwy N...', at=(40, 100))
 _got = SP.read_map_label(_ml, _MapGeom(_ml), store=['Lark Owl Grill',
-                                                    '164 Wren Hollow Pkwy, Brookvale, GA 30066'])
+                                                    '164 Wren Hollow Pkwy, Brookvale, GA 90666'])
 eq('the map label cut by the app\'s ellipsis, read as "...", at the band\'s top left: its street',
    (_got or {}).get('line'), '2900 Kestrel Plains Pkwy N')
 
@@ -5175,7 +5175,7 @@ _thr.close()
 # asks two seconds apart were all spent on the overview; the label is now
 # asked for as long as the card is read, and an ask with no pill to read is
 # no attempt.
-_DD_ONE = (('Lark Owl Tacos', '1761 Fernhill Road Northwest, Atla...'),)
+_DD_ONE = (('Lark Owl Tacos', '1761 Fernhill Road Northwest, Solv...'),)
 
 
 def _dd_one(view, label='286 Wrenfield Dr NW'):
@@ -5185,7 +5185,7 @@ def _dd_one(view, label='286 Wrenfield Dr NW'):
 
 
 _dd_one_card = SP.OP.parse('$7.10\n2 stops (4.8 mi) - 42 min\nLark Owl Tacos\n'
-                           '1761 Fernhill Road Northwest, Atla...\nCustomer dropoff')
+                           '1761 Fernhill Road Northwest, Solv...\nCustomer dropoff')
 _one_stores = SP.label_stores(_dd_one_card)
 eq('label_stores: the card\'s store name and its printed door (as the parser keeps it), '
    'each once', _one_stores, ['Lark Owl Tacos', '1761 Fernhill Road Northwest'])

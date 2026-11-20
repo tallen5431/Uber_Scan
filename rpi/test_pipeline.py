@@ -1260,10 +1260,10 @@ if TC.available():
     _nav = look(TC.nav_banner_screen(), whole=True)
     ok_('[banner] a whole-screen read of the navigation reads its banner (%r)'
         % (_nav['banner'],), '2716 Larkspur Ln' in (_nav['banner'] or '')
-        and 'Marietta, GA' in (_nav['banner'] or ''))
+        and 'Harrowen, GA' in (_nav['banner'] or ''))
     eq('[banner] ...and the customer\'s door comes off it',
        (OP2.nav_banner(_nav['banner'], _nav['text']) or {}).get('line'),
-       '2716 Larkspur Ln, Marietta')
+       '2716 Larkspur Ln, Harrowen')
     ok_('[banner] ...its read timed apart from the card\'s (%r ms)' % _nav['ms']['banner'],
         isinstance(_nav['ms']['banner'], float))
     _store = look(TC.nav_banner_screen(TC.NAV_STORE, 'Next pickup'), whole=True)

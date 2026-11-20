@@ -201,6 +201,53 @@
     return o.gpsWhy || 'unjudged';
   }
 
+  /* --- where a map opens ---------------------------------------------------
+   *
+   * Leaflet wants a centre the moment a map is made, before a single place is
+   * looked up. All three maps used to open on one metro, written into each
+   * page: a real place in a public repository, and the wrong place for any
+   * driver who is not that one. They open on what the page already holds
+   * instead (the owner, 20 Nov 2026): the newest fix the gate passed, or the
+   * ends of what it is about to draw. Only with nothing at all, a wide neutral
+   * view, the whole of the lower 48: a picture of "nothing here yet" rather
+   * than a guess at a city. Every page fits to its pins or its dot right after,
+   * as it always did; this is only the frame before that.
+   *
+   * No home is stored for it. A remembered position would be the same metro
+   * again, written into a browser rather than a file. */
+  var NEUTRAL_VIEW = { center: [39.8, -98.6], zoom: 4 };
+
+  // The first of `candidates` that is a position, at `zoom`; or the neutral
+  // view. A candidate is { lat, lon } (fixOf's shape), [lat, lon] (Leaflet's),
+  // or null for "the page has none of this kind".
+  function openingView(candidates, zoom) {
+    var list = candidates || [];
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      if (!c) continue;
+      var lat = Array.isArray(c) ? c[0] : c.lat;
+      var lon = Array.isArray(c) ? c[1] : c.lon;
+      if (typeof lat === 'number' && typeof lon === 'number' && isFinite(lat)
+          && isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+        return { center: [lat, lon], zoom: zoom || 12 };
+      }
+    }
+    return { center: NEUTRAL_VIEW.center.slice(), zoom: NEUTRAL_VIEW.zoom };
+  }
+
+  // The newest row's position, by its `at`, among those fixOf passes; null for
+  // none. A row with no `at` loses to one with any.
+  function newestFix(rows) {
+    var best = null, bestAt = -Infinity;
+    (rows || []).forEach(function (o) {
+      var at = fixOf(o);
+      if (!at) return;
+      var t = typeof o.at === 'number' && isFinite(o.at) ? o.at : -Infinity;
+      if (best === null || t > bestAt) { best = at; bestAt = t; }
+    });
+    return best;
+  }
+
   /* --- you are here --------------------------------------------------------
    *
    * The heartbeat's newest fix, drawn as a dot with a circle the size of its
@@ -310,7 +357,7 @@
    * them at all, so there is nothing in the string itself to locate them by.
    *
    * The cards already know the answer. Across that week the place names carry a
-   * trailing town 517 times — Atlanta 119, Marietta 85, Kennesaw 68, Acworth
+   * trailing town 517 times — Solvane 119, Harrowen 85, Tellmoor 68, Ivyhame
    * 40 — and every one of them is the same metro. So this is not a guess about
    * geography: it is reading back the town the rig already parsed off the
    * driver's own cards.
@@ -350,7 +397,7 @@
     var asWritten = v.slice(at, at + town.length);
     if (!/[a-z]/.test(asWritten)) return null;
     // Title case, because this is what the ranking prints and the rule
-    // lowercases to compare. "Powder Springs", not "powder springs".
+    // lowercases to compare. "Gorrel Springs", not "gorrel springs".
     return town.replace(/(^|[\s'-])([a-z])/g, function (_, before, c) {
       return before + c.toUpperCase();
     });
@@ -677,27 +724,27 @@
    * candidates in a box round the card's disc, keep the ones inside it, and
    * use one only when exactly one fits or every one that fits is the same
    * place. Measured on the real install (Georgia, 4.5): McDonald's in a box
-   * round Marietta answered ten branches, every one inside the box with a
+   * round Harrowen answered ten branches, every one inside the box with a
    * house number and a street. Handed limit=1, as the public path is, it
    * would have pinned whichever of the ten came first.
    *
    * WHAT IS ASKED, by the shape of the place string (searchPlan):
    *
-   *   "Jimmy John's (1985 Cobb Parkway NW)"  a door in the bracket: the
-   *        street= search for "1985 Cobb Parkway NW". The name is not asked:
+   *   "Jimmy John's (1985 Vosk Parkway NW)"  a door in the bracket: the
+   *        street= search for "1985 Vosk Parkway NW". The name is not asked:
    *        the address is the more exact of the two.
-   *   "Shadowood Pkwy SE, Atlanta"            street= "Shadowood Pkwy SE";
-   *   "4821 Kestrel Dr, Marietta"             the town is NOT sent, and NOT
-   *        the Trip Planner's door line too.   used. Measured: q=Shadowood
-   *                                            Pkwy SE, Atlanta, GA found 0
-   *        and the street alone in the box found 2, in Cumberland. Uber's
-   *        town is the postal town and OSM's is the place (Atlanta against
-   *        Cumberland; Marietta against Kennesaw for 1985 Cobb Parkway). It
+   *   "Gloamwood Pkwy SE, Solvane"            street= "Gloamwood Pkwy SE";
+   *   "4821 Kestrel Dr, Harrowen"             the town is NOT sent, and NOT
+   *        the Trip Planner's door line too.   used. Measured: q=Gloamwood
+   *                                            Pkwy SE, Solvane, GA found 0
+   *        and the street alone in the box found 2, in Hollowmere. Uber's
+   *        town is the postal town and OSM's is the place (Solvane against
+   *        Hollowmere; Harrowen against Tellmoor for 1985 Vosk Parkway). It
    *        was kept as a tie-break among candidates inside the disc, and that
-   *        is the same mistake one step later. Probed: Shadowood Parkway in
-   *        Cumberland and a namesake 1.35 mi off whose OSM address said
-   *        Atlanta, both inside a 3.0 mi card's disc, and the card's
-   *        "Atlanta" pinned the namesake — chosen by the one word the real
+   *        is the same mistake one step later. Probed: Gloamwood Parkway in
+   *        Hollowmere and a namesake 1.35 mi off whose OSM address said
+   *        Solvane, both inside a 3.0 mi card's disc, and the card's
+   *        "Solvane" pinned the namesake — chosen by the one word the real
    *        install showed disagrees with OSM. Two that fit and disagree are
    *        a refusal, whatever the card's town says.
    *        A street with a house number is a door: it is pinned only where
@@ -706,7 +753,7 @@
    *        confidence, and that was pinned as the door.
    *   "A & B, Town"                           cross streets: a and b, asked of
    *        the NucBox's street index (NbxSearch.corner), never of Nominatim,
-   *        which answers ONE point for a whole street (Cobb Parkway NW came
+   *        which answers ONE point for a whole street (Vosk Parkway NW came
    *        back as one result), so the corner of two cannot be asked of it.
    *        With no street index set this says so rather than pinning one
    *        street; three names, or an empty one, are not a corner.
@@ -714,7 +761,7 @@
    *        stretch inside the disc (NbxSearch.stretch), not Nominatim's one
    *        point for it.
    *   anything else                           the merchant's name, q=, with
-   *        a trailing "(Plaza)" or "(Town)" dropped — "Kroger (Shiloh
+   *        a trailing "(Plaza)" or "(Town)" dropped — "Kroger (Merlah
    *        Square)" is asked as Kroger, and the disc chooses among them.
    *
    * "Uber's abbreviations are fine" is measured too: Pkwy and SE are matched
@@ -722,10 +769,10 @@
   /* What is SEARCHED for a place, which is not always what was read.
    *
    * A ⌖ read off a navigation screen can come back with OCR litter in front of
-   * the door: the rig held "ss be 4 1610 Ridenour Blvd, Kennesaw, GA 30144"
+   * the door: the rig held "ss be 4 1610 Hidemoor Blvd, Tellmoor, GA 90744"
    * as the end of the order in the car (the coordinator's /api/status, taken
    * on shift after the pins went). searchPlan cut that at the comma and asked
-   * for a street called "ss be 4 1610 Ridenour Blvd" with no door, which no
+   * for a street called "ss be 4 1610 Hidemoor Blvd" with no door, which no
    * NucBox holds, and the public map was handed the whole string; either way
    * the held end had no pin, and the next card took off the glass the one
    * pin that had stood for it (see heldForPanel in server.js).
@@ -733,8 +780,8 @@
    * The rule is a shape, not a place: a run of short tokens that do not
    * start with a capital ("ss", "be", "4", "•"), at most three characters
    * each, in front of a house number and a capitalised word, is dropped. A
-   * street that has a number in its NAME keeps it — "Hwy 92 Bypass", "US 41",
-   * "Old 41 Hwy" all start with a capital, so nothing is in front to drop.
+   * street that has a number in its NAME keeps it — "Hwy 63 Bypass", "US 41",
+   * "Old 88 Hwy" all start with a capital, so nothing is in front to drop.
    * Applied to the search only: the place keeps its text as read, in the
    * journal, on the hold and in the caption, and every place is searched by
    * this one rule, the card's and the held order's alike. */
@@ -880,8 +927,8 @@
    *
    * "It would be better if the map tried to route something or anything it
    * can." 15:00 that day, one Uber order held: its end the card's corner
-   * "<A> Flat Ct & <B> Rd, Marietta" (no house number), the planner's pickup
-   * read "Kennesaw" alone, and nothing was routed. Map view's run — the held
+   * "<A> Flat Ct & <B> Rd, Harrowen" (no house number), the planner's pickup
+   * read "Tellmoor" alone, and nothing was routed. Map view's run — the held
    * order's, and the offer's own trip — now goes down a ladder and stops at
    * the first rung it can stand on:
    *
@@ -1466,7 +1513,7 @@
    * So this is the name: the text before the bracket searchPlan reads as the
    * door (searchText's leading noise off first, as searchPlan's), or null
    * when the place is no "<Store> (<n> <street>)" — a bare door, a name with
-   * no bracket, a bracket with no house number ("Kroger (Shiloh Square)",
+   * no bracket, a bracket with no house number ("Kroger (Merlah Square)",
    * DoorDash's "Wasabi (2 orders)") — or the name before it holds no word of
    * three letters. Handed as `store` by the callers that know the place is
    * the card's PICKUP (live.html's pickupStore, server.js pickupAsks and the
@@ -1517,7 +1564,7 @@
    * store's own number, which no map carries. A card can print the merchant's
    * label for one branch rather than its name — "Papa John's Store 3317" in
    * the parser's corpus (tests/fixtures/cases.json), "Papa John's Store 181
-   * 4" with the number read in pieces, "AtHome - 0020-Kennesaw" — and asked
+   * 4" with the number read in pieces, "AtHome - 0020-Tellmoor" — and asked
    * for the whole of that, the name OSM holds ("Papa John's", "At Home") is
    * not what was asked. The tail goes: " Store" and its number (in pieces or
    * not, "#" or not), or " - " and a number with a town after it or none.
@@ -1608,11 +1655,11 @@
 
   /* Whether an answer is the door asked for, not just its street. Nominatim
      writes a house number as its own part of display_name, first for a bare
-     address ("1985, Cobb Parkway, Kennesaw, ..." — the real install's three
-     answers for 1985 Cobb Parkway) and second after a named place
-     ("McDonald's, 1155, Roswell Street Northeast, ..."); a street answered
+     address ("1985, Vosk Parkway, Tellmoor, ..." — the real install's three
+     answers for 1985 Vosk Parkway) and second after a named place
+     ("McDonald's, 1155, Ruswold Street Northeast, ..."); a street answered
      for a door it does not hold has no number there ("Kestrel Drive,
-     Marietta, ..."). Only those first two parts are read: the postcode is a
+     Harrowen, ..."). Only those first two parts are read: the postcode is a
      bare number too, and always after the town and county. */
   function hasDoor(hit, house) {
     var parts = String(hit.name || '').toLowerCase().split(/\s*,\s*/).slice(0, 2);
@@ -1853,10 +1900,10 @@
 
   /* When candidates are the same place. A door or a branch is one point, and
      a building and its node can both come back, a few yards apart: a fifth of
-     a mile. A street with no number is answered as its pieces — Shadowood
-     Parkway came back twice, both in Cumberland — and its pin stands for the
+     a mile. A street with no number is answered as its pieces — Gloamwood
+     Parkway came back twice, both in Hollowmere — and its pin stands for the
      street, not a door: a mile. Both are chosen, not measured; the real
-     install's two Shadowood answers were not recorded with their spacing. */
+     install's two Gloamwood answers were not recorded with their spacing. */
   var AGREE_MI = 0.2;
   var STREET_AGREE_MI = 1.0;
 
@@ -1875,7 +1922,7 @@
    * even if it is not exact as long as it gets the general area right for
    * the use case of trip planning." The snap that day: an Uber order held,
    * its card's fix good to ±26 m and its disc 14.9 mi, the Trip Planner's
-   * door "<number> <Name> Mill Rd SE, Marietta". The NucBox answered TWO
+   * door "<number> <Name> Mill Rd SE, Harrowen". The NucBox answered TWO
    * doors of that number inside the disc a few hundred metres apart — drawn
    * as two orange circles almost touching — and pickInDisc refused them as
    * 'several' (two doors are not one place at AGREE_MI), so nothing was
@@ -2658,7 +2705,7 @@
      quadrant or none). The words and the word left out, or null. */
   /* ...BUT NEVER A DESIGNATOR. "Ext", "Conn", "Spur", "Byp", "Alt", "Bus" are
      short words after a type too, and they are the road's own name: "1450
-     <Name> Springs Rd Ext, Canton" asked as "1450 <Name> Springs Rd" is the
+     <Name> Springs Rd Ext, Belvan" asked as "1450 <Name> Springs Rd" is the
      BASE road, and retryFits took its 1450 (review of 6 Nov, invented) — a
      door pin on another road and the GPS drop armed on it, where none was
      only the timer and Drop. So a recognised designator (DESIGNATORS) is
@@ -2784,10 +2831,10 @@
   /* --- the door asked again, a directional inside the name the other way -----
    *
    * The owner's fault of 20 Oct 2026, 21:08: an Uber order's pickup "Outback
-   * Steakhouse (810 Ernest West Barrett Parkway)" and the Trip Planner's "810
-   * Ernest West Barrett Parkway, Kennesaw" were never pinned (pickupsWhy 'no
+   * Steakhouse (810 Osbert West Tallett Parkway)" and the Trip Planner's "810
+   * Osbert West Tallett Parkway, Tellmoor" were never pinned (pickupsWhy 'no
    * house number'). Uber spells out the road's middle initial; OSM names it
-   * "Ernest W Barrett Parkway Northwest", and the NucBox's Nominatim found the
+   * "Osbert W Tallett Parkway Northwest", and the NucBox's Nominatim found the
    * road by the spelled-out name and not the door (pickInDisc 'nodoor', the
    * street inside the disc) — the case retryWanted leaves alone, because the
    * type word is not the trouble there.
@@ -2795,10 +2842,10 @@
    * So where the street was found INSIDE the disc and not the door (dirWanted,
    * exactly the 'nodoor' retryWanted refuses), and the street as printed has a
    * directional word inside its name — after its first name word, so never
-   * the name's opening word ("West Paces Ferry Rd" is asked as printed) — or a
+   * the name's opening word ("West Tolls Ferry Rd" is asked as printed) — or a
    * quadrant last, the door is asked ONCE more with each such word written
    * the other way (dirRetry: West <-> W, North <-> N, East <-> E, South <-> S,
-   * Northwest <-> NW and the other three; "810 Ernest W Barrett Parkway"). An
+   * Northwest <-> NW and the other three; "810 Osbert W Tallett Parkway"). An
    * answer is taken only at door level, inside the disc, alone or agreeing,
    * on the same street (pickRetry: retryFits with a directional and its letter
    * one word, `retry.dirs`, then the same type family or none, then a quadrant
@@ -2875,7 +2922,7 @@
   /* --- the door by the one street the street index says the name as read is
    *
    * The owner's fault of 19 Oct 2026 (night): the Trip Planner's dropoff
-   * "1106 <Name> Ln, Marietta" read off a dark grayscale frame as "L106
+   * "1106 <Name> Ln, Harrowen" read off a dark grayscale frame as "L106
    * <Nam..>" — the type gone, the name's last word cut and the letter at the
    * cut misread — and filed "1106 <Nam..>". The NucBox's search found nothing
    * ('none', "not inside the card's reach"), streetRetry had no type word to
@@ -2956,7 +3003,7 @@
    *      (pickInDisc, AGREE_MI), from a list not cut at the limit.
    *
    * The town is NOT sent with it. The real install answered a question with
-   * the card's town after a comma with nothing ("Shadowood Pkwy SE, Atlanta":
+   * the card's town after a comma with nothing ("Gloamwood Pkwy SE, Solvane":
    * AUDITS.md, the Done entry on the NucBox's arrival; tests/fake-nucbox.js
    * answers any such q with nothing), and a campus's postal town is the
    * likeliest of all not to be OSM's — so the disc does the town's work, as it
@@ -3229,8 +3276,8 @@
 
   /* --- the stretch of a street inside the disc ------------------------------
    *
-   * The street index answers a numberless street ("Shadowood Pkwy SE,
-   * Atlanta") as its polylines inside the disc's box, each [[lat, lon], ...];
+   * The street index answers a numberless street ("Gloamwood Pkwy SE,
+   * Solvane") as its polylines inside the disc's box, each [[lat, lon], ...];
    * these keep the parts inside the disc itself and choose a point on them.
    * Flat geometry in miles round one origin for the projections — over a
    * disc a few miles across that is well under a hundredth of a mile from
@@ -4006,7 +4053,7 @@
      which" two ways at once, a few hundred lines apart.
 
      Measured through the real accumulator over the owner's week: 12 of 1,166
-     readings drew the arrow backwards — `Happy Hawg BBQ (Hiram)` as the
+     readings drew the arrow backwards — `Happy Hawg BBQ (Telby)` as the
      destination of a delivery that starts there — and 182 drew a three- or
      four-stop chain for a job with two ends, because the union holds every
      reading of every name.
@@ -4076,8 +4123,8 @@
    * It printed "<town> is N of M towns here, median $X/hr" — the POSITION from
    * the hour-held order and the NUMBER from the raw one, in one clause, under
    * a sidebar that spends a paragraph saying those are different questions.
-   * On the owner's week, "any time", the default view: Kennesaw is 3rd at
-   * $15.32 and Woodstock 4th at $15.80, Acworth 5th at $14.01 and Marietta 6th
+   * On the owner's week, "any time", the default view: Tellmoor is 3rd at
+   * $15.32 and Marrowick 4th at $15.80, Ivyhame 5th at $14.01 and Harrowen 6th
    * at $14.62. Two of the 36 pairs read backwards, and a driver tapping two
    * pins to compare towns reads an ordinal and a figure as one fact. (Six of
    * 36 before the ranking's baseline stopped including the town itself; the
@@ -4742,7 +4789,7 @@
     var asked = this.search(plan, disc);
     // ...and a door whose street was found inside the disc and not the door,
     // once more with a directional inside its name written the other way
-    // (dirRetry, dirWanted; the 20 Oct "Ernest West Barrett" fault), as the
+    // (dirRetry, dirWanted; the 20 Oct "Osbert West Tallett" fault), as the
     // server asks it for the held end and its pickups.
     var dir = disc ? dirRetry(plan) : null;
     if (dir) {
@@ -5447,10 +5494,10 @@
    * horizon, which is civil twilight. Twice round, so the declination and
    * the equation of time are taken at the moment found rather than at noon.
    *
-   * The DAY is the solar day at that longitude, not the UTC date: Atlanta's
+   * The DAY is the solar day at that longitude, not the UTC date: Solvane's
    * summer dusk is 01:20 UTC, so a UTC date would have called 20:30 EDT
    * night (dawn of the next UTC day still ahead). Measured against the
-   * published tables in tests/mapview.test.js: within a minute in Atlanta.
+   * published tables in tests/mapview.test.js: within a minute in Solvane.
    *
    * Not a figure on the panel and not from a lookup — the header's rule is
    * about places; this is the sun at a fix the rig already has.
@@ -5911,6 +5958,7 @@
            civilTwilight: civilTwilight, nightFor: nightFor,
            detour: detour, detourThrough: detourThrough, stopOrder: stopOrder,
            fixOf: fixOf, fixRefused: fixRefused,
+           NEUTRAL_VIEW: NEUTRAL_VIEW, openingView: openingView, newestFix: newestFix,
            cardFix: cardFix, fixLine: fixLine, cardYardstick: cardYardstick,
            againstCard: againstCard, cardRefuses: cardRefuses,
            SLACK_MI: SLACK_MI, roughCentre: roughCentre,

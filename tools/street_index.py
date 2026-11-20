@@ -4,13 +4,14 @@
 Run ON THE NUCBOX (Ubuntu 24.04), where the extract is:
 
     sudo apt install osmium-tool
-    python3 tools/street_index.py ~/osrm/georgia-latest.osm.pbf ~/streets.json
+    python3 tools/street_index.py ~/osrm/georgia-latest.osm.pbf ~/streets.json \
+        --bbox W,S,E,N
 
 and set NUCBOX_STREETS_FILE=~/streets.json in the environment of the NucBox's
 own server.js (README, "The NucBox at home"). Nothing here downloads
 anything: it reads the file it is given.
 
-WHAT IT KEEPS. Every way inside the driver's metro (BBOX, below) that is a
+WHAT IT KEEPS. Every way inside the box --bbox names that is a
 street a car is driven on (KEEP) and has a name. Three osmium-tool commands
 cut the file to that area, to those ways, and write each way with its nodes'
 coordinates on it (OPL, osmium's line-per-object text); this reads that text
@@ -20,7 +21,8 @@ and each way as its names and its nodes. Coordinates are integers of a
 millionth of a degree, each the difference from the one before, which is what
 keeps the file small. Python's standard library only.
 
-    --bbox W,S,E,N   another area (degrees)
+    --bbox W,S,E,N   the area, in degrees: the driver's metro, every town the
+                     cards name with a margin (required)
     --opl FILE       read osmium's OPL from FILE instead of running osmium
                      (the suites use it where osmium is not installed)
     --keep-opl FILE  keep osmium's OPL there too (how tests/fixtures/
@@ -39,10 +41,11 @@ import time
 
 FORMAT = 'uberscan-streets/1'
 
-# Every town the week's 1,166 cards name, Cartersville and White in the north-
-# west to Suwanee and Lithonia in the east and Union City in the south, with a
-# margin: a card's disc reaches its own distance past where the car was.
-BBOX = (-85.00, 33.50, -83.95, 34.40)
+# The area is the driver's to give, every time: every town the cards name, with
+# a margin, since a card's disc reaches its own distance past where the car
+# was. It was a default here, the metro this was built in, written out in
+# degrees — a real place in a public repository, and the wrong box for any
+# other driver (privacy2, 20 Nov 2026). Asked for instead, never stored.
 
 # The streets a car is driven on, and so the ones Uber names a corner by.
 # `service` is kept: only NAMED ways are kept at all, and a named service way
@@ -164,15 +167,17 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('source', help='the .osm.pbf (or .osm) to read')
     ap.add_argument('out', help='where to write the index (JSON)')
-    ap.add_argument('--bbox', help='W,S,E,N in degrees (default: the metro)')
+    ap.add_argument('--bbox', required=True,
+                    help="W,S,E,N in degrees: the driver's metro, with a margin")
     ap.add_argument('--opl', help="read osmium's OPL from this file instead")
     ap.add_argument('--keep-opl', help="keep osmium's OPL in this file too")
     a = ap.parse_args(argv)
-    bbox = BBOX
-    if a.bbox:
+    try:
         bbox = tuple(float(v) for v in a.bbox.split(','))
-        if len(bbox) != 4:
-            sys.exit('--bbox is W,S,E,N')
+    except ValueError:
+        bbox = ()
+    if len(bbox) != 4:
+        sys.exit('--bbox is W,S,E,N')
     t0 = time.time()
     work = None
     try:

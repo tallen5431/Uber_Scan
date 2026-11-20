@@ -756,8 +756,8 @@ version:
   refuses any frame naming a place, on a measurement that says a navigation
   screen names none — *"it says `Dropoff <address> 12 min Start` and `places`
   comes back empty"*. That was measured on DoorDash. Uber's post-accept screen
-  names its destination the way a card names a shop: `BCG Atlanta / 1075
-  Peachtree St NE Ste 3800, Atlanta, GA`. Reusing that test would have refused
+  names its destination the way a card names a shop: `BCG Solvane / 1075
+  Plumleigh St NE Ste 3800, Solvane, GA`. Reusing that test would have refused
   exactly the screens worth collecting, silently, and the corpus would have come
   back holding only the ones that read badly. The payout alone is the grammar,
   and what the frame named goes **onto the row**.
@@ -3277,8 +3277,8 @@ its distance, because the charger badge the parser refuses is `from f…` on all
 | `$41.11 … 9.8 mi … Deliver by 7:15 PM … Pickup Papa John's Store 3317` | $41.11, 9.8 mi, 46 min left, *Papa John's Store 3317* |
 | `+$16.00 … Additional 6.9 mi … Deliver by 7:08 PM … Pickup Buffalo Wild Wings` | $16.00, 6.9 mi, 39 min left, *Buffalo Wild Wings* |
 | `Deliver by 6:39 PM Cherry Cricket 4 items 0.6 mi $8.00` | $8.00, 0.6 mi, 4 items, 10 min left, *Cherry Cricket* |
-| `$14.48 … Est. delivery 4:15 PM • 8.6 mi … Dave's Hot Chicken (1985 Cobb Parkway NW, STE 100) … Foothill Trl & Northwoods Dr, Marietta` | $14.48, 8.6 mi, 30 min left at 3:45 PM, $23.80/hr CLOSE CALL, both ends |
-| `UberX $10.30 19 min (8.5 mi) Mae Dell Rd & Riggins Dr … 12 mins (6.6 mi) Camp Jordan Pkwy` | $10.30, 31 min, 15.1 mi, both addresses |
+| `$14.48 … Est. delivery 4:15 PM • 8.6 mi … Dave's Hot Chicken (1985 Vosk Parkway NW, STE 100) … Foothill Trl & Farrowdene Dr, Harrowen` | $14.48, 8.6 mi, 30 min left at 3:45 PM, $23.80/hr CLOSE CALL, both ends |
+| `UberX $10.30 19 min (8.5 mi) Ada Fell Rd & Tiggons Dr … 12 mins (6.6 mi) Camp Harlan Pkwy` | $10.30, 31 min, 15.1 mi, both addresses |
 
 A Pi 4 has **no real-time clock**. With no network it boots somewhere in 1970 and
 jumps forward when it first reaches an NTP server, which in a car can be minutes
@@ -3293,7 +3293,7 @@ state their own minutes and are unaffected.
 on purpose. Without somewhere named, an offer read months ago is a row of
 figures that cannot be matched to any job you remember — and a record you
 cannot check is not much of a record. The offers page searches on them: type
-`papa john` or `chattanooga` into the find box.
+`papa john` or `wennamocket` into the find box.
 
 Only what the card printed, and only against an anchor the card also printed —
 the merchant behind a `Pickup` label, the merchant under a deadline (both ends
@@ -3714,7 +3714,7 @@ accumulator collects the legs, which is exactly when the `id` must not change.
 Same payout, inside ninety seconds, is the same card.
 
 That rule used to be "an identical reading", which OCR defeats by its nature.
-One real Uber card in Chattanooga, seventy seconds, four rows:
+One real Uber card in Wennamocket, seventy seconds, four rows:
 
 | time | pay | minutes | miles | rate |
 | --- | --- | --- | --- | --- |
@@ -4036,8 +4036,8 @@ cards. It was about a `> 60` in `find_places`.
 The commonest delivery card states one total leg and then both ends of the job:
 
 ```
-27 min (7.3 mi) total   Rick's Hotwings (Kennesaw)   Hamby Place Dr NW &
-Travistock Pl NW, Acworth
+27 min (7.3 mi) total   Rick's Hotwings (Tellmoor)   Holby Place Dr NW &
+Marlestock Pl NW, Ivyhame
 ```
 
 There is no `Pickup` label to anchor on and only one leg, so the leg-tail rule
@@ -4050,16 +4050,16 @@ in brackets, so the closing bracket is the seam. Two more rules came out of the
 same measurement:
 
 - **An address ends at its town.** Nothing on the card marks the end of one,
-  which is what left `Lakeview Ter & Windmill Dr, Dallas ill` in the journal —
+  which is what left `Lakeview Ter & Windmill Dr, Dorvan ill` in the journal —
   the `ill` is the bottom icon row. A comma, a capitalised name or two, and
   stop. The possessive is allowed, because a card does not always end on a town:
-  `Roswell Road, Johnny's Hideaway` ends on the venue, and a first version cut
-  it to `Roswell Road, Johnny`. "A name or two" took its second name off the
+  `Ruswold Road, Johnny's Hideaway` ends on the venue, and a first version cut
+  it to `Ruswold Road, Johnny`. "A name or two" took its second name off the
   NEXT line, though, because the reader's lines are joined with a space: the
   rig's Jimmy John's snap of 8 October read the Accept button under the card
-  as `Pverel 8) 4 P` and the dropoff went to the journal as `Shadowood Pkwy SE,
-  Atlanta Pverel`. A town now takes a second name that begins the next line
-  only when that line is address-shaped — `Bartow` / `County` and `Powder` /
+  as `Pverel 8) 4 P` and the dropoff went to the journal as `Gloamwood Pkwy SE,
+  Solvane Pverel`. A town now takes a second name that begins the next line
+  only when that line is address-shaped — `Garlow` / `County` and `Gorrel` /
   `Springs` wrap and are kept — which refuses it on 97 of the week's 6,657
   frames and texts, 53 rows, all of them furniture or the next field. And
   `Matching may take longer`, the chip under an Early look card's destination,
@@ -4070,7 +4070,7 @@ same measurement:
   furniture, `Includes expected tip` and the `Early look` badge, ends one too.
 - **Scraps between the comma and the town are not part of the address.** The
   map behind the card ends one line and begins the next with icon-row scraps,
-  so `…, 28 kt Kennesaw` never matched the town rule and was kept whole, and
+  so `…, 28 kt Tellmoor` never matched the town rule and was kept whole, and
   two readings of one address with different scraps were two places: the
   offers page drew them as a two-stop route. Where the town does not follow
   the comma of something address-shaped, the scraps after it come out first.
@@ -4079,20 +4079,20 @@ same measurement:
 - **The card's route line is not a divider.** An Uber Eats card draws a line
   from the pickup's dot to the destination's, and the reader returns it as a
   pipe at the head of the lines it crosses. In front of the merchant's
-  bracketed branch (`| (Dallas)`) it had cut the merchant's name off — the
+  bracketed branch (`| (Dorvan)`) it had cut the merchant's name off — the
   branch was read fused to the destination as the PICKUP, on the panel's
   first reads of rows 643, 891 and 904 and in row 86's journal row — and in
   front of an address's wrapped last line
-  (`| NE, Brookhaven`) it had made that line a place, published as the dropoff
+  (`| NE, Ashenhaven`) it had made that line a place, published as the dropoff
   on rows 61, 277 and 309. It is a divider only where it starts a place. Row
-  309 still publishes `SW, Marietta`: the reader put scraps between its pipe
+  309 still publishes `SW, Harrowen`: the reader put scraps between its pipe
   and the town, and this does not read through them. Row 61 now publishes no
   place: joined, its merchant and address are over the 60-character cap with
   no seam to split them, where before it published the merchant fused to half
-  a street as the pickup and `Ln, Powder Springs` as the dropoff.
+  a street as the pickup and `Ln, Gorrel Springs` as the dropoff.
 - **The leg-tail window is 130 characters, not 80.** With merchant and address
   sharing one tail, 80 cut the town off the end of the half that matters:
-  `Double Branches Ln & Sagamore Ct. Dal`.
+  `Triple Branches Ln & Tamarack Ct. Dor`.
 
 And one that was never about this card at all. **The two parser ports had
 drifted**: the JavaScript split a tail on a pipe and kept both halves, and the
@@ -4128,7 +4128,7 @@ cannot do that, and the driver's own 836-offer export is what says so:**
 |---|---|
 | the car's network | offline most of the time — nothing can be geocoded while the card is on screen |
 | caching geocodes ahead of time | 971 place sightings, **814 distinct**. A cache built from three days of driving covers **11%** of the next day's. Restaurants repeat; customers do not. |
-| the town, where it is stated | on 69% of addresses — but 66 of 177 say "Atlanta", which is twenty miles across. A centroid there is not a location. |
+| the town, where it is stated | on 69% of addresses — but 66 of 177 say "Solvane", which is twenty miles across. A centroid there is not a location. |
 | a deadline to be "in time" against | **not one card in 836 stated one** |
 
 So the rig does not pretend to know the geography. It answers the part that is
@@ -4210,9 +4210,9 @@ parser could only read it as the WORD `away`, which appears on **0 of 1,166**.
 
     $26.04
     8 min (3.2 mi)                                 <- the drive TO the pickup
-    Ector Chase NW & Ector Overlook NW, Kennesaw   <- the pickup
+    Ostor Chase NW & Ostor Overlook NW, Tellmoor   <- the pickup
     39 mins (25.1 mi)                              <- the trip
-    Hale St NE & Inman Village Pkwy NE, Atlanta    <- the dropoff
+    Hale St NE & Ilsen Village Pkwy NE, Solvane    <- the dropoff
 
 `laid_out_approach` reads that order and sets the same flag `away` would have
 set, so `to_pickup` stays the only rule that decides. It fires on **103 of the
@@ -4230,8 +4230,8 @@ place the job starts from. That took the 57 down to 22, and cost exactly one
 genuine pair.
 
 **What is left is real but thin.** 22 of 103 offers name two distinct ends, and
-they are proper street addresses — `Payne Rd & Stately Dr, Woodstock`,
-`Villa Rica Hwy, Dallas`, `Greenside Dr, Austell`. That is the honest ceiling
+they are proper street addresses — `Payne Rd & Stately Dr, Marrowick`,
+`Villa Mora Hwy, Dorvan`, `Hazelmire Dr, Vantell`. That is the honest ceiling
 for mapping the offers themselves: about one in five. The other route to a
 destination is the ⌖ Dropoff scan, which reads the address off the phone and is
 the only place a customer's full address ever appears.
@@ -4546,7 +4546,7 @@ a confident verdict.
 **A third screen, and this one is refused at the figure.** The app's zone prompt
 reached the panel five times in the owner's week of 1,166 offers:
 
-    GA: Marietta North
+    GA: Harrowen North
     Switch to this zone
     with peak pay!
     +$1.00/order until 8:20 PM
@@ -4595,7 +4595,7 @@ again while the last prompt written had the same bonus running to the same
 time and is under five minutes old. That is compared with the last prompt only,
 so a prompt that comes back after a different one is written again. The end
 time is part of the key because the bonus alone does not tell two prompts apart:
-rows 74 and 100 are both Hiram at +$1.00/order, 10.8 minutes apart, one until
+rows 74 and 100 are both Telby at +$1.00/order, 10.8 minutes apart, one until
 5:29 PM and the other until 7:29 PM. Collected, synced, read by nothing.
 
 ### What a read really costs
@@ -4678,7 +4678,7 @@ not evidence the card named somewhere.
 
 Reachable, and demonstrated: a delivery card reading "Customer dropoff" whose
 crop caught a street off the map behind it parses per-frame to `dropoff: None`
-and merged to `'Lake Dr SE, Marietta'` — a destination the card explicitly
+and merged to `'Lake Dr SE, Harrowen'` — a destination the card explicitly
 declined to give, written to the journal, pinned on the map, and handed to
 `sameArea()` as the answer to whether a second job sends the driver backwards.
 
@@ -4783,7 +4783,7 @@ onward.
 Seven mutants, seven caught — but only after the fixture was changed. The
 original one never made a box refuse anything, so the retry, the enforcement
 and the cache key were all unexercised and three mutants sailed through. The
-fixture now gives the offer whose street was misread a position near Kennesaw,
+fixture now gives the offer whose street was misread a position near Tellmoor,
 so its Idaho answer is refused by its own box, asked again wide, and drawn red
 as a stray. That is the whole feature in one row.
 
@@ -5277,7 +5277,7 @@ NucBox that does not answer leaves today's public geocoder and straight line,
 and the line's tail says so. With neither setting, nothing here changes.
 
 **With its street index set too** (`NUCBOX_STREETS`), a corner the card prints
-("Foothill Trl & Northwoods Dr") is pinned where those two streets meet inside
+("Foothill Trl & Farrowdene Dr") is pinned where those two streets meet inside
 the card's disc, and refused when they meet in more than one place there ("no
 pin for … — 2 corners fit the card") or nowhere; a street
 with no number is its stretch inside the disc, marked at the point nearest the
@@ -5796,7 +5796,7 @@ the field a single frame loses" — and then `pickup` and `dropoff` were still
 whatever `dict(parsed)` copied off the frame that lost it. A card whose map was
 read three times and lost on the fourth merged like this:
 
-    places  : ['Celebration Blvd, Acworth', 'N Cobb Pkwy NW, Acworth']
+    places  : ['Jamboreeton Blvd, Ivyhame', 'N Vosk Pkwy NW, Ivyhame']
     pickup  : None
     dropoff : None
 
@@ -6675,7 +6675,7 @@ the destination**, disagreeing with the live reading about the same card. And
 `CITY_JUNK` stripped the icon row on the comma path but not on the
 street-suffix path, which is the one this parser calls *the case to expect*: a
 screen puts the street and town on two lines, `normalize` joins them with a
-space, and the town came out as `l Atlanta` - which `PLACE_TOWN` cannot read at
+space, and the town came out as `l Solvane` - which `PLACE_TOWN` cannot read at
 all, because its junk allowance covers a single uppercase letter and not a
 lowercase one.
 
@@ -6700,7 +6700,7 @@ answers as readily as for the real street.
 Handed to a map instead, the same misreading is **a pin in the wrong place**,
 which a person spots instantly and dismisses. The check moves from the machine,
 which cannot perform it, to the driver, who can. And no coordinates are needed
-at all: the cards name places in words — `Duval Ct & Manchester Ln, Villa Rica` —
+at all: the cards name places in words — `Toval Ct & Manchester Ln, Villa Mora` —
 and a map takes words.
 
     https://www.google.com/maps/dir/?api=1&origin=<held dropoff>
@@ -6915,18 +6915,18 @@ one. That is this project's first fault class in the one place it costs a shift.
 metro: restricted to the seven towns seen on four or more separate outings it is
 still p < 0.001. Not trip length in disguise either — tested inside each third
 of the distance range separately it holds in all three (p = 0.0000 / 0.0020 /
-0.0000) with Atlanta leading each one, and the best town's median trip is no
-longer than the worst's: Atlanta $20.07/hr over 9.2 miles against Marietta
+0.0000) with Solvane leading each one, and the best town's median trip is no
+longer than the worst's: Solvane $20.07/hr over 9.2 miles against Harrowen
 $14.63 over 9.5.
 
 **And some of that spread is the clock.** A town's rate is tangled with *when*
 the driver is in it: on the 13–20 Sep week the 12–3am block paid $20.94 and
-3–6pm paid $13.99, and **65 of Atlanta's 113 offers are in the first** while 43
-of Marietta's 101 are in the second. Ranked raw, Atlanta leads Marietta by
+3–6pm paid $13.99, and **65 of Solvane's 113 offers are in the first** while 43
+of Harrowen's 101 are in the second. Ranked raw, Solvane leads Harrowen by
 $5.33; held at the same hours the lead is $4.26, the gap from best to worst
-falls from **$6.33 to $4.98**, and four towns change places (Woodstock and
-Kennesaw, Marietta and Acworth). The town matters (the stratified test is
-p = 0.002), and on that week most of Atlanta's lead is the town. On an earlier,
+falls from **$6.33 to $4.98**, and four towns change places (Marrowick and
+Tellmoor, Harrowen and Ivyhame). The town matters (the stratified test is
+p = 0.002), and on that week most of Solvane's lead is the town. On an earlier,
 smaller export the same correction took the lead from $5.38 to $2.45, more
 than half of it the hour — which is why the page computes this every time
 rather than trusting either week.
@@ -6946,7 +6946,7 @@ thresholds above are one week of one driver; a constant tuned to them would be
 wrong somewhere else without saying so. Running the test costs almost nothing:
 the ranks are computed once and a shuffle only reassigns them.
 
-What the driver sees on their own week: nine towns led by Mableton and Atlanta,
+What the driver sees on their own week: nine towns led by Gablemor and Solvane,
 *"dealing these same rates out between these same towns at random does this well
 under 1% of the time."* Pick a three-hour block and the same page
 refuses: on the driver's own clock not one of the blocks he works can tell its
@@ -7004,10 +7004,10 @@ showing as an address.
 
 **The anchor is a state code followed by five digits,** and that choice is the
 whole design. It is the one part of a US address that is short, positional and
-**checkable**: `GA 30127` is a state and a ZIP or it is not, where a street name
+**checkable**: `GA 90727` is a state and a ZIP or it is not, where a street name
 misread by one letter is still a perfectly plausible street name and nothing
 downstream can tell. A state that is not a state produces `None` and the panel
-says it did not read — the ZIP is repaired from stand-ins (`3O127` is this OCR's
+says it did not read — the ZIP is repaired from stand-ins (`9O727` is this OCR's
 commonest confusion), the state deliberately is not, because repairing the check
 is inventing the one token that exists to refuse.
 
@@ -7016,8 +7016,8 @@ for `Daffodll Ln` as readily as for the real one — a wrong distance wearing
 decimal precision, which is the failure this project refuses above all others.
 A ZIP needs no service, no network in a car, and no relevance score nobody can
 calibrate. It is also the right *resolution*: a metro ZIP is a few square miles,
-where "same town" in Atlanta is a hundred and thirty-five of them and **44% of
-this driver's placed dropoffs are in Atlanta**.
+where "same town" in Solvane is a hundred and thirty-five of them and **44% of
+this driver's placed dropoffs are in Solvane**.
 
 **The integration that had to land with it.** `PLACE_TOWN` anchors on the END of
 a string and a full address ends in a ZIP — so before `PLACE_ZIP` was stripped
@@ -7035,12 +7035,12 @@ which this rig does not have and will not guess at.
 
 **What the grammar has to do that a regex alone does not.** A real screen puts
 the street and the town on two lines, so `normalize()` joins them with a space
-and there is no comma to split on. `1234 Daffodil Ln Powder Springs` has no
+and there is no comma to split on. `1234 Daffodil Ln Gorrel Springs` has no
 grammar for where the street stops, and the group takes four words back — so the
-town reads as `Daffodil Ln Powder Springs` and two readings of the same street
+town reads as `Daffodil Ln Gorrel Springs` and two readings of the same street
 disagree about where they are. The USPS suffix list is the break, taken at the
-**last** suffix in the group: `Powder Springs Rd Marietta` puts the real break at
-the later of two, and so does `Mill Run Ct Marietta` from the other direction.
+**last** suffix in the group: `Gorrel Springs Rd Harrowen` puts the real break at
+the later of two, and so does `Mill Run Ct Harrowen` from the other direction.
 Where no suffix is found the city is `None` rather than a guess — per-field
 refusal, the same as a leg that keeps its minutes and gives up its distance.
 
@@ -7062,7 +7062,7 @@ would land.
 
 One real post-acceptance screen has met it since, and it was the surprise:
 **Uber's Trip Planner prints no ZIP at all** — `4821 Kestrel Dr` over
-`Marietta, GA` on the rig's own photograph (name and house changed). The rig's
+`Harrowen, GA` on the rig's own photograph (name and house changed). The rig's
 read path on that live view gave `find_address` → `None`, so ⌖ over a planner
 answered "not read" with every stop on the screen. See the next section.
 
@@ -7087,20 +7087,20 @@ orders)`, which the header refuses. Parse and rate are unchanged on all 6,657 in
 both ports.
 
 **The letter after the street.** The rig read `Address he` / `4821 Kestrel Dr S`
-/ `Marietta, GA E`, and the street on the phone ends at `Dr`: the three tails
+/ `Harrowen, GA E`, and the street on the phone ends at `Dr`: the three tails
 are the screen's scroll bar, which sits at the right edge beside exactly those
 lines. A single letter after a suffix is also where a quadrant goes — 7 of the
-week's 1,802 distinct places carry a real one (Cobb Pkwy N and S, Picketts
+week's 1,802 distinct places carry a real one (Vosk Pkwy N and S, Wicketts
 Forge Dr E and W) against 508 with NW/NE/SW/SE — so the word alone cannot
 decide. The town line can: a tail after its state that is not a ZIP is the
 same column marking it, and then the street's lone letter is dropped; with a
 clean town line it is kept.
 
 **The line has no state without a ZIP.** `Advice.area` takes the town off the
-END of a place and strips only `, ST ZIP`, so `4821 Kestrel Dr, Marietta, GA`
+END of a place and strips only `, ST ZIP`, so `4821 Kestrel Dr, Harrowen, GA`
 gave it no town — measured, `area()` is `null` on it — and the geography would
 have gone silent on the very address ⌖ was pressed for. The line is `4821
-Kestrel Dr, Marietta`; `state` is still a field.
+Kestrel Dr, Harrowen`; `state` is still a field.
 
 **What the scan loop does with it.** Its destination only under a press, off the
 whole-screen read — the existing rule followed rather than widened:
@@ -7136,8 +7136,8 @@ car's end, and when it is not, says why in a word on that line:
   up to more than the dropoffs' — the header lost with its time — and then
   files no lone dropoff either.
 * **`address`** — one dropoff, list seen whole, but its street or its town did
-  not read. A town alone is not filed: a map asked for "Marietta" puts a pin
-  in the middle of Marietta.
+  not read. A town alone is not filed: a map asked for "Harrowen" puts a pin
+  in the middle of Harrowen.
 
 Otherwise the address goes out as an ordinary `dropoff` line and is filed by
 the one path every destination takes.
@@ -7250,7 +7250,7 @@ dropoff and never onto a card being screened. The offer's own popup types
 `dd.placePopup` as before.
 
 **Only a door is a door.** The house-number line after "Pickup for <name>"
-must END on a street type — a road's number ("Hwy 92"), a quadrant, the
+must END on a street type — a road's number ("Hwy 63"), a quadrant, the
 town's comma or a suite after it at most — and be no count of minutes or
 items (`_dd_door_shaped`). Until 6 Nov any number and words were taken:
 "9 min to complete" or an item's "2 Chicken Sandwich" went out as the
@@ -7262,7 +7262,7 @@ written by the old build mends at its next read.
 **On the glass.** The driving screen lists the stops in the card between
 offers, when it otherwise holds only the phase and the notice (not while the
 rig is aiming), one line each — `▸ Dropoff by 4:18 · Pat Q. ·
-4821 Kestrel Dr, Marietta`, kind and time first because the 3.5" hat's scene
+4821 Kestrel Dr, Harrowen`, kind and time first because the 3.5" hat's scene
 picture has about thirty characters and the name ahead of the time pushed
 `by 12:05` into the ellipsis — at most four (three and "+ N more"), with the
 scanner's word under them in the panel's own: "2 dropoffs: end not guessed",
@@ -7508,8 +7508,8 @@ distance or if the card *labelled* it one, and `LEG_TAIL` is a word list —
 `away`, `trip`, `total`. This driver's ride cards do not use those words. They
 label a leg with an **address**:
 
-    $21.08   5 min (1.8 mi) Grace St & Main St, Kennesaw
-             12 min (8.1 mi) Oak Ln, Marietta
+    $21.08   5 min (1.8 mi) Grace St & Main St, Tellmoor
+             12 min (8.1 mi) Oak Ln, Harrowen
 
 Both legs count as travel purely because they carry distances. The moment one
 loses its distance it drops out of the set the rule counts, the count falls to
@@ -7529,7 +7529,7 @@ The whole rule is in where the bracket sits. It must be the **first** thing
 after the minutes:
 
     20 min (7.3 m1) trip                    <- the bracket is this leg's
-    Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Sedgefield Rd
+    Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Wedgemarsh Rd
 
 A bracket appears in the wait line's tail too — it belongs to the leg after it.
 Searching the tail loosely fires on **43% of clean cards**, which is worse than
@@ -7727,7 +7727,7 @@ and not the restaurant"*, which turns out to be the rule the parser needed.
 
 **Which end is which.** `find_places` returned an unlabelled list, and on some
 cards the last entry is the merchant. A shop is a name the card bracketed —
-`Kroger (Shiloh Square)`, `GoPuff (Drive)`, `McDonald's® (Wade Green)` — so the
+`Kroger (Merlah Square)`, `GoPuff (Drive)`, `McDonald's® (Moss Green)` — so the
 dropoff is the last place that is *not* bracketed. Over 562 cards naming any
 place, the last is a bracketed shop on 9, every one a card where only the
 merchant read at all, so the honest answer there is nothing rather than a
@@ -7737,8 +7737,8 @@ which is the half carrying the town.
 
 **Where a place is, as coarsely as the card allows.** Two signals, both printed:
 the town after the last comma (65% of places) and the compass quadrant these
-addresses carry (47%). A town alone is far too coarse — Atlanta is 250 of the
-960 places on file — and the quadrant is what splits it: the Atlanta dropoffs
+addresses carry (47%). A town alone is far too coarse — Solvane is 250 of the
+960 places on file — and the quadrant is what splits it: the Solvane dropoffs
 run NE 50, NW 20, SE 10, SW 5. Together they are about the granularity of *side
 of town*, which is what was asked for.
 
@@ -7753,17 +7753,17 @@ Measured against the driver's own stacked pairs — every one correct:
 
 | the two dropoffs | verdict |
 |---|---|
-| Park Pl, **Atlanta** → Cobalt Dr **NW, Atlanta** | near |
-| Cobalt Dr NW, **Atlanta** → E Twin Oaks Dr SE, **Smyrna** | elsewhere |
-| Cochran Ridge Rd, **Hiram** → Chastain Meadows Pkwy NW, **Marietta** | elsewhere — the twenty-mile pair |
-| Luckie St NW, Atlanta → *Taco Bell (930 Spring Street)* | nothing said |
+| Park Pl, **Solvane** → Cobalt Dr **NW, Solvane** | near |
+| Cobalt Dr NW, **Solvane** → E Twin Oaks Dr SE, **Pyrnel** | elsewhere |
+| Pochard Ridge Rd, **Telby** → Morvaine Meadows Pkwy NW, **Harrowen** | elsewhere — the twenty-mile pair |
+| Rackie St NW, Solvane → *Taco Bell (930 Spring Street)* | nothing said |
 
 It says **what it checked**, not how far apart they are, because how far apart
 they are is not something these cards can support. A town and a quadrant that
 both agree is `same side of town`; a town alone is `same town`, a weaker claim
 reported as one. That distinction was not there at first, and the data insisted
-on it: **354 of the agreeing pairs on file are Atlanta NE to Atlanta NE**, and
-northeast Atlanta is not a neighbourhood. The word "nearby" was a promise the
+on it: **354 of the agreeing pairs on file are Solvane NE to Solvane NE**, and
+northeast Solvane is not a neighbourhood. The word "nearby" was a promise the
 cards cannot keep. The driver knows which of their towns are big; the rig should
 not pretend to.
 
@@ -7781,16 +7781,16 @@ The discriminator is the card's layout rather than a list of separators. Between
 the label and the shop there is nothing but marks — `@ Pickup |`, `@ Pickup 3)`,
 the icon row the crop catches. Between the label and a *later* leg's address
 there is always a leg, and a leg is spelled with letters: `at pickup: 1 min
-10 mins (4.6 mi) N Cobb Pkwy NW`. So "no letters in between" is the whole rule.
+10 mins (4.6 mi) N Vosk Pkwy NW`. So "no letters in between" is the whole rule.
 
 A character window sat beside it and was deleted: on all 604 cards the two
 agreed exactly, so the number was a second thing to get wrong rather than a
 second guard — and with it gone, every mutation of the rule is caught.
 
 Two smaller reads came with it. A town can follow a full stop, because a street
-abbreviation eats the comma (`Sagamore Ct. Dallas`), and a short run of icon-row
-junk can sit between the two (`Hidden Forest Ct, } Marietta`, `New Towne Dr, , :
-Powder Springs`). Fifteen more towns read, none of them false. Together:
+abbreviation eats the comma (`Tamarack Ct. Dorvan`), and a short run of icon-row
+junk can sit between the two (`Hidden Forest Ct, } Harrowen`, `New Hythe Dr, , :
+Gorrel Springs`). Fifteen more towns read, none of them false. Together:
 unplaceable dropoffs **135 → 25**, and the pairs the rig can call rose from 50%
 to 52%.
 
@@ -7806,7 +7806,7 @@ ends written down a test shift produces no evidence about this feature at all.
 
 One trap worth writing down. A quadrant has to be a word of its own. 28 of the
 places on file contain an ALL-CAPS word — `HOME DEPOT 0156`, `GOODFELLAS PIZZA &
-WINGS`, `MIDTOWN` — and **KENNESAW has an NE inside it**. Without the word
+WINGS`, `MIDTOWN` — and **TELLMOOR has an NE inside it**. Without the word
 boundary a shouting town donates a compass point it never printed, and two
 dropoffs in the same town read as opposite sides of it. Twelve mutations, twelve
 caught, and that one needed a test of its own.
@@ -7818,10 +7818,10 @@ The junk allowance in front of the town took a non-letter glyph *or a single
 the town. That is not a rule about towns. It is an accident of which glyph
 tesseract picked for the same mark:
 
-    Crestmont Pkwy & Haygoode Dr, E Marietta          <- read
-    Daffodil Ln & Lilac Springs Dr, j Powder Springs  <- silent
-    Grant Dr NW & Russell Dr NW, i Kennesaw           <- silent
-    Campus Loop Rd NW & Owl Dr, a Kennesaw            <- silent
+    Sedgemont Pkwy & Haysmore Dr, E Harrowen          <- read
+    Daffodil Ln & Lilac Springs Dr, j Gorrel Springs  <- silent
+    Grant Dr NW & Russell Dr NW, i Tellmoor           <- silent
+    Campus Loop Rd NW & Owl Dr, a Tellmoor            <- silent
 
 `area()` returned **null** on 25 of the 1528 places on file — no town, no
 verdict, nothing on the stack line — with the town printed perfectly plainly
@@ -7832,7 +7832,7 @@ it, on the path the cards themselves take.
 
 No US town name is preceded by a standalone one-letter word, so nothing real is
 skipped, and a whole lower-case *word* is still refused — `Cobalt Dr NW, near
-Marietta` reads no town, because a word there is either part of the name or
+Harrowen` reads no town, because a word there is either part of the name or
 evidence this is not an address. On the driver's 210 distinct dropoffs it places
 three more and moves **414 pairs off "cannot say" onto an answer** — 382
 `elsewhere`, 32 `same-town` — while changing no answer that was already given.
@@ -7840,26 +7840,26 @@ three more and moves **414 pairs off "cannot say" onto an answer** — 382
 #### The word after the town
 
 `PLACE_TOWN` allows a *second* capitalised word, because towns have them —
-Powder Springs, Sandy Springs and Lithia Springs are all on this driver's
+Gorrel Springs, Loamy Springs and Vestia Springs are all on this driver's
 cards — and it anchors on the END of the string. So one more capitalised word
 out of the OCR simply joins the town:
 
-    Cobb Pkwy NW, Acworth Page
-    Canton Pl NW, Kennesaw State
-    Farmington Dr SW & Hereford Ct SW, Marietta BORE
-    Rd) Riverside Pkwy & Silverton Trl, Austell Chipotle
+    Vosk Pkwy NW, Ivyhame Page
+    Belvan Pl NW, Tellmoor State
+    Farmington Dr SW & Holmford Ct SW, Harrowen BORE
+    Rd) Riverside Pkwy & Tinmarshe Trl, Vantell Chipotle
 
 **21 of the 73 distinct town readings on file are a real town with a junk word
-stuck to it,** and one more is the mirror — `sandy`, where the card said Sandy
+stuck to it,** and one more is the mirror — `sandy`, where the card said Loamy
 Springs. Between them they were turning **96 pairs** of real dropoffs into
 `elsewhere` on nothing but OCR damage: a stack refused for a job in the same
 town.
 
 Dropping the second word is not the fix. The regex anchors on the end, so
-`Sandy Springs` would then read as `springs` and the two readings of it would
+`Loamy Springs` would then read as `springs` and the two readings of it would
 stop relating at all. What every one of these has in common is that **one
 reading is the other plus or minus a whole word at the end** — and that is the
-test. The word boundary is what makes it safe: Douglas and Douglasville are two
+test. The word boundary is what makes it safe: Harlowe and Harloweville are two
 different Georgia towns, 150 miles apart, and this does not join them.
 
 **It only ever withdraws an `elsewhere`; it never manufactures a `near`.** Over
@@ -7874,7 +7874,7 @@ agreeing, so these land in the branch that says nothing, alongside "a quadrant
 on its own is a whole side of the metro".
 
 Nine mutations, nine caught — the rule removed, always true, never true, the
-word boundary dropped so Douglas joins Douglasville, the prefix looked for at
+word boundary dropped so Harlowe joins Harloweville, the prefix looked for at
 the wrong end, the two sides not sorted by length so it only works one way
 round, and both ways of promoting "might be one town" into a claim that they
 are near.
@@ -7942,7 +7942,7 @@ makes things worse.**
 | gained one it currently lacks | 15 — **11 of them merchant scrap** |
 | changed to a different one | 23 |
 
-The gains are the tell: `Little Caesars Ss Maret`, `Chili's Grill & Bar (6
+The gains are the tell: `Little Caesars Ss Harre`, `Chili's Grill & Bar (6
 items) te ele eee)`, `cls) Ct)`, `Papa John's Store 414 AME ne`. The union of
 every frame's places is a bag containing every misreading any frame made, and
 `find_dropoff` picks from it by position, not by confidence — so it reaches for
@@ -7950,8 +7950,8 @@ the restaurant when the customer's street was the thing that failed to read.
 
 And two of the 23 changes are outright destructive:
 
-    Cherry St NE, Marietta               ->  Vella Gir 000%, Renan
-    10th St NW & Williams St NW, Atlanta ->  Dabbs Xing & Shepard Ct, Acworth
+    Cherry St NE, Harrowen               ->  Vella Gir 000%, Renan
+    10th St NW & Williams St NW, Solvane ->  Tobbs Xing & Hollard Ct, Ivyhame
 
 A different address, in a different town, presented as where the job ends.
 
@@ -7972,8 +7972,8 @@ frame named one:
 | frames **disagree** | **6** |
 
 And five of those six are the junk-word shape `couldBeOneTown` already treats as
-one town: `austell` / `austell res`, `atlanta` / `atlanta eater`, `mableton` /
-`mableton perot`, `marietta` / `marietta bore`, `lithia springs` / `lithia`.
+one town: `vantell` / `vantell res`, `solvane` / `solvane eater`, `gablemor` /
+`gablemor perot`, `harrowen` / `harrowen bore`, `vestia springs` / `vestia`.
 
 **One offer in 124 is a genuine disagreement.** Every fix measured costs an order
 of magnitude more than that. So the code is unchanged, and this is written down
@@ -8024,10 +8024,10 @@ yields no address, which this file asserted in a comment:
 **True of that corpus. Over the 900 texts on file now it is five.** A merchant's
 branch address carries the same `, ST ZIP` anchor a real address does:
 
-    800 Forrest St NW, Atlanta, GA 30318      <- off a Delivery card, twice
-    100 Rosemont Ct, Hiram, GA 30141
-    2603 E, GA 30106                          <- and two fragments
-    Austell, GA 30106
+    800 Garrest St NW, Solvane, GA 90818      <- off a Delivery card, twice
+    100 Tullmont Ct, Telby, GA 90741
+    2603 E, GA 90706                          <- and two fragments
+    Vantell, GA 90706
 
 Any one of them ends the window with the wrong answer *and stops it looking* —
 the first address found wins. The order in the car is then recorded as ending
@@ -8045,8 +8045,8 @@ it closes the path completely. The comment in both ports now says what the data
 says.
 
 My own first attempt at this overstated it: synthetic cards like `Dollar General
-(925 Shiloh Rd Nw, Kennesaw, GA 30144)` made it look like *every* delivery card
-leaked its merchant address. Real ones print `Dollar General (925 Shiloh Rd Nw)`
+(925 Merlah Rd Nw, Tellmoor, GA 90744)` made it look like *every* delivery card
+leaked its merchant address. Real ones print `Dollar General (925 Merlah Rd Nw)`
 with no state and no ZIP, so the anchor never fires. Measuring turned "this
 happens constantly" into "this happens 5 times in 900" — still worth closing,
 but not the thing the synthetic test claimed.
@@ -8444,7 +8444,7 @@ that decide what may be done to the number it publishes.
 The rig photographs whatever is on the phone, and between jobs that is the map.
 One screen off this driver's own shift, read as an offer:
 
-    The Townes at Chastain ... Windsor Drive ...
+    The Townes at Morvaine ... Windsor Drive ...
     3min   8   11 min   $ 22min   &   Ti min   3 min (1.0 mi)
     Fastest route now due to traffic conditions   Saves gas   Add stops   Share
 
@@ -8469,7 +8469,7 @@ payout, so no verdict, rather than a wrong one.
 
 The test of whether it is narrow enough is a real card off the same shift:
 
-    $13.05  *% 493  © Verified   $ 12 min (6.3 mi)   Paces Ferry Rd NW, Atlanta
+    $13.05  *% 493  © Verified   $ 12 min (6.3 mi)   Tolls Ferry Rd NW, Solvane
 
 A stray glyph in front of the leg, on an offer the driver actually took. The $12
 is refused and the $13.05 headline is untouched. One card in 604 changes — the
@@ -8492,7 +8492,7 @@ is a word.
 Off a real card, two lines under the headline:
 
     $9.03 Guaranteed (incl. tip)  30 min (10.8 mi) total
-    Doro's Italian Restaurant (Acworth)   $ Bound Ct & Shoals
+    Doro's Italian Restaurant (Ivyhame)   $ Bound Ct & Shoals
 
 `B` reads as 8, `o` reads as 0, and **"$ Bound" became an $80.00 payout**. The
 largest dollar figure wins, so a $9.03 delivery was published at **$153.52/hr,
@@ -9532,7 +9532,7 @@ setup: exposure 16667us (a whole number of 60/120/240Hz cycles, so the screen sh
        not band), gain 1.50 (tracking the screen)
 setup: corners [[951, 300], [1456, 301], [1455, 1399], [950, 1398]]
 read 1 found nothing usable (no payout in the crop, 1 in a row).
-       Reader saw: '34 min (3.6 mi) total\nDollar General (925 Shiloh Rd Nw)\n...'
+       Reader saw: '34 min (3.6 mi) total\nDollar General (925 Merlah Rd Nw)\n...'
 screen not visible — is the phone lit and in frame?
 health over 120s: 7 reads, 5 complete; median 259ms; 2 found no payout; screen
        brightness 190/205; banding 0.4; gain 2.10; crop [0.00 0.40 1.00 0.60];

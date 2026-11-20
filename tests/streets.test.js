@@ -1,6 +1,6 @@
 /* The NucBox's street index, end to end. Run with: node tests/streets.test.js
  *
- * tests/fixtures/streets.osm is a handful of invented streets round Marietta
+ * tests/fixtures/streets.osm is a handful of invented streets round Harrowen
  * Square, each there for one rule:
  *
  *   Northgate Drive        north-south; meets Foxglove Trail at a shared node
@@ -51,8 +51,12 @@ function ok_(name, cond) { eq(name, !!cond, true); }
 
 var tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'streets-'));
 
+// The fixture's own box: the exporter takes no area by default (it was the
+// driver's metro), and Faraway Road lies north of this one.
+var FIX_BBOX = ['--bbox=-45.00,33.50,-43.95,34.40'];
+
 function exporter(args) {
-  var r = cp.spawnSync('python3', [path.join(ROOT, 'tools', 'street_index.py')].concat(args),
+  var r = cp.spawnSync('python3', [path.join(ROOT, 'tools', 'street_index.py')].concat(args, FIX_BBOX),
                        { encoding: 'utf8' });
   return { status: r.status, said: (r.stderr || '') + (r.stdout || '') };
 }
@@ -104,14 +108,14 @@ function wayNodes(w) { return Array.from(ix.nodes.slice(ix.start[w], ix.start[w 
 var ng = [].concat.apply([], waysNamed('Northgate Drive').map(wayNodes));
 var fx = [].concat.apply([], waysNamed('Foxglove Trail').map(wayNodes));
 var both = ng.filter(function (n) { return fx.indexOf(n) >= 0; });
-eq('Foxglove Trail and Northgate Drive share one node, at 33.96, -84.55',
-   both.length === 1 && [ix.lat[both[0]], ix.lon[both[0]]].join(','), '33.96,-84.55');
+eq('Foxglove Trail and Northgate Drive share one node, at 33.96, -44.55',
+   both.length === 1 && [ix.lat[both[0]], ix.lon[both[0]]].join(','), '33.96,-44.55');
 // The exporter's own list, where osmium did not filter first.
 var stray = path.join(tmp, 'stray.opl');
 fs.writeFileSync(stray, 'w1 v1 dV c0 t i0 u Thighway=footway,name=Some%20%Path '
-                 + 'Nn1x-84.5y33.9,n2x-84.4y33.9\n'
+                 + 'Nn1x-44.5y33.9,n2x-44.4y33.9\n'
                  + 'w2 v1 dV c0 t i0 u Thighway=residential,name=Some%20%Road '
-                 + 'Nn1x-84.5y33.9,n3x\n');
+                 + 'Nn1x-44.5y33.9,n3x\n');
 r = exporter([path.join(FIX, 'streets.osm'), path.join(tmp, 'stray.json'), '--opl', stray]);
 ok_('a footway reaching the exporter is dropped by its own list, and a way with '
     + 'one located node by its own check (' + r.said.trim() + ')',
@@ -120,7 +124,7 @@ ok_('a footway reaching the exporter is dropped by its own list, and a way with 
 /* ---- names --------------------------------------------------------------- */
 // Every street of the fixture is inside this box; the OCR rule is asked only
 // inside a box (a card's disc), so the name checks are asked in one.
-var ALL = S.boxOf('-84.6,34.0,-84.4,33.8');
+var ALL = S.boxOf('-44.6,34.0,-44.4,33.8');
 function m(name, box) {
   var x = S.match(ix, name, box === undefined ? ALL : box);
   return x.names.join(' | ') + ' (' + x.how + ')';
@@ -145,9 +149,9 @@ eq('...and never with no box to keep the guess to: "Foxglove Tri" asked of the w
    + 'index', m('Foxglove Tri', null), ' (null)');
 // Juniper Circle is at 33.965-33.969; this box is south of it.
 eq('...and only among the names inside the box: "Junlper Cir" in a box short of '
-   + 'Juniper Circle finds nothing', m('Junlper Cir', S.boxOf('-84.56,33.959,-84.551,33.95')),
+   + 'Juniper Circle finds nothing', m('Junlper Cir', S.boxOf('-44.56,33.959,-44.551,33.95')),
    ' (null)');
-eq('...where one holding it finds it', m('Junlper Cir', S.boxOf('-84.56,33.97,-84.54,33.96')),
+eq('...where one holding it finds it', m('Junlper Cir', S.boxOf('-44.56,33.97,-44.54,33.96')),
    'Juniper Circle (ocr)');
 eq('...never one street word for another: "Pine St" is not Pine Court', m('Pine St'), ' (null)');
 eq('a name the index holds exactly is never widened to its neighbour: Heron Way '
@@ -157,7 +161,7 @@ eq('the OCR\'s litter is dropped after the street\'s type: "Foxglove Trl x"',
 // The town a reader glued on is only ever on a dropoff with no comma, which
 // map-view.js asks of Nominatim and never of this (see cleaned).
 eq('...but a word after the type is not dropped as a town: "Northgate Dr NE '
-   + 'Marietta" is refused', m('Northgate Dr NE Marietta'), ' (null)');
+   + 'Harrowen" is refused', m('Northgate Dr NE Harrowen'), ' (null)');
 eq('a name nothing like any street finds nothing', m('Quintessence Blvd'), ' (null)');
 // Guards measured on the week's real names (see the commit): each kept two
 // real, different streets apart.
@@ -165,11 +169,11 @@ function tiny(names) {
   return S.build({ format: S.FORMAT, e: 6, names: names, nodes: [0, 0, 1, 1],
                    ways: names.map(function (n, i) { return [[i], [0, 1]]; }) });
 }
-// "Ol Canton Rd" is the card's Old Canton Road with its first word misread;
-// dropped as litter it was asked as Canton Road, a different street whose
+// "Ol Belvan Rd" is the card's Old Belvan Road with its first word misread;
+// dropped as litter it was asked as Belvan Road, a different street whose
 // corner was a mile off.
-eq('"Ol Canton Rd" is not Canton Road: a word before the type is the name, never litter',
-   S.match(tiny(['Canton Road', 'Old Canton Road']), 'Ol Canton Rd').how, null);
+eq('"Ol Belvan Rd" is not Belvan Road: a word before the type is the name, never litter',
+   S.match(tiny(['Belvan Road', 'Old Belvan Road']), 'Ol Belvan Rd').how, null);
 eq('a lone digit is a route\'s number, never litter: "Old Hwy 5" is not "Old Highway"',
    S.match(tiny(['Old Highway']), 'Old Hwy 5').how, null);
 eq('nothing is dropped after a type spelled out, which may be the name: "Orange '
@@ -178,11 +182,11 @@ eq('nothing is dropped after a type spelled out, which may be the name: "Orange 
 eq('"Main St NW" is not "S Main St": two names each with a directional the other '
    + 'lacks never match, before or after', S.match(tiny(['S Main Street']), 'Main St NW').how,
    null);
-eq('...nor "Cobb Pkwy S" "S Cobb Pkwy NW", whose S is before the name and NW after',
-   S.match(tiny(['S Cobb Parkway NW']), 'Cobb Pkwy S').how, null);
-eq('...but one more on one side still matches: "Lincoln Trace Ave SE" finds '
-   + '"S Lincoln Trace Ave SE"', S.match(tiny(['S Lincoln Trace Avenue SE']),
-                                          'Lincoln Trace Ave SE').how, 'dir');
+eq('...nor "Vosk Pkwy S" "S Vosk Pkwy NW", whose S is before the name and NW after',
+   S.match(tiny(['S Vosk Parkway NW']), 'Vosk Pkwy S').how, null);
+eq('...but one more on one side still matches: "Hallett Trace Ave SE" finds '
+   + '"S Hallett Trace Ave SE"', S.match(tiny(['S Hallett Trace Avenue SE']),
+                                          'Hallett Trace Ave SE').how, 'dir');
 // tiny()'s one way is at 0,0; a box round it, as a card's disc would be.
 var NEAR = [-1, -1, 1, 1];
 eq('"17th St NW" is not "12th Street Northwest": no OCR letter is a digit',
@@ -205,59 +209,59 @@ eq('"Beach St" is not "Beech St", both on the week\'s cards: a, e and any letter
 // Ellis Street is held across town; Eliis Street, one OCR letter from it,
 // inside the card's box. The card printed a name the index holds.
 var twoPlaces = S.build({ format: S.FORMAT, e: 6, names: ['Ellis Street', 'Eliis Street'],
-                          nodes: [-84500000, 33900000, 100, 0, 100000, 100000, 100, 0],
+                          nodes: [-44500000, 33900000, 100, 0, 100000, 100000, 100, 0],
                           ways: [[[0], [0, 1]], [[1], [2, 1]]] });
 eq('a name the index holds anywhere is never read as another inside the box: '
    + '"Ellis St" is not the box\'s "Eliis Street"',
-   S.match(twoPlaces, 'Ellis St', S.boxOf('-84.41,34.01,-84.39,33.99')).names.join(),
+   S.match(twoPlaces, 'Ellis St', S.boxOf('-44.41,34.01,-44.39,33.99')).names.join(),
    'Ellis Street');
 
 /* ---- one street by its name as read, inside a box (named) ---------------- */
 // The owner's 19 Oct night fault, invented: "1106 <Name> Ln" read off a dark
-// frame as "<Nam..>r", the type lost and the last word cut. Tamarons Lane is
-// at 33.975, -84.561; Brindlewood Way and Brindleton Court a mile east, both
-// what "Brindler" could be; Tamar Court 0.6 degrees off, outside every box
+// frame as "<Nam..>r", the type lost and the last word cut. Pelarons Lane is
+// at 33.975, -44.561; Brindlewood Way and Brindleton Court a mile east, both
+// what "Brindler" could be; Pelar Court 0.6 degrees off, outside every box
 // asked here. Coordinates are deltas, in millionths of a degree.
 var cutIx = S.build({ format: S.FORMAT, e: 6,
-  names: ['Tamarons Lane', 'Brindlewood Way', 'Brindleton Court', 'Tamar Court',
+  names: ['Pelarons Lane', 'Brindlewood Way', 'Brindleton Court', 'Pelar Court',
           'Wendle Lane Northwest'],
-  nodes: [-84561000, 33975000, 2000, 400, 21000, -10400, 2000, 0, -6000, 3000, 0, 2000,
+  nodes: [-44561000, 33975000, 2000, 400, 21000, -10400, 2000, 0, -6000, 3000, 0, 2000,
           600000, 0, 100, 100, -620000, -17000, 2000, 0],
   ways: [[[0], [0, 1]], [[1], [2, 1]], [[2], [4, 1]], [[3], [6, 1]], [[4], [8, 1]]] });
-var CARD = S.boxOf('-84.6,34.0,-84.5,33.9');
+var CARD = S.boxOf('-44.6,34.0,-44.5,33.9');
 function nm(name, box) {
   var x = S.named(cutIx, name, box === undefined ? CARD : box);
   return x.names.join(' | ') + ' (' + x.how + ', ' + x.among + ')';
 }
-eq('named: "Tamaror" — the type lost, the last word cut and the letter at the cut misread — '
-   + 'is the one street inside the box it can be', nm('Tamaror'), 'Tamarons Lane (cut, 1)');
-eq('...and the word whole with only its type lost', nm('Tamarons'), 'Tamarons Lane (cut, 1)');
+eq('named: "Pelaror" — the type lost, the last word cut and the letter at the cut misread — '
+   + 'is the one street inside the box it can be', nm('Pelaror'), 'Pelarons Lane (cut, 1)');
+eq('...and the word whole with only its type lost', nm('Pelarons'), 'Pelarons Lane (cut, 1)');
 eq('...and a name the matcher finds as read is counted inside the box as well',
-   nm('Tamarons Ln'), 'Tamarons Lane (exact, 1)');
+   nm('Pelarons Ln'), 'Pelarons Lane (exact, 1)');
 eq('...two near streets the read can be are none, never the likelier: "Brindler"',
    nm('Brindler'), ' (cut, 2)');
 eq('...a read longer than the street word is none: "Brindlewoods"', nm('Brindlewoods'),
    ' (null, 0)');
 eq('...and once it can be only one of them, that one: "Brindlewo"', nm('Brindlewo'),
    'Brindlewood Way (cut, 1)');
-eq('...CUT_KEEP (' + S.CUT_KEEP + ') letters before the cut read right: "Tamax" is Tamarons, '
-   + '"Tamx" nothing', [nm('Tamax'), nm('Tamx')].join(' / '),
-   'Tamarons Lane (cut, 1) /  (null, 0)');
-eq('...a digit in the word read is never a cut word: "Tamaro5"', nm('Tamaro5'), ' (null, 0)');
-eq('...a read that kept its type is not a cut name: "Tamaror Ln"', nm('Tamaror Ln'), ' (null, 0)');
+eq('...CUT_KEEP (' + S.CUT_KEEP + ') letters before the cut read right: "Pelax" is Pelarons, '
+   + '"Pelx" nothing', [nm('Pelax'), nm('Pelx')].join(' / '),
+   'Pelarons Lane (cut, 1) /  (null, 0)');
+eq('...a digit in the word read is never a cut word: "Pelaro5"', nm('Pelaro5'), ' (null, 0)');
+eq('...a read that kept its type is not a cut name: "Pelaror Ln"', nm('Pelaror Ln'), ' (null, 0)');
 // ...nor with its word cut clean, where the type word would otherwise pass
 // for a fragment (cutFits' first refusal).
-eq('...nor one cut clean before its type: "Tamaro Ln"', nm('Tamaro Ln'), ' (null, 0)');
-eq('...the words before the last must be the street\'s: "Old Tamaror"', nm('Old Tamaror'),
+eq('...nor one cut clean before its type: "Pelaro Ln"', nm('Pelaro Ln'), ' (null, 0)');
+eq('...the words before the last must be the street\'s: "Old Pelaror"', nm('Old Pelaror'),
    ' (null, 0)');
 eq('...directionals agree as match\'s do: "Wendle" is Wendle Lane Northwest, "Wendle SE" '
    + 'not', [nm('Wendle'), nm('Wendle SE')].join(' / '),
    'Wendle Lane Northwest (cut, 1) /  (null, 0)');
 eq('...a name the index holds as read ANYWHERE is never read as another inside the box: '
-   + '"Tamar Ct" is Tamar Court, off the box, so none', nm('Tamar Ct'), ' (exact, 0)');
-eq('...no street of it inside the box is none', nm('Tamaror', S.boxOf('-84.4,33.9,-84.3,33.8')),
+   + '"Pelar Ct" is Pelar Court, off the box, so none', nm('Pelar Ct'), ' (exact, 0)');
+eq('...no street of it inside the box is none', nm('Pelaror', S.boxOf('-44.4,33.9,-44.3,33.8')),
    ' (null, 0)');
-eq('...and no box is no answer', nm('Tamaror', null), ' (null, 0)');
+eq('...and no box is no answer', nm('Pelaror', null), ' (null, 0)');
 // The owner's 20 Oct 20:44 fault, invented: "2100 <Ellison> Lakes Dr" read
 // "2100 <Ellison> Lake r" — the word's last letter and the type run together
 // and cut to a fragment. Every street here is inside CARD; two near ones for
@@ -265,7 +269,7 @@ eq('...and no box is no answer', nm('Tamaror', null), ' (null, 0)');
 var fragIx = S.build({ format: S.FORMAT, e: 6,
   names: ['Quillon Lakes Drive', 'Ferrow Lakeview Court', 'Ferrow Lakeside Way', 'Harlan Lakes',
           'Wexley Elm Drive', 'Gable 14th Street'],
-  nodes: [-84561000, 33975000, 2000, 400, 3000, -2000, 2000, 0, 3000, 2000, 2000, 0,
+  nodes: [-44561000, 33975000, 2000, 400, 3000, -2000, 2000, 0, 3000, 2000, 2000, 0,
           -9000, 3000, 2000, 0, 1000, -4000, 2000, 0, 1000, -3000, 2000, 0],
   ways: [[[0], [0, 1]], [[1], [2, 1]], [[2], [4, 1]], [[3], [6, 1]], [[4], [8, 1]],
          [[5], [10, 1]]] });
@@ -303,7 +307,7 @@ eq('[fragment] ...nor after a word with a digit in it: "Gable 14th r"', fr('Gabl
 var tailIx = S.build({ format: S.FORMAT, e: 6,
   names: ['Ossian W Wrenley Parkway Northwest', 'Corlan Pike', 'Hester Corlan Pike',
           'Pellan Way', 'Mid Pellan Way', 'Hollin Bower Trail Southeast'],
-  nodes: [-84560000, 33960000, 30000, 0, 0, 5000, 2000, 0, 0, 3000, 2000, 0,
+  nodes: [-44560000, 33960000, 30000, 0, 0, 5000, 2000, 0, 0, 3000, 2000, 0,
           0, 3000, 2000, 0, 0, 3000, 2000, 0, 0, 3000, 2000, 0],
   ways: [[[0], [0, 1]], [[1], [2, 1]], [[2], [4, 1]], [[3], [6, 1]], [[4], [8, 1]],
          [[5], [10, 1]]] });
@@ -330,11 +334,11 @@ eq('...the printed name must end in a type with a name word before it: "Pkwy", "
    + '"W Pkwy"', [tl('Pkwy'), tl('Wrenley'), tl('W Pkwy')].join(' / '),
    ' (null, 0, 0) /  (null, 0, 0) /  (null, 0, 0)');
 eq('...no street of it inside the box is none, and no box is no answer',
-   [tl('Wrenley Pkwy', S.boxOf('-84.4,33.9,-84.3,33.8')), tl('Wrenley Pkwy', null)].join(' / '),
+   [tl('Wrenley Pkwy', S.boxOf('-44.4,33.9,-44.3,33.8')), tl('Wrenley Pkwy', null)].join(' / '),
    ' (null, 0, 0) /  (null, 0, 0)');
 var tail2 = S.build({ format: S.FORMAT, e: 6, names: ['Ossian W Wrenley Parkway Northwest',
                                                       'Ardo Wrenley Parkway'],
-                      nodes: [-84560000, 33960000, 30000, 0, 0, 5000, 2000, 0],
+                      nodes: [-44560000, 33960000, 30000, 0, 0, 5000, 2000, 0],
                       ways: [[[0], [0, 1]], [[1], [2, 1]]] });
 var two = S.tail(tail2, 'Wrenley Pkwy', CARD);
 eq('...two streets it ends inside the box: no names, both shapes (a store along either is '
@@ -356,28 +360,28 @@ eq('the fixture through named: "Foxglov" is Foxglove Trail, and "Church St" (two
 // runs 2.5 km, past WHOLE_LINE_M.
 var wholeIx = S.build({ format: S.FORMAT, e: 6,
   names: ['Larkmoor Court', 'Fennick Court', 'Hollin Road'],
-  nodes: [-84540000, 33960000, 2700, 0, 0, 1000,          // Larkmoor Court
+  nodes: [-44540000, 33960000, 2700, 0, 0, 1000,          // Larkmoor Court
           -20000, 5000, 2000, 0, 30000, -25000, 2000, 0,  // Fennick Court, twice
           -30000, -20000, 27000, 0],                      // Hollin Road
   ways: [[[0], [0, 1]], [[0], [1, 1]], [[1], [3, 1]], [[1], [5, 1]], [[2], [7, 1]]] });
 function wh(name, box) {
   return S.whole(wholeIx, name, box === undefined ? CARD : box);
 }
-var lark = wh('Larkmoor Ct', S.boxOf('-84.541,33.9605,-84.536,33.959'));
+var lark = wh('Larkmoor Ct', S.boxOf('-44.541,33.9605,-44.536,33.959'));
 eq('whole: a court of two ways sharing a node is one street, measured whole even where it '
    + 'leaves the box, with its geometry',
    JSON.stringify([lark.names, lark.how, lark.streets]),
    JSON.stringify([['Larkmoor Court'], 'exact', [{ metres: 360, ways: 2, lines: [
-     [[33.96, -84.54], [33.96, -84.5373]], [[33.96, -84.5373], [33.961, -84.5373]]] }]]));
+     [[33.96, -44.54], [33.96, -44.5373]], [[33.96, -44.5373], [33.961, -44.5373]]] }]]));
 eq('...two courts of one name that share no node are two streets, each its own length',
    JSON.stringify(wh('Fennick Court').streets.map(function (x) { return [x.metres, x.ways]; })),
    '[[184,1],[184,1]]');
 eq('...and one of them alone where the box holds only it',
-   wh('Fennick Ct', S.boxOf('-84.535,33.945,-84.52,33.935')).streets.length, 1);
+   wh('Fennick Ct', S.boxOf('-44.535,33.945,-44.52,33.935')).streets.length, 1);
 eq('...a street past WHOLE_LINE_M (' + S.WHOLE_LINE_M + ' m) is said by its length, no shape',
    JSON.stringify(wh('Hollin Rd').streets), '[{"metres":2491,"ways":1,"lines":null}]');
 eq('...a name not in the box, and no box, are no street',
-   [wh('Larkmoor Ct', S.boxOf('-84.4,33.9,-84.3,33.8')).streets.length,
+   [wh('Larkmoor Ct', S.boxOf('-44.4,33.9,-44.3,33.8')).streets.length,
     wh('Larkmoor Ct', null).streets.length].join(), '0,0');
 
 /* ---- where two streets meet --------------------------------------------- */
@@ -387,25 +391,25 @@ function meets(a, b, box) {
   }).join(' ; ');
 }
 eq('ways sharing a node meet there, once, though one of them is four ways',
-   meets('Foxglove Trl', 'Northgate Dr'), '33.96,-84.55,1,0,node');
+   meets('Foxglove Trl', 'Northgate Dr'), '33.96,-44.55,1,0,node');
 eq('ways that cross with no shared node meet where their segments cross',
-   meets('Wren Rd', 'Foxglove Trl'), '33.96,-84.5455,1,0,crossing');
+   meets('Wren Rd', 'Foxglove Trl'), '33.96,-44.5455,1,0,crossing');
 eq('a road across a dual carriageway meets it twice, 22 m apart: one corner',
-   meets('Wren Rd', 'Kestrel Pkwy SE'), '33.9451,-84.5455,2,22,node');
+   meets('Wren Rd', 'Kestrel Pkwy SE'), '33.9451,-44.5455,2,22,node');
 eq('a loop meeting a street twice, 444 m apart, is two corners',
-   meets('Juniper Cir', 'Northgate Dr'), '33.965,-84.55,1,0,node ; 33.969,-84.55,1,0,node');
+   meets('Juniper Cir', 'Northgate Dr'), '33.965,-44.55,1,0,node ; 33.969,-44.55,1,0,node');
 eq('two names on one way run together for its length: one meeting 1199 m long',
-   meets('Larkspur Pkwy SE', 'Old Mill Rd'), '33.948,-84.5585,14,1199,node');
+   meets('Larkspur Pkwy SE', 'Old Mill Rd'), '33.948,-44.5585,14,1199,node');
 eq('"Church St" (no directional) meets Northgate Drive where the NW one does',
-   meets('Church St', 'Northgate Dr'), '33.955,-84.55,1,0,node');
+   meets('Church St', 'Northgate Dr'), '33.955,-44.55,1,0,node');
 eq('...and "Church St SE" does not meet it at all', meets('Church St SE', 'Northgate Dr'), '');
 eq('only inside the box asked: a box short of the corner holds none',
-   meets('Foxglove Trl', 'Northgate Dr', '-84.56,33.959,-84.551,33.95'), '');
+   meets('Foxglove Trl', 'Northgate Dr', '-44.56,33.959,-44.551,33.95'), '');
 // ...and the box is held to the POINT, not only to the ways: both streets
 // reach into this box, and only the northern corner is in it.
 eq('...and of Juniper Circle\'s two corners, a box holding one answers one',
-   meets('Juniper Cir', 'Northgate Dr', '-84.551,33.97,-84.54,33.966'),
-   '33.969,-84.55,1,0,node');
+   meets('Juniper Cir', 'Northgate Dr', '-44.551,33.97,-44.54,33.966'),
+   '33.969,-44.55,1,0,node');
 var cx = S.cross(ix, 'Pine St', 'Wren Rd', null);
 eq('a name the index does not hold is said, with no meeting',
    JSON.stringify([cx.a.names, cx.b.names, cx.meets]), '[[],["Wren Road"],[]]');
@@ -413,7 +417,7 @@ eq('a name the index does not hold is said, with no meeting',
 var comb = { format: S.FORMAT, e: 6, names: ['Comb Road', 'Spine Road'], nodes: [], ways: [] };
 var spine = [];
 for (var t = 0; t < 60; t++) {
-  comb.nodes.push(t === 0 ? -84500000 : 2000, t === 0 ? 33900000 : 0);
+  comb.nodes.push(t === 0 ? -44500000 : 2000, t === 0 ? 33900000 : 0);
   spine.push(t === 0 ? 0 : 1);
 }
 comb.ways.push([[1], spine]);
@@ -429,16 +433,16 @@ eq('sixty meetings are cut at ' + S.MEETS_MAX + ', and say so',
    [combed.meets.length, combed.cutAt].join(','), S.MEETS_MAX + ',' + S.MEETS_MAX);
 
 /* ---- the stretch of one street ------------------------------------------ */
-box = '-84.56,33.95,-84.54,33.94';
+box = '-44.56,33.95,-44.54,33.94';
 st = S.stretch(ix, 'Larkspur Pkwy SE', S.boxOf(box));
 var pts = [].concat.apply([], st.lines);
 ok_('a stretch is only the part inside the box (' + pts.length + ' points)',
     pts.length && pts.every(function (p) {
-      return p[0] >= 33.94 && p[0] <= 33.95 && p[1] >= -84.56 && p[1] <= -84.54;
+      return p[0] >= 33.94 && p[0] <= 33.95 && p[1] >= -44.56 && p[1] <= -44.54;
     }));
 eq('...cut at the box\'s edge, not at the nearest node inside it',
    JSON.stringify([st.lines.length, st.lines[0][0], st.lines[0][st.lines[0].length - 1]]),
-   '[1,[33.948,-84.56],[33.948,-84.552]]');
+   '[1,[33.948,-44.56],[33.948,-44.552]]');
 eq('...and without a box, both stretches of it, 6.4 mi apart',
    S.stretch(ix, 'Larkspur Pkwy SE', null).lines.length, 2);
 var cutSt = S.stretch(ix, 'Larkspur Pkwy SE', null, 5);
@@ -503,28 +507,28 @@ async function get(srv, u, init) {
         /Street index: 13 names, 17 ways, 175 nodes from .*, loaded in \d+ ms, heap \d+ MB/
           .test(nuc.said()));
     g = await get(nuc, '/api/streets/cross?a=' + encodeURIComponent('Foxglove Tri')
-                  + '&b=' + encodeURIComponent('Northgate Dr') + '&box=-84.6,34.0,-84.5,33.9');
+                  + '&b=' + encodeURIComponent('Northgate Dr') + '&box=-44.6,34.0,-44.5,33.9');
     eq('/api/streets/cross answers where two streets meet inside the box',
        JSON.stringify([g.status, g.body.a.names, g.body.a.how, g.body.meets]),
        JSON.stringify([200, ['Foxglove Trail'], 'ocr',
-                       [{ lat: 33.96, lon: -84.55, n: 1, spanM: 0, shared: true }]]));
+                       [{ lat: 33.96, lon: -44.55, n: 1, spanM: 0, shared: true }]]));
     g = await get(nuc, '/api/streets/stretch?name=' + encodeURIComponent('Larkspur Pkwy SE')
                   + '&box=' + box);
     eq('/api/streets/stretch answers the street inside the box',
        JSON.stringify([g.status, g.body.lines]), JSON.stringify([200, st.lines]));
     g = await get(nuc, '/api/streets/named?name=' + encodeURIComponent('Foxglov')
-                  + '&box=-84.6,34.0,-84.5,33.9');
+                  + '&box=-44.6,34.0,-44.5,33.9');
     eq('/api/streets/named answers the one street the name as read is inside the box',
        JSON.stringify([g.status, g.body.names, g.body.how, g.body.among]),
        JSON.stringify([200, ['Foxglove Trail'], 'cut', 1]));
     g = await get(nuc, '/api/streets/whole?name=' + encodeURIComponent('Foxglove Trl')
-                  + '&box=-84.6,34.0,-84.5,33.9');
+                  + '&box=-44.6,34.0,-44.5,33.9');
     eq('/api/streets/whole answers each street of the name reaching into the box, whole',
        JSON.stringify([g.status, g.body.names, g.body.how, g.body.streets.length,
                        typeof g.body.streets[0].metres]),
        JSON.stringify([200, ['Foxglove Trail'], 'exact', 1, 'number']));
     g = await get(nuc, '/api/streets/tail?name=' + encodeURIComponent('Foxglove Trl')
-                  + '&box=-84.6,34.0,-84.5,33.9');
+                  + '&box=-44.6,34.0,-44.5,33.9');
     eq('/api/streets/tail answers the streets a store\'s printed street can be inside the box, '
        + 'with their shapes (a name held as printed is that street)',
        JSON.stringify([g.status, g.body.names, g.body.how, g.body.among,

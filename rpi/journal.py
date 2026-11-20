@@ -192,7 +192,7 @@ SCREEN_WINDOW_MS = 180 * 1000
 # appended to.
 #
 # Five minutes, against the week's own prompts. The two closest that offered
-# the same bonus were 10.8 minutes apart (rows 74 and 100, both Hiram, both
+# the same bonus were 10.8 minutes apart (rows 74 and 100, both Telby, both
 # $1.00/order) and were two prompts, not one: the first ran until 5:29 PM and
 # the second until 7:29 PM, so they are told apart by PROMO_ENDS below and the
 # window never has to. The closest pair that were the same prompt — same bonus,
@@ -207,7 +207,7 @@ PROMO_WINDOW_MS = 5 * 60 * 1000
 # prompt. See note_promo.
 #
 # The bonus alone does not say it. Rows 74 and 100 on the owner's week are the
-# same zone (Hiram) offering the same +$1.00/order, 10.8 minutes apart, and they
+# same zone (Telby) offering the same +$1.00/order, 10.8 minutes apart, and they
 # are two prompts: one until 5:29 PM, the next until 7:29 PM. Keyed on the bonus
 # alone, two such prompts inside the window would have been one row with nothing
 # saying the second was ever asked. The end time read the same on every one of
@@ -1267,7 +1267,7 @@ class OfferLog:
         "this is a card" and it is the only one that holds: a merchant name is
         NOT, because an Uber navigation screen names the destination the same
         way a card names the shop — the screenshot this was built from reads
-        `BCG Atlanta / 1075 Peachtree St NE Ste 3800, Atlanta, GA`. Refusing a
+        `BCG Solvane / 1075 Plumleigh St NE Ste 3800, Solvane, GA`. Refusing a
         frame for naming a place would throw away exactly the screens worth
         collecting, and trusting one would be the recogniser this must not
         invent. So the frame is written and what it named is written with it,

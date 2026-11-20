@@ -94,12 +94,12 @@ for bad_one in ('', '   ', '[::1'):
 
 # gpsd's own shape, which is what port 2947 means when it means anything.
 TPV = ('{"class":"TPV","device":"/dev/x","mode":3,'
-       '"time":"2026-09-12T18:20:49.000Z","lat":34.0117,"lon":-84.6105,'
+       '"time":"2026-09-12T18:20:49.000Z","lat":34.0117,"lon":-44.6105,'
        '"alt":290.0,"speed":0.0,"track":0.0}')
 got = G.parse_line(TPV)
 ok_('a gpsd TPV record is a fix', got is not None)
 close_to('...at the latitude it states', got['lat'], 34.0117)
-close_to('...and the longitude', got['lon'], -84.6105)
+close_to('...and the longitude', got['lon'], -44.6105)
 eq('...and says where it came from', got['source'], 'gpsd')
 eq('...and keeps the GPS\'s own time, which is the true one',
    got['gpsTime'], '2026-09-12T18:20:49.000Z')
@@ -107,13 +107,13 @@ eq('...and keeps the GPS\'s own time, which is the true one',
 # mode 1 is "no fix". A record can carry a lat and lon and still be saying it
 # does not know where it is - the last known position, or a zero.
 eq('a TPV with no fix is not a fix',
-   G.parse_line('{"class":"TPV","mode":1,"lat":34.0,"lon":-84.6}'), None)
+   G.parse_line('{"class":"TPV","mode":1,"lat":34.0,"lon":-44.6}'), None)
 eq('...and mode 2 is', G.parse_line(
-    '{"class":"TPV","mode":2,"lat":34.0,"lon":-84.6}')['lat'], 34.0)
+    '{"class":"TPV","mode":2,"lat":34.0,"lon":-44.6}')['lat'], 34.0)
 # A record with no mode at all is taken at its word: several senders omit it,
 # and refusing them all would refuse the fix for the sake of a missing field.
 ok_('a TPV with no mode stated is still a fix',
-    G.parse_line('{"class":"TPV","lat":34.0,"lon":-84.6}') is not None)
+    G.parse_line('{"class":"TPV","lat":34.0,"lon":-44.6}') is not None)
 
 eq('the VERSION banner is not a fix',
    G.parse_line('{"class":"VERSION","release":"3.22"}'), None)
@@ -128,8 +128,8 @@ try:
     _sky = [G.parse_line('{"class":"SKY","device":"/dev/ttyACM0","satellites":[]}'),
             G.parse_line('{"class": "SKY", "satellites": []}')]
     _skied = len(_asked)
-    _tpv = [G.parse_line('{"class":"TPV","mode":3,"lat":34.0,"lon":-84.6}'),
-            G.parse_line('{"class": "TPV", "mode": 3, "lat": 34.0, "lon": -84.6}')]
+    _tpv = [G.parse_line('{"class":"TPV","mode":3,"lat":34.0,"lon":-44.6}'),
+            G.parse_line('{"class": "TPV", "mode": 3, "lat": 34.0, "lon": -44.6}')]
 finally:
     G.json.loads = _loads
 eq('a SKY record is refused before it is parsed (%d parsed)' % _skied, (_sky, _skied),
@@ -142,7 +142,7 @@ eq('nor a None', G.parse_line(None), None)
 
 # The other protocol. Several phone apps take gpsd's port and push raw NMEA at
 # whoever connects, so the port says nothing about what will arrive.
-RMC = '$GPRMC,182049.00,A,3400.7020,N,08436.6300,W,0.0,0.0,120926,,,A*4A'
+RMC = '$GPRMC,182049.00,A,3400.7020,N,04436.6300,W,0.0,0.0,120926,,,A*46'
 got = G.parse_line(RMC)
 ok_('an NMEA RMC sentence is a fix', got is not None)
 # ddmm.mmmm is neither degrees nor minutes: 3400.7020 is 34 degrees and 0.702
@@ -150,33 +150,33 @@ ok_('an NMEA RMC sentence is a fix', got is not None)
 # entire hemisphere's worth of arithmetic.
 close_to('...with ddmm.mmmm converted, not read as a decimal',
          got['lat'], 34.0117)
-close_to('...and west made negative', got['lon'], -84.6105)
+close_to('...and west made negative', got['lon'], -44.6105)
 eq('...and says which protocol it came from', got['source'], 'nmea')
 
 # 'V' is the receiver saying the fix is not valid. The position beside it is
 # whatever it last thought, and using it would put the car wherever it was when
 # it last saw the sky - a tunnel, a car park, this morning.
 eq('an RMC marked void is not a fix',
-   G.parse_line('$GPRMC,182049.00,V,3400.7020,N,08436.6300,W,0,0,120926,,,N*52'),
+   G.parse_line('$GPRMC,182049.00,V,3400.7020,N,04436.6300,W,0,0,120926,,,N*5E'),
    None)
 
 # Knots on the wire. Storing them as if they were metres per second would
 # overstate every speed by a factor of two.
 fast = G.parse_line(
-    '$GPRMC,182049.00,A,3400.7020,N,08436.6300,W,38.9,271.5,120926,,,A*79')
+    '$GPRMC,182049.00,A,3400.7020,N,04436.6300,W,38.9,271.5,120926,,,A*75')
 ok_('a moving RMC carries a speed', fast is not None and 'speed' in fast)
 close_to('...converted from knots to metres per second', fast['speed'],
          38.9 * 0.514444, tol=0.01)
 close_to('...and a heading', fast['heading'], 271.5)
 
-GGA = '$GPGGA,182049.00,3400.7020,N,08436.6300,W,1,08,0.9,290.0,M,,,,*2F'
+GGA = '$GPGGA,182049.00,3400.7020,N,04436.6300,W,1,08,0.9,290.0,M,,,,*23'
 got = G.parse_line(GGA)
 ok_('a GGA sentence is a fix too', got is not None)
 close_to('...at the same place', got['lat'], 34.0117)
 close_to('...and carries the altitude', got['altitude'], 290.0)
 # Quality 0 means the receiver has no fix. Same trap as RMC's 'V'.
 eq('a GGA with quality 0 is not a fix',
-   G.parse_line('$GPGGA,182049.00,3400.7020,N,08436.6300,W,0,00,,,M,,,,*24'),
+   G.parse_line('$GPGGA,182049.00,3400.7020,N,04436.6300,W,0,00,,,M,,,,*28'),
    None)
 
 # The checksum. A sentence crosses a phone hotspot in a moving car, and one
@@ -189,7 +189,7 @@ eq('a sentence that fails its checksum is refused', G.parse_line(broken), None)
 # ...while one with no checksum at all is allowed, because some senders omit it
 # and refusing them would refuse a working setup over a missing field.
 ok_('a sentence with no checksum is still read',
-    G.parse_line('$GPRMC,182049.00,A,3400.7020,N,08436.6300,W,0.0,0.0,120926,,,A')
+    G.parse_line('$GPRMC,182049.00,A,3400.7020,N,04436.6300,W,0.0,0.0,120926,,,A')
     is not None)
 eq('a checksum that is not hexadecimal is refused',
    G.parse_line(RMC[:-2] + 'ZZ'), None)
@@ -209,17 +209,17 @@ eq('...and a longitude past the line', G.parse_line(
 eq('a boolean is not a latitude', G.parse_line(
     '{"class":"TPV","mode":3,"lat":true,"lon":true}'), None)
 eq('nor is a string', G.parse_line(
-    '{"class":"TPV","mode":3,"lat":"34.0","lon":"-84.6"}'), None)
+    '{"class":"TPV","mode":3,"lat":"34.0","lon":"-44.6"}'), None)
 
 # --- what a fix says about itself ---------------------------------------------
 #
-# Kept, and judged in one place. Marietta Square, a public place, rather than
+# Kept, and judged in one place. Harrowen Square, a public place, rather than
 # anywhere the rig has actually been. The figures are real ones: 27.8 m is the
 # owner's VK-162 on mode 3 indoors (epx 17.8, epy 12.8), and 129.2 m is what
 # real gpsd 3.25 made of a four-satellite stream at HDOP 6.8 — still mode 3.
 
 def tpv(**fields):
-    msg = {'class': 'TPV', 'lat': 33.9526, 'lon': -84.5499}
+    msg = {'class': 'TPV', 'lat': 33.9526, 'lon': -44.5499}
     msg.update(fields)
     return json.dumps(msg)
 
@@ -686,7 +686,7 @@ finally:
 gate = threading.Event()
 clock = Clock()
 phone = FakePhone(script=[RMC + '\r\n', gate,
-                          '$GPRMC,182100.00,A,3401.7020,N,08436.6300,W,0.0,0.0,120926,,,A*47\r\n'])
+                          '$GPRMC,182100.00,A,3401.7020,N,04436.6300,W,0.0,0.0,120926,,,A*4B\r\n'])
 try:
     it = G.Phone(phone.address, clock=clock).start()
     ok_('the first fix arrives', waited(lambda: it.fix() is not None))
@@ -725,7 +725,7 @@ finally:
 # The owner's VK-162 under gpsd's binary u-blox mode: TPV lat/lon bit-identical
 # second after second, for an hour and a half of driving, while the same lines'
 # ECEF moved — and every one of them passed the gate. See FROZEN_AFTER in
-# gps.py. Built here at Marietta Square, a public place, never at the owner's
+# gps.py. Built here at Harrowen Square, a public place, never at the owner's
 # coordinates; the SHAPE is the owner's: mode 3, eph 27.8, epx 11.4, nine
 # decimals, five lines a second apart, the ECEF moving +0.11 m in x and
 # -2.65 m in y over the five (interpolated evenly between — only the first
@@ -752,7 +752,7 @@ def north(lat, lon, metres):
     return lat + math.degrees(metres / 6378137.0), lon
 
 
-SQ = (33.9526, -84.5499)
+SQ = (33.9526, -44.5499)
 
 
 def frozen_tpv(xyz, lat=SQ[0], lon=SQ[1], **more):
@@ -801,7 +801,7 @@ def lla(*xyz):
 
 # ECEF -> lat/lon, against points built the other way, to half a metre.
 _worst = 0.0
-for _lat, _lon, _h in ((33.9526, -84.5499, 300.0), (0.0, 0.0, 0.0),
+for _lat, _lon, _h in ((33.9526, -44.5499, 300.0), (0.0, 0.0, 0.0),
                        (-33.8568, 151.2153, 5.0), (27.9881, 86.9250, 8848.0),
                        (31.5590, 35.4732, -430.0), (89.99, -45.0, 0.0),
                        (-89.99, 120.0, 2800.0), (64.8378, -147.7164, 136.0)):
@@ -824,7 +824,7 @@ eq('...nor is NaN', G.ecef_to_lla(float('nan'), 1.0, 1.0), None)
 _car = west(SQ[0], SQ[1], 3048.7)
 _base = ecef_of(_car[0], _car[1], 300.0)
 OWNER5 = [frozen_tpv((_base[0] + 0.11 * k / 4, _base[1] - 2.65 * k / 4, _base[2]),
-                     lat=33.952600000, lon=-84.549900000, sec=k) for k in range(5)]
+                     lat=33.952600000, lon=-44.549900000, sec=k) for k in range(5)]
 got = G.parse_line(OWNER5[0])
 eq('a TPV whose lat/lon are 3 km from its own ECEF uses the ECEF position',
    got and got.get('source'), 'ecef')
@@ -834,7 +834,7 @@ ok_('...and it is where the ECEF says, within half a metre (%.2f m)'
 ok_('...says by how much they disagreed (%r)' % got.get('ecefGap'),
     abs(got.get('ecefGap', 0) - 3048.7) < 1.0)
 eq('...keeps gpsd\'s pair beside it', (got.get('gpsdLat'), got.get('gpsdLon')),
-   (33.9526, -84.5499))
+   (33.9526, -44.5499))
 ok_('...and says what was done on the fix (%r)' % got.get('note'),
     'ECEF' in (got.get('note') or '') and '3049 m' in got.get('note'))
 eq('...keeping gpsd\'s error estimate for the gate to ask', got.get('err'), 27.8)
@@ -889,7 +889,7 @@ eq('a frozen lat/lon whose ECEF has crept 25-50 m is refused as frozen',
 
 # Frozen with a speed and no ECEF at all — gpsd's NMEA path, or a phone.
 STUCK = [json.dumps({'class': 'TPV', 'mode': 3, 'lat': 33.952600000,
-                     'lon': -84.549900000, 'eph': 27.8, 'speed': 13.4})] * 9
+                     'lon': -44.549900000, 'eph': 27.8, 'speed': 13.4})] * 9
 seen = feed(STUCK)
 eq('frozen lat/lon while the TPV says 13.4 m/s is refused as frozen past '
    'five seconds', [s.get('why') for s in seen], [None] * 6 + ['frozen'] * 3)
@@ -998,7 +998,7 @@ _clock.now += 0.5
 eq('...and so do 10 s with no fix at all, asked of latest() between fixes',
    (_at10, (_it.latest() or {}).get('driving')), (True, False))
 _clock.now += 1.5
-_it.take(G.parse_line(tpv(mode=3, eph=12.0, speed=15.0, lat=34.0, lon=-84.5)))
+_it.take(G.parse_line(tpv(mode=3, eph=12.0, speed=15.0, lat=34.0, lon=-44.5)))
 eq('...after which one fast fix is the first of two again, not a continuation',
    (_it.latest() or {}).get('driving'), False)
 eq('...and the hold is this Phone\'s staleness rule where that is shorter than '

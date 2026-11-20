@@ -443,19 +443,19 @@ eq('...with the distance the window found',
 # The address sits at the edge of the crop, in small type, over a map — which
 # is exactly the field a single frame drops. `merged = dict(parsed)` took the
 # last frame's, so one frame losing it lost it for the offer.
-WITH = ('UberX $12.45 5 min (1.2 mi) away Chastain Rd NW, Kennesaw '
-        '23 min (8.4 mi) trip Canton Rd, Marietta')
+WITH = ('UberX $12.45 5 min (1.2 mi) away Morvaine Rd NW, Tellmoor '
+        '23 min (8.4 mi) trip Belvan Rd, Harrowen')
 WITHOUT = '$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip'
 
 eq('the card names two places', P.parse(WITH)['places'],
-   ['Chastain Rd NW, Kennesaw', 'Canton Rd, Marietta'])
+   ['Morvaine Rd NW, Tellmoor', 'Belvan Rd, Harrowen'])
 eq('...and the frame that lost the map names none', P.parse(WITHOUT)['places'], [])
 
 acc = OfferAccumulator()
 acc.add(P.parse(WITH), now=600.0)
 after = acc.add(P.parse(WITHOUT), now=600.5)
 eq('a frame that missed the address does not erase it',
-   after['places'], ['Chastain Rd NW, Kennesaw', 'Canton Rd, Marietta'])
+   after['places'], ['Morvaine Rd NW, Tellmoor', 'Belvan Rd, Harrowen'])
 
 # ...and the other way round, which is the commoner order: the first look
 # misses the map and a later one catches it.
@@ -463,7 +463,7 @@ acc = OfferAccumulator()
 acc.add(P.parse(WITHOUT), now=700.0)
 later = acc.add(P.parse(WITH), now=700.5)
 eq('...and an address found late still arrives',
-   later['places'], ['Chastain Rd NW, Kennesaw', 'Canton Rd, Marietta'])
+   later['places'], ['Morvaine Rd NW, Tellmoor', 'Belvan Rd, Harrowen'])
 
 # A different card is a different window, so nothing carries over. Two offers
 # paying different amounts are never one offer.
@@ -478,8 +478,8 @@ eq('the next card does not inherit the last one\'s address', other['places'], []
 # read once with a comma and once without is rendered as a two-stop route that
 # never happened. That is worse than the missing address the union fixes, and
 # the last-frame behaviour it replaced could not produce it.
-WITH_COMMA = '$12.45 5 min (1.2 mi) away Cobb Pkwy NW, Acworth 23 min (8.4 mi) trip'
-NO_COMMA = '$12.45 5 min (1.2 mi) away Cobb Pkwy NW Acworth 23 min (8.4 mi) trip'
+WITH_COMMA = '$12.45 5 min (1.2 mi) away Vosk Pkwy NW, Ivyhame 23 min (8.4 mi) trip'
+NO_COMMA = '$12.45 5 min (1.2 mi) away Vosk Pkwy NW Ivyhame 23 min (8.4 mi) trip'
 eq('the two frames really do read it differently',
    P.parse(WITH_COMMA)['places'] == P.parse(NO_COMMA)['places'], False)
 acc = OfferAccumulator()
@@ -487,30 +487,30 @@ acc.add(P.parse(WITH_COMMA), now=900.0)
 twice = acc.add(P.parse(NO_COMMA), now=900.5)
 eq('one address read two ways stays one address', len(twice['places']), 1)
 eq('...and the fuller reading is the one kept',
-   twice['places'], ['Cobb Pkwy NW, Acworth'])
+   twice['places'], ['Vosk Pkwy NW, Ivyhame'])
 
 # ...and the other direction, which is the whole risk of merging at all: the
 # two genuinely different ends of a card must survive as two.
 acc = OfferAccumulator()
-ends = acc.add(P.parse('$12.45 5 min (1.2 mi) away Chastain Rd NW, Kennesaw '
-                       '23 min (8.4 mi) trip Canton Rd, Marietta'), now=950.0)
+ends = acc.add(P.parse('$12.45 5 min (1.2 mi) away Morvaine Rd NW, Tellmoor '
+                       '23 min (8.4 mi) trip Belvan Rd, Harrowen'), now=950.0)
 eq('the two ends of a real card are still two places', len(ends['places']), 2)
 
 # Same street, different town is a different place. It is the nearest thing to a
 # hard case for the test above and it must come down on this side of it.
 acc = OfferAccumulator()
-acc.add(P.parse('$12.45 5 min (1.2 mi) away Cobb Pkwy NW, Acworth 23 min (8.4 mi) trip'),
+acc.add(P.parse('$12.45 5 min (1.2 mi) away Vosk Pkwy NW, Ivyhame 23 min (8.4 mi) trip'),
         now=960.0)
-towns = acc.add(P.parse('$12.45 5 min (1.2 mi) away Cobb Pkwy NW, Kennesaw '
+towns = acc.add(P.parse('$12.45 5 min (1.2 mi) away Vosk Pkwy NW, Tellmoor '
                         '23 min (8.4 mi) trip'), now=960.5)
 eq('the same street in two towns is two places', len(towns['places']), 2)
 
 # Never more than one card's worth, however many frames read the map. Four
 # frames, four genuinely different corners.
 acc = OfferAccumulator()
-CORNERS = ('Chastain Rd NW, Kennesaw', 'Canton Rd, Marietta',
-           'Airport Rd NW, Kennesaw', 'Post Woods Dr, Atlanta',
-           'Dallas Hwy, Marietta')
+CORNERS = ('Morvaine Rd NW, Tellmoor', 'Belvan Rd, Harrowen',
+           'Airport Rd NW, Tellmoor', 'Post Woods Dr, Solvane',
+           'Dorvan Hwy, Harrowen')
 for i, corner in enumerate(CORNERS):
     many = acc.add(P.parse('$12.45 5 min (1.2 mi) away %s 23 min (8.4 mi) trip'
                            % corner), now=900.0 + i * 0.5)
@@ -616,10 +616,10 @@ eq('...not the one the last frame happened to read', _m.get('mergedFrom'), 5)
 # the reading is not finished — and one frame that reads the card properly is
 # what finishes it. ANDed across the window rather than ORed, unlike everything
 # else here, and taken from the last frame before that.
-_LOST = ("Exclusive x $9.05 * 5.00 min (44 mi) . Gresham Rd "
-         "Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Sedgefield Rd")
-_READ = ("Exclusive x $9.05 * 12 min (4.4 mi) . Gresham Rd "
-         "Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Sedgefield Rd")
+_LOST = ("Exclusive x $9.05 * 5.00 min (44 mi) . Pelsham Rd "
+         "Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Wedgemarsh Rd")
+_READ = ("Exclusive x $9.05 * 12 min (4.4 mi) . Pelsham Rd "
+         "Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Wedgemarsh Rd")
 
 _n, _m = _episodes([(_LOST, None)] * 3)
 eq('every frame short a time leaves the reading unfinished',
@@ -839,10 +839,10 @@ eq('the same card an hour later is a second offer', _n, 2)
 # third clause that fixes it — a bracket sitting where the distance should be —
 # and it takes the same three hops `labelled` does, which is why it is in
 # LEG_FIELDS above. Here it is asserted through the merge, in both directions.
-_ADDR_HURT = ('$21.08 5 min (1.8 mi) Grace St & Main St, Kennesaw '
-              '12 min (8.1 m1) Oak Ln, Marietta')
-_ADDR_OK = ('$21.08 5 min (1.8 mi) Grace St & Main St, Kennesaw '
-            '12 min (8.1 mi) Oak Ln, Marietta')
+_ADDR_HURT = ('$21.08 5 min (1.8 mi) Grace St & Main St, Tellmoor '
+              '12 min (8.1 m1) Oak Ln, Harrowen')
+_ADDR_OK = ('$21.08 5 min (1.8 mi) Grace St & Main St, Tellmoor '
+            '12 min (8.1 mi) Oak Ln, Harrowen')
 
 eq('a damaged address card is not whole on its own',
    P.is_whole(P.parse(_ADDR_HURT)), False)
@@ -859,8 +859,8 @@ eq('a damaged address card is not whole on its own',
 # clean and damaged corpora sit like that, and every one of them has its
 # distance.
 _STRAY = ('| Exclusive x le a ; $10.04 *% 497 @ Verified 16 min (6.6 mi) ; '
-          '( Roswell Rd, Atlanta Avg. wait time at pickup: 1 min } 18 mins '
-          '(10.2 mi) ¢ Dunwoody Xing, Atlanta 4, 7 mi from fast charger')
+          '( Ruswold Rd, Solvane Avg. wait time at pickup: 1 min } 18 mins '
+          '(10.2 mi) ¢ Penwoody Xing, Solvane 4, 7 mi from fast charger')
 eq('a stray bracket after a leg that has its distance claims nothing',
    [l.get('lostMiles') for l in P.parse(_STRAY)['legDetail']],
    [False, False, False])
@@ -897,8 +897,8 @@ eq('...whichever order that frame arrives in', P.is_whole(_m), True)
 # And the line that is not a leg stays not a leg. A pickup wait has a bracket
 # in its tail too — belonging to the leg after it — so the bracket has to be
 # the FIRST thing after the minutes or this card stops being whole.
-_WAIT = ('Exclusive x $9.05 12 min (4.4 mi) Gresham Rd '
-         'Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Sedgefield Rd')
+_WAIT = ('Exclusive x $9.05 12 min (4.4 mi) Pelsham Rd '
+         'Avg. wait time at pickup: 1 min 9 mins (2.6 mi) Wedgemarsh Rd')
 _n, _m = _episodes([(_WAIT, None)] * 3)
 eq('a pickup wait between two good legs is still whole', P.is_whole(_m), True)
 eq('...and nothing about it is doubted', _m['milesUncertain'], False)
@@ -913,8 +913,8 @@ eq('...and no leg of it claims a lost distance',
 # mirror rule catches it, a distance with no time — but the wait line is still
 # not a leg, and a rule that decides it is has stopped answering the question it
 # was written for.
-_WAIT_HURT = ('Exclusive x $9.05 12 min (4.4 mi) Gresham Rd '
-              'Avg. wait time at pickup: 1 min 9 (2.6 mi) Sedgefield Rd')
+_WAIT_HURT = ('Exclusive x $9.05 12 min (4.4 mi) Pelsham Rd '
+              'Avg. wait time at pickup: 1 min 9 (2.6 mi) Wedgemarsh Rd')
 _hurtp = P.parse(_WAIT_HURT)
 eq('a wait line is not a leg even when the next leg lost its unit',
    [l.get('lostMiles') for l in _hurtp['legDetail']], [False, False])
@@ -1023,9 +1023,9 @@ eq('...along with its time', _m['minutes'], 22.0)
 # `lostMiles` is one frame's claim about damage, not a fact about the card, and
 # ORing it stamped a slot that never gains a distance: a pickup-wait line whose
 # tail begins with the NEXT leg's bracket once that leg is truncated away.
-_GOOD = ('Exclusive x $9.05 12 min (4.4 mi) Gresham Rd '
-         'Avg. wait time at pickup: 1 min 18 mins (2.6 mi) Sedgefield Rd')
-_CUT = ('Exclusive x $9.05 12 min (4.4 mi) Gresham Rd '
+_GOOD = ('Exclusive x $9.05 12 min (4.4 mi) Pelsham Rd '
+         'Avg. wait time at pickup: 1 min 18 mins (2.6 mi) Wedgemarsh Rd')
+_CUT = ('Exclusive x $9.05 12 min (4.4 mi) Pelsham Rd '
         'Avg. wait time at pickup: 1 min (2.6 m')
 acc = OfferAccumulator()
 for _i, _t in enumerate([_GOOD, _CUT, _GOOD, _GOOD]):
@@ -1036,8 +1036,8 @@ eq('...with the journey the good frames read', (_m['minutes'], _m['miles']),
    (31.0, 7.0))
 
 # ...and a leg that really did lose its distance in most frames still says so.
-_HURT = ('$21.08 5 min (1.8 mi) Grace St & Main St, Kennesaw '
-         '12 min (8.1 m1) Oak Ln, Marietta')
+_HURT = ('$21.08 5 min (1.8 mi) Grace St & Main St, Tellmoor '
+         '12 min (8.1 m1) Oak Ln, Harrowen')
 acc = OfferAccumulator()
 for _i in range(3):
     _m = acc.add(P.parse(_HURT), now=9400.0 + _i * 0.5)
@@ -1048,10 +1048,10 @@ eq('a leg damaged in every frame is still doubted', _m['milesUncertain'], True)
 # mangled in two frames of three and simply absent in the third is a leg the
 # card printed a distance for; requiring every frame to agree would let one
 # clean-looking frame excuse the damage the others saw.
-_MANGLED = ('$21.08 5 min (1.8 mi) Grace St & Main St, Kennesaw '
-            '12 min (8.1 m1) Oak Ln, Marietta')
-_ABSENT = ('$21.08 5 min (1.8 mi) Grace St & Main St, Kennesaw '
-           '12 min Oak Ln, Marietta')
+_MANGLED = ('$21.08 5 min (1.8 mi) Grace St & Main St, Tellmoor '
+            '12 min (8.1 m1) Oak Ln, Harrowen')
+_ABSENT = ('$21.08 5 min (1.8 mi) Grace St & Main St, Tellmoor '
+           '12 min Oak Ln, Harrowen')
 acc = OfferAccumulator()
 for _i, _t in enumerate([_MANGLED, _MANGLED, _ABSENT]):
     _m = acc.add(P.parse(_t), now=9450.0 + _i * 0.5)
@@ -1115,9 +1115,9 @@ eq('a real long trip is not folded away by one slipped point',
 # often learns which leg is the approach from its second frame, and a maximum
 # taken once keeps the first frame's answer for good. Checked in every order,
 # because order-independence is exactly what the recompute buys.
-_CLEAN = ('UberX $12.45 5 min (1.2 mi) Old 41 Hwy NW, Kennesaw '
-          '23 min (8.4 mi) Celebration Blvd, Acworth')
-_GLARE = ('UberX $12.45 5 min (1.2 mi) Old 41 Hwy NW, Kennesaw '
+_CLEAN = ('UberX $12.45 5 min (1.2 mi) Old 88 Hwy NW, Tellmoor '
+          '23 min (8.4 mi) Jamboreeton Blvd, Ivyhame')
+_GLARE = ('UberX $12.45 5 min (1.2 mi) Old 88 Hwy NW, Tellmoor '
           '29 min (3.4 mi)')
 for _order in ([_CLEAN, _CLEAN, _GLARE], [_GLARE, _CLEAN, _CLEAN],
                [_CLEAN, _GLARE, _CLEAN]):
@@ -1135,10 +1135,10 @@ for _order in ([_CLEAN, _CLEAN, _GLARE], [_GLARE, _CLEAN, _CLEAN],
 # orders. This is the check to run first if anyone touches the caps: one frame
 # reading only the approach and another reading only the trip must keep both,
 # and a single total cap would drop one of them.
-for _order in (['UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw',
-                'UberX $12.45 23 min (8.4 mi) trip Celebration Blvd, Acworth'],
-               ['UberX $12.45 23 min (8.4 mi) trip Celebration Blvd, Acworth',
-                'UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw']):
+for _order in (['UberX $12.45 5 min (1.2 mi) away Old 88 Hwy NW, Tellmoor',
+                'UberX $12.45 23 min (8.4 mi) trip Jamboreeton Blvd, Ivyhame'],
+               ['UberX $12.45 23 min (8.4 mi) trip Jamboreeton Blvd, Ivyhame',
+                'UberX $12.45 5 min (1.2 mi) away Old 88 Hwy NW, Tellmoor']):
     _acc = OfferAccumulator()
     _m = None
     for _i, _f in enumerate(_order):
@@ -1162,10 +1162,10 @@ for _order in (['UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw',
 # cure is in laid_out_approach, which now requires the leg it publishes to
 # STATE its distance rather than merely to look like a leg — this file already
 # refuses to trust one frame's `lostMiles`, and says why beside `lostSeen`.
-_WAIT_OK = ('$11.06 Avg. wait time at pickup: 3 min Little Caesars (3372 Canton Rd) '
-            '25 min (8.1 mi) Barrington Overlook, Marietta')
-_WAIT_BAD = ('$11.06 Avg. wait time at pickup: 3 min (3372 Canton Rd) '
-             '25 min (8.1 mi) Barrington Overlook, Marietta')
+_WAIT_OK = ('$11.06 Avg. wait time at pickup: 3 min Little Caesars (3372 Belvan Rd) '
+            '25 min (8.1 mi) Carrowdene Overlook, Harrowen')
+_WAIT_BAD = ('$11.06 Avg. wait time at pickup: 3 min (3372 Belvan Rd) '
+             '25 min (8.1 mi) Carrowdene Overlook, Harrowen')
 acc = OfferAccumulator()
 _m = None
 for _i, _f in enumerate([_WAIT_OK, _WAIT_BAD, _WAIT_OK, _WAIT_OK, _WAIT_OK]):
@@ -1187,8 +1187,8 @@ eq('one damaged frame does not publish a wait line as the approach',
 # 1,200, an hour 7,200 — and exactly one of them distinct, every time, because
 # the frames of a card land in the same slots. A set is exact here, because a
 # maximum over a multiset is the maximum over its set.
-_STEADY = ('UberX $12.45 5 min (1.2 mi) Old 41 Hwy NW, Kennesaw '
-           '23 min (8.4 mi) Celebration Blvd, Acworth')
+_STEADY = ('UberX $12.45 5 min (1.2 mi) Old 88 Hwy NW, Tellmoor '
+           '23 min (8.4 mi) Jamboreeton Blvd, Ivyhame')
 acc = OfferAccumulator()
 _parsed = P.parse(_STEADY)
 _t = 5000.0
@@ -1207,10 +1207,10 @@ eq('...and the window is still the same two legs', len(acc.legs), 2)
 # keep, and it is on the one field nothing can reconstruct afterwards: a card
 # recorded with no split is indistinguishable from a card that never stated
 # one.
-_RIDE = ('UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw '
-         '23 min (8.4 mi) trip Celebration Blvd, Acworth')
+_RIDE = ('UberX $12.45 5 min (1.2 mi) away Old 88 Hwy NW, Tellmoor '
+         '23 min (8.4 mi) trip Jamboreeton Blvd, Ivyhame')
 _LOST = ('UberX $12.45 5 min (1.2 mi) '
-         '23 min (8.4 mi) trip Celebration Blvd, Acworth')
+         '23 min (8.4 mi) trip Jamboreeton Blvd, Ivyhame')
 
 acc = OfferAccumulator()
 _first = acc.add(P.parse(_RIDE))
@@ -1243,8 +1243,8 @@ eq('...and a second frame without it does not manufacture one',
 # Those two fields are what the journal row stores, what map.html pins, and
 # what the stacking advice asks sameArea() about. The window's whole reason for
 # keeping the addresses stopped at the field that everything downstream uses.
-_MAPPED = ('$16.05 5 min (1.1 mi) away Celebration Blvd, Acworth '
-           '18 min (7.3 mi) trip N Cobb Pkwy NW, Acworth')
+_MAPPED = ('$16.05 5 min (1.1 mi) away Jamboreeton Blvd, Ivyhame '
+           '18 min (7.3 mi) trip N Vosk Pkwy NW, Ivyhame')
 _NO_MAP = '$16.05 5 min (1.1 mi) away 18 min (7.3 mi) trip'
 
 acc = OfferAccumulator()
@@ -1252,13 +1252,13 @@ for _ in range(3):
     _seen = acc.add(P.parse(_MAPPED))
 eq('both ends are read while the map is legible',
    (_seen['pickup'], _seen['dropoff']),
-   ('Celebration Blvd, Acworth', 'N Cobb Pkwy NW, Acworth'))
+   ('Jamboreeton Blvd, Ivyhame', 'N Vosk Pkwy NW, Ivyhame'))
 _lost = acc.add(P.parse(_NO_MAP))
 eq('...and the window keeps the addresses when a frame loses them',
-   _lost['places'], ['Celebration Blvd, Acworth', 'N Cobb Pkwy NW, Acworth'])
+   _lost['places'], ['Jamboreeton Blvd, Ivyhame', 'N Vosk Pkwy NW, Ivyhame'])
 eq('...including the two ends, which are what everything downstream reads',
    (_lost['pickup'], _lost['dropoff']),
-   ('Celebration Blvd, Acworth', 'N Cobb Pkwy NW, Acworth'))
+   ('Jamboreeton Blvd, Ivyhame', 'N Vosk Pkwy NW, Ivyhame'))
 
 # --- ...and which end is which is the FRAMES' verdict, not the union's order -
 #
@@ -1272,19 +1272,19 @@ eq('...including the two ends, which are what everything downstream reads',
 # Below: two frames read the card properly, a third arrives with the map
 # smeared and contributes a garbage name that merges as a new entry. The union
 # then ends on the garbage.
-_CLEAN = ('$18.40 4 min (1.0 mi) away Little Caesars (3372 Canton Rd) '
-          '16 min (5.2 mi) trip Barrington Overlook, Marietta')
-_SMEAR = ('$18.40 4 min (1.0 mi) away Little Caesars (3372 Canton Rd) '
-          '16 min (5.2 mi) trip Wrongway Dr NE, Smyrna')
+_CLEAN = ('$18.40 4 min (1.0 mi) away Little Caesars (3372 Belvan Rd) '
+          '16 min (5.2 mi) trip Carrowdene Overlook, Harrowen')
+_SMEAR = ('$18.40 4 min (1.0 mi) away Little Caesars (3372 Belvan Rd) '
+          '16 min (5.2 mi) trip Wrongway Dr NE, Pyrnel')
 
 acc = OfferAccumulator()
 for _ in range(2):
     _two = acc.add(P.parse(_CLEAN))
 _late = acc.add(P.parse(_SMEAR))
 eq('a name one late frame invented does not become the destination',
-   _late['dropoff'], 'Barrington Overlook, Marietta')
+   _late['dropoff'], 'Carrowdene Overlook, Harrowen')
 ok_('...and the union still KEEPS it, because losing an address is the worse '
-    'failure', 'Wrongway Dr NE, Smyrna' in _late['places'])
+    'failure', 'Wrongway Dr NE, Pyrnel' in _late['places'])
 
 # One frame is still enough, which is the property the union exists for: with
 # nothing to outvote it there is nothing for the count to do.
@@ -1292,20 +1292,20 @@ acc = OfferAccumulator()
 _only = acc.add(P.parse(_CLEAN))
 eq('one frame that read the card is still the whole answer',
    (_only['pickup'], _only['dropoff']),
-   ('Little Caesars (3372 Canton Rd)', 'Barrington Overlook, Marietta'))
+   ('Little Caesars (3372 Belvan Rd)', 'Carrowdene Overlook, Harrowen'))
 
 # And the card's own layout outranks the count. place_ends is a union too, so
 # it can carry a statement from a frame the voters never matched — a card
 # SAYING which end a name is beats any number of frames inferring it from
 # position. Without this the vote contradicted the layout on two more starts
 # than the rule it replaced, which is the one thing it must not do.
-_LAID = ('$12.50 5 min (1.2 mi) Old 41 Hwy NW, Kennesaw '
-         '23 mins (8.4 mi) Celebration Blvd, Acworth')
+_LAID = ('$12.50 5 min (1.2 mi) Old 88 Hwy NW, Tellmoor '
+         '23 mins (8.4 mi) Jamboreeton Blvd, Ivyhame')
 acc = OfferAccumulator()
 _said = acc.add(P.parse(_LAID))
 eq('where the card states the ends, the card decides',
    (_said['pickup'], _said['dropoff']),
-   ('Old 41 Hwy NW, Kennesaw', 'Celebration Blvd, Acworth'))
+   ('Old 88 Hwy NW, Tellmoor', 'Jamboreeton Blvd, Ivyhame'))
 
 # Row 18 of the owner's week, in miniature, and the reason the clause above is
 # not decoration. Seven frames read only the trip leg and its one place, so
@@ -1314,44 +1314,44 @@ eq('where the card states the ends, the card decides',
 # start. Seven votes to one, and the one is right: this is the row the
 # place_ends fix was written for, and a count that outranked the layout would
 # hand it straight back.
-_TRIP_ONLY = '$20.00 24 mins (10.6 mi) Canton Rd, Marietta'
-_WHOLE_CARD = ('$20.00 1 min (46 mi) away Cobb Pkwy NW, Acworth '
-               '24 mins (10.6 mi) trip Canton Rd, Marietta')
+_TRIP_ONLY = '$20.00 24 mins (10.6 mi) Belvan Rd, Harrowen'
+_WHOLE_CARD = ('$20.00 1 min (46 mi) away Vosk Pkwy NW, Ivyhame '
+               '24 mins (10.6 mi) trip Belvan Rd, Harrowen')
 acc = OfferAccumulator()
 for _n in range(7):
     acc.add(P.parse(_TRIP_ONLY), now=1000.0 + _n * 0.5)
 _r18 = acc.add(P.parse(_WHOLE_CARD), now=1003.5)
 eq('seven frames guessing do not outvote the card saying it once',
    (_r18['pickup'], _r18['dropoff']),
-   ('Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'))
+   ('Vosk Pkwy NW, Ivyhame', 'Belvan Rd, Harrowen'))
 
 # ...and the other half of that clause: the layout outranks the count only
 # where it SETTLES the question. Two frames print one name at the start, three
 # print another, so the union has two names both marked "start" — which is two
 # frames disagreeing, not a card with two pickups. The old rule takes the
 # first of them, which is first only because it arrived first.
-_START_A = ('$18.40 4 min (1.0 mi) away Wrongstart Dr NE, Smyrna '
-            '16 min (5.2 mi) trip Barrington Overlook, Marietta')
-_START_B = ('$18.40 4 min (1.0 mi) away Rightstart Ave NW, Kennesaw '
-            '16 min (5.2 mi) trip Barrington Overlook, Marietta')
+_START_A = ('$18.40 4 min (1.0 mi) away Wrongstart Dr NE, Pyrnel '
+            '16 min (5.2 mi) trip Carrowdene Overlook, Harrowen')
+_START_B = ('$18.40 4 min (1.0 mi) away Rightstart Ave NW, Tellmoor '
+            '16 min (5.2 mi) trip Carrowdene Overlook, Harrowen')
 acc = OfferAccumulator()
 for _n, _t in enumerate([_START_A, _START_A, _START_B, _START_B, _START_B]):
     _two_starts = acc.add(P.parse(_t), now=1000.0 + _n * 0.5)
 eq('where the layout names two starts it has settled nothing, and the count '
-   'decides', _two_starts['pickup'], 'Rightstart Ave NW, Kennesaw')
+   'decides', _two_starts['pickup'], 'Rightstart Ave NW, Tellmoor')
 
 # And where the count itself is split, it says nothing either: one frame each
 # is not a majority, so the old rule decides rather than the iteration order
 # of a dict.
-_END_A = ('$18.40 4 min (1.0 mi) away Little Caesars (3372 Canton Rd) '
-          '16 min (5.2 mi) trip Alpha Dr NE, Smyrna')
-_END_B = ('$18.40 4 min (1.0 mi) away Little Caesars (3372 Canton Rd) '
-          '16 min (5.2 mi) trip Beta Dr NE, Smyrna')
+_END_A = ('$18.40 4 min (1.0 mi) away Little Caesars (3372 Belvan Rd) '
+          '16 min (5.2 mi) trip Alpha Dr NE, Pyrnel')
+_END_B = ('$18.40 4 min (1.0 mi) away Little Caesars (3372 Belvan Rd) '
+          '16 min (5.2 mi) trip Beta Dr NE, Pyrnel')
 acc = OfferAccumulator()
 for _n, _t in enumerate([_END_A, _END_B]):
     _tied = acc.add(P.parse(_t), now=1000.0 + _n * 0.5)
 eq('one frame each is not a majority, and the older rule still decides',
-   _tied['dropoff'], 'Beta Dr NE, Smyrna')
+   _tied['dropoff'], 'Beta Dr NE, Pyrnel')
 
 # --- ...and a frame that saw ONE name has no opinion about which end it is --
 #
@@ -1362,10 +1362,10 @@ eq('one frame each is not a majority, and the older rule still decides',
 # let the default outvote the frames that had actually distinguished the two
 # ends.
 #
-# Row 397 of the owner's week is the shape: three frames read only `Ridenour
-# Ct …`, one read `Dairy Queen Grill & Chill (…)` → `Ridenour Ct …`. Three
+# Row 397 of the owner's week is the shape: three frames read only `Hidemoor
+# Ct …`, one read `Dairy Queen Grill & Chill (…)` → `Hidemoor Ct …`. Three
 # positional defaults beat the one frame that saw the journey, and both ends
-# were published as `Ridenour Ct`. 5 of 1,166 rows came out with the SAME
+# were published as `Hidemoor Ct`. 5 of 1,166 rows came out with the SAME
 # place at both ends; 0 did before the vote existed.
 #
 # The fixture carries row 397's own two properties, and both are load-bearing:
@@ -1373,16 +1373,16 @@ eq('one frame each is not a majority, and the older rule still decides',
 # the merchant's bracket open, so find_pickup's shop rule cannot either. Two
 # earlier drafts of this check passed against the broken code because they
 # accidentally supplied one or the other.
-_ONE_END = '$14.50 22 min (5.1 mi) total Ridenour Ct NW, Kennesaw'
-_BOTH_ENDS = ('$14.50 22 min (5.1 mi) total Dairy Queen Grill (2561 Cobb Pkwy '
-              'ow recent |) Ridenour Ct NW, Kennesaw')
+_ONE_END = '$14.50 22 min (5.1 mi) total Hidemoor Ct NW, Tellmoor'
+_BOTH_ENDS = ('$14.50 22 min (5.1 mi) total Dairy Queen Grill (2561 Vosk Pkwy '
+              'ow recent |) Hidemoor Ct NW, Tellmoor')
 acc = OfferAccumulator()
 for _n, _t in enumerate([_ONE_END, _ONE_END, _ONE_END, _BOTH_ENDS]):
     _r397 = acc.add(P.parse(_t), now=1000.0 + _n * 0.5)
 ok_('three frames that saw one name do not outvote the one that saw both',
     (_r397['pickup'] or '').startswith('Dairy Queen'))
 eq('...and the name they all read is the END, which is where the card put it',
-   _r397['dropoff'], 'Ridenour Ct NW, Kennesaw')
+   _r397['dropoff'], 'Hidemoor Ct NW, Tellmoor')
 ok_('...and the two ends are not the same place',
     _r397['pickup'] != _r397['dropoff'])
 
@@ -1397,7 +1397,7 @@ ok_('...and the two ends are not the same place',
 _SHOP_ONLY = ("$8.21 Guaranteed (incl. tip) 26 min (6.6 mi) total "
               "MRR's Deli (3055 North Main St)")
 _STREET_FIRST = ("$8.21 Guaranteed (incl. tip) 26 min (6.6 mi) total "
-                 "lroquis NW & Monrovia NW, Kennesaw ow recent |) "
+                 "lroquis NW & Monrovia NW, Tellmoor ow recent |) "
                  "MRR's Deli (3055 North Main St")
 acc = OfferAccumulator()
 for _n, _t in enumerate([_SHOP_ONLY, _SHOP_ONLY, _STREET_FIRST]):
@@ -1421,21 +1421,21 @@ ok_('the published ends are never one place twice',
 # held card's pickup and its dropoff none. OP.corner_ends marks it the end on
 # each frame, and the window narrows by that as by the layout. Invented.
 _CORNER = ('$9.40\nIncludes expected tip\n© 21 min (6.2 mi) total\n'
-           'Wren Hollow Cir NW & Quillon Lakes Dr NW,\nKennesaw')
+           'Wren Hollow Cir NW & Quillon Lakes Dr NW,\nTellmoor')
 _STORE = ('$9.40\nIncludes expected tip\n© 21 min (6.2 mi) total\nFable Grill\n'
-          'Wren Hollow Cir NW & Quillon Lakes Dr NW,\nKennesaw')
+          'Wren Hollow Cir NW & Quillon Lakes Dr NW,\nTellmoor')
 acc = OfferAccumulator()
 for _n, _t in enumerate([_CORNER, _CORNER, _CORNER]):
     _cn = acc.add(P.parse(_t), now=1000.0 + _n * 0.5)
 eq('[corner] three frames of a delivery card that read only its corner: no pickup, the corner '
    'the dropoff', (_cn['pickup'], _cn['dropoff'], _cn['placeEnds']),
-   (None, 'Wren Hollow Cir NW & Quillon Lakes Dr NW, Kennesaw', [1]))
+   (None, 'Wren Hollow Cir NW & Quillon Lakes Dr NW, Tellmoor', [1]))
 acc = OfferAccumulator()
 for _n, _t in enumerate([_CORNER, _STORE, _CORNER]):
     _cn = acc.add(P.parse(_t), now=1000.0 + _n * 0.5)
 eq('[corner] ...and the corner read first, a frame then reading the store: the store is the '
    'pickup', (_cn['pickup'], _cn['dropoff']),
-   ('Fable Grill', 'Wren Hollow Cir NW & Quillon Lakes Dr NW, Kennesaw'))
+   ('Fable Grill', 'Wren Hollow Cir NW & Quillon Lakes Dr NW, Tellmoor'))
 
 # --- which leg claims a slot, when two of them could ------------------------
 #
@@ -1457,9 +1457,9 @@ eq('[corner] ...and the corner read first, a frame then reading the store: the s
 # $18.96/hr state `no`, and the loop stopped resampling it. What every frame
 # read is 10 minutes over 1.4 miles with one distance missing, which rate()
 # reports as a ceiling.
-_AS_ONE = '$3.20 5 min (1.4 mi) trip Barrington Overlook, Marietta'
-_AS_TWO = ('$3.20 5 min away Little Caesars (3372 Canton Rd) '
-           '5 min (1.4 mi) trip Barrington Overlook, Marietta')
+_AS_ONE = '$3.20 5 min (1.4 mi) trip Carrowdene Overlook, Harrowen'
+_AS_TWO = ('$3.20 5 min away Little Caesars (3372 Belvan Rd) '
+           '5 min (1.4 mi) trip Carrowdene Overlook, Harrowen')
 acc = OfferAccumulator()
 for _n, _t in enumerate([_AS_ONE, _AS_TWO, _AS_TWO]):
     _slots = acc.add(P.parse(_t), now=1000.0 + _n * 0.5)
@@ -1481,8 +1481,8 @@ eq('...which is what keeps the card off a settled rate',
 # twice is the same leg read twice, while 9.9 is a leg the earlier frame never
 # saw. A "both" that quietly accepted either field would hand the slot back to
 # print order and file 9.9 miles under the leg that measured 1.4.
-_FAR_FIRST = ('$3.20 5 min (9.9 mi) away Little Caesars (3372 Canton Rd) '
-              '5 min (1.4 mi) trip Barrington Overlook, Marietta')
+_FAR_FIRST = ('$3.20 5 min (9.9 mi) away Little Caesars (3372 Belvan Rd) '
+              '5 min (1.4 mi) trip Carrowdene Overlook, Harrowen')
 acc = OfferAccumulator()
 for _n, _t in enumerate([_AS_ONE, _FAR_FIRST, _FAR_FIRST]):
     _far = acc.add(P.parse(_t), now=1000.0 + _n * 0.5)
@@ -1498,7 +1498,7 @@ eq('a leg agreeing on ONE field does not outrank one agreeing on two',
 # The fixture deliberately HAS a place in it, so a merge that simply took the
 # last thing in the list would be caught: a rule that returns None because the
 # list is empty proves nothing about a rule.
-_SHOP_ONLY = 'Deliver now $9.00 Pickup Kroger (Chastain) 22 min (4.6 mi) total'
+_SHOP_ONLY = 'Deliver now $9.00 Pickup Kroger (Morvaine) 22 min (4.6 mi) total'
 acc = OfferAccumulator()
 for _ in range(2):
     _cust = acc.add(P.parse(_SHOP_ONLY))
@@ -1523,7 +1523,7 @@ eq('...and the shop is where it starts, which is all the card said',
 # The fixture has to produce the street through the real parser rather than
 # being handed a places list, or it proves nothing about what a camera does.
 _MAP_LEAK = ("$8.00\n5 min (1.1 mi) away\n20 min (7.3 mi) trip\n"
-             "Lake Dr SE, Marietta\nPickup\nChuy's\nCustomer dropoff")
+             "Lake Dr SE, Harrowen\nPickup\nChuy's\nCustomer dropoff")
 _leak_frame = P.parse(_MAP_LEAK)
 eq('the fixture really does leak a street into the places (%r)'
    % (_leak_frame.get('places'),),
@@ -1545,7 +1545,7 @@ eq('...while still keeping the street it saw, which is evidence either way', boo
 # missed "Customer dropoff" — a partial read, a hand over the screen — is not
 # evidence that the card named somewhere, so one frame seeing it settles the
 # window.
-_HALF = "$8.00\n5 min (1.1 mi) away\n20 min (7.3 mi) trip\nLake Dr SE, Marietta\nPickup\nChuy's"
+_HALF = "$8.00\n5 min (1.1 mi) away\n20 min (7.3 mi) trip\nLake Dr SE, Harrowen\nPickup\nChuy's"
 eq('the half-read frame on its own does name an end (%r)'
    % (P.parse(_HALF).get('dropoff'),),
    P.parse(_HALF).get('dropoff') is not None, True)
@@ -1578,26 +1578,26 @@ eq('a new card starts without the last one\'s refusal',
 # One frame whose crop lost the pickup's name and kept both legs, so the
 # DESTINATION is the only name it has and arrives first. This is row 1149 of
 # the owner's week, where four frames in a row read it that way.
-_GLARE = "$14.03\n9 min (3.4 mi)\n| ~ 1 @\n21 mins (9.2 mi)\nCanton Rd, Marietta\n"
-_CLEAR = ("$14.03\n9 min (3.4 mi)\nCobb Pkwy NW, Acworth\n"
-          "21 mins (9.2 mi)\nCanton Rd, Marietta\n")
+_GLARE = "$14.03\n9 min (3.4 mi)\n| ~ 1 @\n21 mins (9.2 mi)\nBelvan Rd, Harrowen\n"
+_CLEAR = ("$14.03\n9 min (3.4 mi)\nVosk Pkwy NW, Ivyhame\n"
+          "21 mins (9.2 mi)\nBelvan Rd, Harrowen\n")
 eq('the damaged frame has one name and the card put it at the far end',
    [P.parse(_GLARE)['places'], P.parse(_GLARE)['placeEnds']],
-   [['Canton Rd, Marietta'], [1]])
+   [['Belvan Rd, Harrowen'], [1]])
 eq('...so on its own it names a destination and no pickup at all',
    [P.parse(_GLARE)['pickup'], P.parse(_GLARE)['dropoff']],
-   [None, 'Canton Rd, Marietta'])
+   [None, 'Belvan Rd, Harrowen'])
 
 acc = OfferAccumulator()
 acc.add(P.parse(_GLARE), now=100.0)
 _two = acc.add(P.parse(_CLEAR), now=100.5)
 eq('the merged list is in the order the FRAMES arrived',
-   _two['places'], ['Canton Rd, Marietta', 'Cobb Pkwy NW, Acworth'])
+   _two['places'], ['Belvan Rd, Harrowen', 'Vosk Pkwy NW, Ivyhame'])
 eq('...and the ends the card printed travel with it',
    _two['placeEnds'], [1, 0])
 eq('so the first entry is not taken for the pickup', _two['pickup'],
-   'Cobb Pkwy NW, Acworth')
-eq('...nor the last for the destination', _two['dropoff'], 'Canton Rd, Marietta')
+   'Vosk Pkwy NW, Ivyhame')
+eq('...nor the last for the destination', _two['dropoff'], 'Belvan Rd, Harrowen')
 
 # ...and the order the two frames arrive in must not change the answer.
 acc = OfferAccumulator()
@@ -1605,14 +1605,14 @@ acc.add(P.parse(_CLEAR), now=200.0)
 _rev = acc.add(P.parse(_GLARE), now=200.5)
 eq('the same two frames the other way round give the same two ends',
    [_rev['pickup'], _rev['dropoff']],
-   ['Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'])
+   ['Vosk Pkwy NW, Ivyhame', 'Belvan Rd, Harrowen'])
 
 # Two frames that put ONE name at two different ends. That is damage, not a
 # vote - the same rule to_pickup keeps for a card whose word and whose layout
 # name different legs - so the layout is refused for those names and the older
 # rules decide the card.
-_SWAPPED = ("$14.03\n9 min (3.4 mi)\nCanton Rd, Marietta\n"
-            "21 mins (9.2 mi)\nCobb Pkwy NW, Acworth\n")
+_SWAPPED = ("$14.03\n9 min (3.4 mi)\nBelvan Rd, Harrowen\n"
+            "21 mins (9.2 mi)\nVosk Pkwy NW, Ivyhame\n")
 acc = OfferAccumulator()
 acc.add(P.parse(_CLEAR), now=300.0)
 _fought = acc.add(P.parse(_SWAPPED), now=300.5)
@@ -1620,13 +1620,13 @@ eq('two frames that disagree about an end refuse the layout rather than vote',
    _fought['placeEnds'], [None, None])
 eq('...and the card is then read by the rules that were always there',
    [_fought['pickup'], _fought['dropoff']],
-   ['Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'])
+   ['Vosk Pkwy NW, Ivyhame', 'Belvan Rd, Harrowen'])
 
 # The ends are kept in step with the list by the index merge_place returns,
 # not by matching the strings a second time - the two readings a window joins
 # are by definition the ones that do not match on sight.
-_NO_COMMA = ("$14.03\n9 min (3.4 mi)\nCobb Pkwy NW Acworth\n"
-             "21 mins (9.2 mi)\nCanton Rd, Marietta\n")
+_NO_COMMA = ("$14.03\n9 min (3.4 mi)\nVosk Pkwy NW Ivyhame\n"
+             "21 mins (9.2 mi)\nBelvan Rd, Harrowen\n")
 acc = OfferAccumulator()
 acc.add(P.parse(_NO_COMMA), now=400.0)
 _comma = acc.add(P.parse(_CLEAR), now=400.5)
@@ -1635,7 +1635,7 @@ eq('...and the ends list is as long as the list it describes',
    len(_comma['placeEnds']), len(_comma['places']))
 eq('...and the longer reading kept the end the shorter one was given',
    [_comma['pickup'], _comma['dropoff']],
-   ['Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'])
+   ['Vosk Pkwy NW, Ivyhame', 'Belvan Rd, Harrowen'])
 
 # A card that is not the two-leg layout says nothing about its ends, and the
 # older rules must read exactly as they always did.
@@ -1679,14 +1679,14 @@ def _door_card(line):
 
 
 _dw = OfferAccumulator()
-_d1 = _dw.add(_door_card('2530 Kestrel Plains Road, Marietta, 30066 GA\n'), now=700.0)
-_d2 = _dw.add(_door_card('2530 Kestrel Plains Road, Marietta, 30.\n'), now=700.5)
+_d1 = _dw.add(_door_card('2530 Kestrel Plains Road, Harrowen, 90666 GA\n'), now=700.0)
+_d2 = _dw.add(_door_card('2530 Kestrel Plains Road, Harrowen, 30.\n'), now=700.5)
 _d3 = _dw.add(_door_card(''), now=701.0)
 eq('the premise: the last frame read no door, alone', _door_card('')['pickupLine'], None)
 eq('a store\'s door read under its name is kept across frames, the fullest reading '
    'standing over the edge-cut one and over a frame that lost it',
    [(_d['pickup'], _d['pickupLine'], _d['dropoff']) for _d in (_d1, _d2, _d3)],
-   [('Lark Owl Grill', '2530 Kestrel Plains Road, Marietta, GA 30066', None)] * 3)
+   [('Lark Owl Grill', '2530 Kestrel Plains Road, Harrowen, GA 90666', None)] * 3)
 eq('...and the episode is one card throughout', [_d1['episode'], _d3['episode']],
    [_d1['episode']] * 2)
 
@@ -1703,20 +1703,20 @@ def _two_store(second_line, tail='8 Customer dropoff\nDrop off 2 orders'):
 _tw = OfferAccumulator()
 _t1 = _tw.add(_two_store('2516 Quillon Street, Brookvale, 301...\n'), now=720.0)
 _t2 = _tw.add(_two_store(''), now=720.5)
-_t3 = _tw.add(_two_store('2516 Quillon Street, Brookvale, 30144 GA\n'), now=721.0)
+_t3 = _tw.add(_two_store('2516 Quillon Street, Brookvale, 90744 GA\n'), now=721.0)
 eq('the premise: the middle frame, its second store\'s line lost, read one store alone',
    (_two_store('')['places'], _two_store('')['placeDoors']),
    (['Lark Owl Pizza'], ['4410 Fernhill Road Northwest']))
 eq('every store\'s door is kept beside its own name across frames, the fullest standing',
    [_d['placeDoors'] for _d in (_t1, _t2, _t3)],
    [['4410 Fernhill Road Northwest', '2516 Quillon Street, Brookvale']] * 2
-   + [['4410 Fernhill Road Northwest', '2516 Quillon Street, Brookvale, GA 30144']])
+   + [['4410 Fernhill Road Northwest', '2516 Quillon Street, Brookvale, GA 90744']])
 eq('...the dropoff shape voted across the window: one customer, two orders',
    (_t3['dropoffs'], _t3['dropoffOrders'], _t3['pickupLine']),
    (1, 2, '4410 Fernhill Road Northwest'))
 eq('...and a card that is no stops card carries no doors',
    OfferAccumulator().add(P.parse('$9.12\nGuaranteed (incl. tip)\n26 min (7.1 mi) total\n'
-                                  'Fable Grill (1200 Lantern Rd)\nBirch Ct, Marietta'))
+                                  'Fable Grill (1200 Lantern Rd)\nBirch Ct, Harrowen'))
    ['placeDoors'], [])
 
 # --- the wall clock stepping --------------------------------------------------
@@ -1763,9 +1763,9 @@ finally:
 # value read. Three readings of one card, in turn, as OCR gives them.
 import time as _time                                           # noqa: E402
 
-_reads = [P.parse('$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip 123 Ab St, Acworth'),
-          P.parse('$12.45 5 min (1.2 mi) away 28 min (8.4 mi) trip 123 Ab St, Acworth'),
-          P.parse('$12.45 5 min (1.2 mi) away 23 min (3.4 mi) trip 123 Ab St, Acworth')]
+_reads = [P.parse('$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip 123 Ab St, Ivyhame'),
+          P.parse('$12.45 5 min (1.2 mi) away 28 min (8.4 mi) trip 123 Ab St, Ivyhame'),
+          P.parse('$12.45 5 min (1.2 mi) away 23 min (3.4 mi) trip 123 Ab St, Ivyhame')]
 _long = OfferAccumulator()
 for _i in range(10000):
     _last = _long.add(dict(_reads[_i % 3]), now=1000.0 + _i * 0.5)

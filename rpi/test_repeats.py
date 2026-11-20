@@ -8,7 +8,7 @@ every few seconds until the driver decides. That is by design, and for most of
 the project's life the extra readings cost nothing, because an identical reading
 is dropped and a better one supersedes.
 
-Then a real recording produced this, one Uber card in Chattanooga, seventy
+Then a real recording produced this, one Uber card in Wennamocket, seventy
 seconds, four rows:
 
     19:50:37  $10.30   31 min   15.1 mi      $11.17/hr
@@ -88,7 +88,7 @@ def feed(log, texts, start=1_700_000_000.0, step=20.0, acc=None):
     return log.journal.rows()
 
 
-# The Chattanooga card, as the camera actually read it. The second line is the
+# The Wennamocket card, as the camera actually read it. The second line is the
 # decimal point lost; the third is the accumulator merging a stale leg into a
 # fresh one, which is where 40 min and 23.6 mi come from.
 GOOD = '$10.30 12 min (5.1 mi) away 19 min (10.0 mi) trip'
@@ -99,7 +99,7 @@ BAD_MERGE = '$10.30 12 min (5.1 mi) away 28 min (18.5 mi) trip'
 # The writing side: what the rig files.
 # =====================================================================
 
-rows = feed(fresh('chattanooga.jsonl'), [GOOD, LOST_POINT, BAD_MERGE, GOOD])
+rows = feed(fresh('wennamocket.jsonl'), [GOOD, LOST_POINT, BAD_MERGE, GOOD])
 eq('the four readings that made four offers are one offer',
    len({r['id'] for r in rows}), 1)
 eq('...with every reading still on disk', len(rows), 4)
@@ -534,7 +534,7 @@ else:
         # distance, so a reading that wins on those takes its empty `places`
         # with it — and the offers page then shows no address for a card
         # another reading of the same card read the map off perfectly well.
-        WHERE = ['Chastain Rd NW, Kennesaw', 'Canton Rd, Marietta']
+        WHERE = ['Morvaine Rd NW, Tellmoor', 'Belvan Rd, Harrowen']
         write([dict(reading('c', 1, T, 10.30, 31, 15.1), places=WHERE),
                reading('c', 2, T + 4_000, 10.30, 40, 23.6),
                reading('c', 3, T + 8_000, 10.30, 31, 15.1)])
@@ -546,7 +546,7 @@ else:
         # that does not. Here the outvoted 40min/23.6mi reading has an address
         # and so does an agreeing 31min/15.1mi one; taking the first row with a
         # place would show the outvoted reading's.
-        write([dict(reading('c', 1, T, 10.30, 40, 23.6), places=['Somewhere Else Rd, Acworth']),
+        write([dict(reading('c', 1, T, 10.30, 40, 23.6), places=['Somewhere Else Rd, Ivyhame']),
                dict(reading('c', 2, T + 4_000, 10.30, 31, 15.1), places=WHERE),
                reading('c', 3, T + 8_000, 10.30, 31, 15.1)])
         eq('the address comes from a reading that agrees about the card',
@@ -554,7 +554,7 @@ else:
 
         # ...and where the winner has one of its own, that is the one to show:
         # it is the reading the numbers came from.
-        write([dict(reading('c', 1, T, 10.30, 40, 23.6), places=['Somewhere Else Rd, Acworth']),
+        write([dict(reading('c', 1, T, 10.30, 40, 23.6), places=['Somewhere Else Rd, Ivyhame']),
                dict(reading('c', 2, T + 4_000, 10.30, 31, 15.1), places=WHERE),
                dict(reading('c', 3, T + 8_000, 10.30, 31, 15.1), places=WHERE)])
         eq('an address on the winning reading is not overruled',
@@ -563,7 +563,7 @@ else:
         # An impossible reading does not lend one either. It is the row the vote
         # drove to -1000, and its map is no more believable than its money.
         write([dict(reading('c', 1, T, 1030.0, 31, 15.1, suspect=True),
-                    places=['Nowhere At All Rd, Kennesaw']),
+                    places=['Nowhere At All Rd, Tellmoor']),
                reading('c', 2, T + 4_000, 10.30, 31, 15.1)])
         eq('a reading the vote refused does not lend its address',
            offers()[0].get('places'), None)

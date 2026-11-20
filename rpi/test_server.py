@@ -326,8 +326,8 @@ try:
         # any split, and readings eight days apart make the winner itself fall
         # outside the window, so the offer never appears either way.
         offer(2, NOW - 2 * DAY - 60000, pay=14.0,
-              pickup='Chipotle (Barrett)', dropoff='Oak St',
-              places=['Chipotle (Barrett)', 'Oak St']),
+              pickup='Chipotle (Tallett)', dropoff='Oak St',
+              places=['Chipotle (Tallett)', 'Oak St']),
         offer(2, NOW - 2 * DAY + 60000, pay=14.0, seq=2),
         # ...and the one the rule above hides, scanned today.
         offer(3, NOW - 120000, pay=11.0),
@@ -381,7 +381,7 @@ try:
     # This is the whole of what the straddle check is for: without it the
     # equivalence above passes on a card that lost the same thing both ways.
     eq('...carrying the address the reading outside the window saw',
-       (N.get('off2') or {}).get('pickup'), 'Chipotle (Barrett)')
+       (N.get('off2') or {}).get('pickup'), 'Chipotle (Tallett)')
 
     # The fold is cached per window now, and the windows have to stay apart.
     # Asked narrow FIRST and then wide, a cache that ignored the floor would
@@ -532,7 +532,7 @@ try:
     _screen = {'v': 1, 'kind': 'screen', 'at': NOW - 2000,
                'id': 'screen-%d' % (NOW - 2000), 'seq': 1,
                'after': 'off20', 'afterMs': 4000,
-               'text': '3.2 mi\nI-75 S toward 14th St\nDeliver to Daria I.'}
+               'text': '3.2 mi\nI-98 S toward 14th St\nDeliver to Daria I.'}
     write(journal, [_screen], mode='a')
     _after_page = get(base, '/api/journal?days=0')
     eq('a screen row is not counted as an offer',
@@ -571,34 +571,34 @@ try:
     # Both rows are staged directly because that divergence is the whole point
     # and a live run cannot be made to produce it on demand.
     write(journal, [
-        offer(40, NOW - 5000, dropoff='Oak Ln, Marietta'),
+        offer(40, NOW - 5000, dropoff='Oak Ln, Harrowen'),
         {'v': 1, 'kind': 'mark', 'id': 'off40', 'at': NOW - 1000,
-         'dropoff': '222 Wrong Way Dr, Kennesaw, GA 30144', 'asked': False},
+         'dropoff': '222 Wrong Way Dr, Tellmoor, GA 90744', 'asked': False},
         # ...and one that named nowhere, which is the case the sighting is FOR.
         offer(41, NOW - 5000),
         {'v': 1, 'kind': 'mark', 'id': 'off41', 'at': NOW - 1000,
-         'dropoff': '111 Filled In Rd, Kennesaw, GA 30144', 'asked': False},
+         'dropoff': '111 Filled In Rd, Tellmoor, GA 90744', 'asked': False},
         # ...and a press, which still overrules the card. Absent `asked` means
         # asked, so rows written before that field existed keep their meaning —
         # written without it here deliberately, because that is what is already
         # in this driver's journal.
-        offer(42, NOW - 5000, dropoff='Oak Ln, Marietta'),
+        offer(42, NOW - 5000, dropoff='Oak Ln, Harrowen'),
         {'v': 1, 'kind': 'mark', 'id': 'off42', 'at': NOW - 1000,
-         'dropoff': '333 Asked For Ave, Kennesaw, GA 30144'},
+         'dropoff': '333 Asked For Ave, Tellmoor, GA 90744'},
     ], mode='a')
     folded = {r.get('id'): r for r in get(base, '/api/journal?days=0').get('offers', [])}
     eq('an unasked sighting does not overwrite a card that named its own end',
-       (folded.get('off40') or {}).get('dropoff'), 'Oak Ln, Marietta')
+       (folded.get('off40') or {}).get('dropoff'), 'Oak Ln, Harrowen')
     no_('...and the row is not claimed as scanned either',
         (folded.get('off40') or {}).get('dropoffScanned'))
     eq('...while the same sighting fills a card that named nowhere',
        (folded.get('off41') or {}).get('dropoff'),
-       '111 Filled In Rd, Kennesaw, GA 30144')
+       '111 Filled In Rd, Tellmoor, GA 90744')
     ok_('...and that one IS marked as scanned',
         (folded.get('off41') or {}).get('dropoffScanned') is True)
     eq('...and a press still overrules the card, as it always did',
        (folded.get('off42') or {}).get('dropoff'),
-       '333 Asked For Ave, Kennesaw, GA 30144')
+       '333 Asked For Ave, Tellmoor, GA 90744')
 
     # ...and a sighting does not displace a press, however late it arrives.
     #
@@ -615,24 +615,24 @@ try:
     write(journal, [
         offer(43, NOW - 5000),
         {'v': 1, 'kind': 'mark', 'id': 'off43', 'at': NOW - 4000,
-         'dropoff': '444 Asked First Rd, Kennesaw, GA 30144', 'asked': True},
+         'dropoff': '444 Asked First Rd, Tellmoor, GA 90744', 'asked': True},
         {'v': 1, 'kind': 'mark', 'id': 'off43', 'at': NOW - 1000,
-         'dropoff': '555 Seen Later Dr, Kennesaw, GA 30144', 'asked': False},
+         'dropoff': '555 Seen Later Dr, Tellmoor, GA 90744', 'asked': False},
         # ...while two of a KIND still fold newest-first, or the rule would
         # have stopped being about presses and started being about order.
         offer(44, NOW - 5000),
         {'v': 1, 'kind': 'mark', 'id': 'off44', 'at': NOW - 4000,
-         'dropoff': '666 Pressed Early Rd, Kennesaw, GA 30144', 'asked': True},
+         'dropoff': '666 Pressed Early Rd, Tellmoor, GA 90744', 'asked': True},
         {'v': 1, 'kind': 'mark', 'id': 'off44', 'at': NOW - 1000,
-         'dropoff': '777 Pressed Again Dr, Kennesaw, GA 30144', 'asked': True},
+         'dropoff': '777 Pressed Again Dr, Tellmoor, GA 90744', 'asked': True},
     ], mode='a')
     folded = {r.get('id'): r for r in get(base, '/api/journal?days=0').get('offers', [])}
     eq('a later sighting does not displace an earlier press',
        (folded.get('off43') or {}).get('dropoff'),
-       '444 Asked First Rd, Kennesaw, GA 30144')
+       '444 Asked First Rd, Tellmoor, GA 90744')
     eq('...while a later press does displace an earlier one',
        (folded.get('off44') or {}).get('dropoff'),
-       '777 Pressed Again Dr, Kennesaw, GA 30144')
+       '777 Pressed Again Dr, Tellmoor, GA 90744')
 
     # --- a mark that carries its offer, after a restart -----------------------
     # The offer on record is process memory. The panel keeps "Took?" across a
@@ -642,16 +642,16 @@ try:
     code, reply = post(base, '/api/offers/mark', {
         'id': 'off99', 'accepted': True,
         'offer': {'id': 'off99', 'pay': 12.45, 'minutes': 28.0, 'billedMinutes': 28.0,
-                  'miles': 5.0, 'cost': 1.75, 'dropoff': 'Oak Ln, Marietta'}})
+                  'miles': 5.0, 'cost': 1.75, 'dropoff': 'Oak Ln, Harrowen'}})
     eq('a mark with its offer is taken', code, 200)
     ok_('...and puts the order in the car', reply.get('holding') is True)
     held = get(base, '/api/status').get('holding')
-    eq('...where the status says it ends', (held or {}).get('dropoff'), 'Oak Ln, Marietta')
+    eq('...where the status says it ends', (held or {}).get('dropoff'), 'Oak Ln, Harrowen')
     code, reply = post(base, '/api/offers/mark', {'id': 'off98', 'accepted': True,
                                                   'offer': {'id': 'off97', 'pay': 1.0, 'minutes': 5.0}})
     status = get(base, '/api/status')
     eq('...but only the offer it names: the order in the car is still the first',
-       (status.get('holding') or {}).get('dropoff'), 'Oak Ln, Marietta')
+       (status.get('holding') or {}).get('dropoff'), 'Oak Ln, Harrowen')
     eq('...and so is the offer on record', (status.get('offer') or {}).get('id'), 'off99')
 finally:
     stop(proc)
@@ -1177,9 +1177,9 @@ write(journal, [
     # map and the other did not.
     offer(1, NOW - 2000, id='twice', places=[], pickup=None, dropoff=None),
     offer(1, NOW - 1000, id='twice', seq=2,
-          places=['Chick-fil-A (Dallas Hwy)', 'Old Mountain Rd NW, Kennesaw'],
-          pickup='Chick-fil-A (Dallas Hwy)',
-          dropoff='Old Mountain Rd NW, Kennesaw'),
+          places=['Chick-fil-A (Dorvan Hwy)', 'Old Mountain Rd NW, Tellmoor'],
+          pickup='Chick-fil-A (Dorvan Hwy)',
+          dropoff='Old Mountain Rd NW, Tellmoor'),
 ])
 proc, base = start({'SCANNER': '0'}, journal)
 try:
@@ -1193,9 +1193,9 @@ try:
     # offers no map control for it, which reads as the page contradicting
     # itself about one row.
     eq('...and which end is the pickup',
-       row.get('pickup'), 'Chick-fil-A (Dallas Hwy)')
+       row.get('pickup'), 'Chick-fil-A (Dorvan Hwy)')
     eq('...and which is the dropoff',
-       row.get('dropoff'), 'Old Mountain Rd NW, Kennesaw')
+       row.get('dropoff'), 'Old Mountain Rd NW, Tellmoor')
 finally:
     stop(proc)
     shutil.rmtree(work, ignore_errors=True)
@@ -1213,8 +1213,8 @@ write(journal, [
           pickup='Wrong Shop', dropoff='Wrong St, Nowhere'),
     # ...and this one agrees, so it is.
     offer(1, NOW - 1000, id='three', seq=3,
-          places=['Right Shop', 'Right St, Dallas'],
-          pickup='Right Shop', dropoff='Right St, Dallas'),
+          places=['Right Shop', 'Right St, Dorvan'],
+          pickup='Right Shop', dropoff='Right St, Dorvan'),
 ])
 proc, base = start({'SCANNER': '0'}, journal)
 try:
@@ -1223,7 +1223,7 @@ try:
     row = got[0] if got else {}
     eq('the ends are borrowed from the reading that agrees about the card',
        (row.get('pickup'), row.get('dropoff')),
-       ('Right Shop', 'Right St, Dallas'))
+       ('Right Shop', 'Right St, Dorvan'))
     ok_('...and the places with them, from the same one',
         (row.get('places') or [''])[0] == 'Right Shop')
 finally:
@@ -1315,14 +1315,14 @@ if shutil.which('python3'):
             '                  "band": 15, "costPerMile": 0.35, "dropoff": None,\n'
             '                  "endRefused": True, "state": "go"}}), flush=True)\n'
             'def addr(line):\n'
-            '    print(json.dumps({"dropoff": {"line": line, "street": "3100 Esquire Dr NW",\n'
-            '        "city": "Kennesaw", "state": "GA", "zip": "30144",\n'
+            '    print(json.dumps({"dropoff": {"line": line, "street": "3100 Elquine Dr NW",\n'
+            '        "city": "Tellmoor", "state": "GA", "zip": "90744",\n'
             '        "at": int(time.time() * 1000)}}), flush=True)\n'
             'addr("nobody home, 0 Nowhere St, X, GA 30000")\n'
             'time.sleep(0.6)\n'
             'card("o-screen")\n'
             'time.sleep(0.6)\n'
-            'addr("3100 Esquire Dr NW, Kennesaw, GA 30144")\n'
+            'addr("3100 Elquine Dr NW, Tellmoor, GA 90744")\n'
             'time.sleep(600)\n')
     # The row the rig itself would have written for this card. server.js does
     # not write offer rows — the scanner does, straight to the file — so a
@@ -1346,7 +1346,7 @@ if shutil.which('python3'):
             got is not None)
         eq('...as the address itself',
            (got.get('offer') or {}).get('dropoff'),
-           '3100 Esquire Dr NW, Kennesaw, GA 30144')
+           '3100 Elquine Dr NW, Tellmoor, GA 90744')
         # Said to be a SCAN rather than something the card printed. The two are
         # different degrees of evidence and the row has to be able to say which
         # it is holding: a cross street off a card is what the reader made of a
@@ -1382,7 +1382,7 @@ if shutil.which('python3'):
         eq('the address is appended as a note naming the offer', len(marks), 1)
         eq('...naming it', marks[0].get('id'), 'o-screen')
         eq('...and carrying the address', marks[0].get('dropoff'),
-           '3100 Esquire Dr NW, Kennesaw, GA 30144')
+           '3100 Elquine Dr NW, Tellmoor, GA 90744')
         # The first address arrived before any card did. The old rule refused
         # it for being unheld; the new one refuses it for having nothing to
         # belong to, which is the reason that was always doing the work.
@@ -1394,7 +1394,7 @@ if shutil.which('python3'):
         mine = [o for o in (page.get('offers') or []) if o.get('id') == 'o-screen']
         eq('the offers page shows the row it landed on', len(mine), 1)
         eq('...with the address on it', mine[0].get('dropoff'),
-           '3100 Esquire Dr NW, Kennesaw, GA 30144')
+           '3100 Elquine Dr NW, Tellmoor, GA 90744')
         ok_('...still saying it was scanned', mine[0].get('dropoffScanned') is True)
     finally:
         stop(proc)
@@ -1430,7 +1430,7 @@ if shutil.which('python3'):
             '                  "costPerMile": 0.35, "dropoff": dropoff}}), flush=True)\n'
             'def addr(line, asked):\n'
             '    print(json.dumps({"dropoff": {"line": line, "street": "1 X St",\n'
-            '        "city": "Kennesaw", "state": "GA", "zip": "30144",\n'
+            '        "city": "Tellmoor", "state": "GA", "zip": "90744",\n'
             '        "asked": asked, "at": int(time.time() * 1000)}}), flush=True)\n'
             # Before any card at all, so there is nothing to attach it to and
             # nothing is stored — the one case where the driver DID ask and the
@@ -1443,20 +1443,20 @@ if shutil.which('python3'):
             # gone before the listener has connected, and the check would pass
             # or fail on how busy the box was.
             'time.sleep(1.0)\n'
-            'addr("444 No Card Yet Rd, Kennesaw, GA 30144", True)\n'
+            'addr("444 No Card Yet Rd, Tellmoor, GA 90744", True)\n'
             'time.sleep(0.7)\n'
             '# A card that named nowhere: an unasked sighting fills it.\n'
             'card("o-blank", None)\n'
             'time.sleep(0.7)\n'
-            'addr("111 Filled In Rd, Kennesaw, GA 30144", False)\n'
+            'addr("111 Filled In Rd, Tellmoor, GA 90744", False)\n'
             'time.sleep(0.7)\n'
             '# A card that named its own end: an unasked sighting must not move it.\n'
-            'card("o-named", "Oak Ln, Marietta")\n'
+            'card("o-named", "Oak Ln, Harrowen")\n'
             'time.sleep(0.7)\n'
-            'addr("222 Wrong Way Dr, Kennesaw, GA 30144", False)\n'
+            'addr("222 Wrong Way Dr, Tellmoor, GA 90744", False)\n'
             'time.sleep(0.7)\n'
             '# ...and the driver ASKING does move it.\n'
-            'addr("333 Asked For Ave, Kennesaw, GA 30144", True)\n'
+            'addr("333 Asked For Ave, Tellmoor, GA 90744", True)\n'
             'time.sleep(600)\n')
     open(journal, 'w').close()
     proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
@@ -1478,7 +1478,7 @@ if shutil.which('python3'):
         time.sleep(1.0)
         blank = (get(base, '/api/status').get('offer') or {})
         eq('an address nobody asked for fills a card that named nowhere',
-           blank.get('dropoff'), '111 Filled In Rd, Kennesaw, GA 30144')
+           blank.get('dropoff'), '111 Filled In Rd, Tellmoor, GA 90744')
         ok_('...and is still marked as read off the screen',
             blank.get('dropoffScanned') is True)
 
@@ -1486,7 +1486,7 @@ if shutil.which('python3'):
         time.sleep(1.0)
         named = (get(base, '/api/status').get('offer') or {})
         eq('...but does not overwrite a card that named its own end',
-           named.get('dropoff'), 'Oak Ln, Marietta')
+           named.get('dropoff'), 'Oak Ln, Harrowen')
         # ...and nothing was written about it either, because nothing changed.
         rows = [json.loads(l) for l in open(journal) if l.strip()]
         no_('...nor writes one down',
@@ -1518,7 +1518,7 @@ if shutil.which('python3'):
             time.sleep(0.05)
         eq('an address the driver asked for overrules the card',
            (get(base, '/api/status').get('offer') or {}).get('dropoff'),
-           '333 Asked For Ave, Kennesaw, GA 30144')
+           '333 Asked For Ave, Tellmoor, GA 90744')
 
         # --- and what the PANEL was told, which is a different question ------
         #
@@ -1603,17 +1603,17 @@ if shutil.which('python3'):
             '                  "dropoff": None}}), flush=True)\n'
             'def addr(line, asked):\n'
             '    print(json.dumps({"dropoff": {"line": line, "street": "1 X St",\n'
-            '        "city": "Kennesaw", "state": "GA", "zip": "30144",\n'
+            '        "city": "Tellmoor", "state": "GA", "zip": "90744",\n'
             '        "asked": asked, "at": int(time.time() * 1000)}}), flush=True)\n'
             '# A card that names nowhere, which is 129 of this driver\'s 272.\n'
             'card("o-reread", 5.0)\n'
             'time.sleep(0.7)\n'
-            'addr("123 Oak St, Kennesaw, GA 30144", True)\n'
+            'addr("123 Oak St, Tellmoor, GA 90744", True)\n'
             'time.sleep(0.7)\n'
             '# The SAME card, read fuller — a corrected mileage.\n'
             'card("o-reread", 8.4)\n'
             'time.sleep(0.7)\n'
-            'addr("999 Wrong Way Dr, Dallas, GA 30132", False)\n'
+            'addr("999 Wrong Way Dr, Dorvan, GA 90732", False)\n'
             'time.sleep(600)\n')
     open(journal, 'w').close()
     proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
@@ -1636,7 +1636,7 @@ if shutil.which('python3'):
         # by never reaching the case it is named after.
         eq('the card really was read again', now.get('miles'), 8.4)
         eq('...and the address the driver pressed for survived it',
-           now.get('dropoff'), '123 Oak St, Kennesaw, GA 30144')
+           now.get('dropoff'), '123 Oak St, Tellmoor, GA 90744')
         ok_('...still marked as read off the screen',
             now.get('dropoffScanned') is True)
         rows = [json.loads(l) for l in open(journal) if l.strip()]
@@ -1646,7 +1646,7 @@ if shutil.which('python3'):
         mine = [o for o in (page.get('offers') or []) if o.get('id') == 'o-reread']
         if mine:
             eq('...so the offers page shows what was pressed for',
-               mine[0].get('dropoff'), '123 Oak St, Kennesaw, GA 30144')
+               mine[0].get('dropoff'), '123 Oak St, Tellmoor, GA 90744')
     finally:
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
@@ -1674,9 +1674,9 @@ if shutil.which('python3'):
             '# Long enough for the mark below to put the order in the car\n'
             '# first — the press being tested is one made while HOLDING.\n'
             'time.sleep(2.0)\n'
-            'print(json.dumps({"dropoff": {"line": "77 Held Job Way, Kennesaw, GA 30144",\n'
-            '    "street": "77 Held Job Way", "city": "Kennesaw", "state": "GA",\n'
-            '    "zip": "30144", "asked": True,\n'
+            'print(json.dumps({"dropoff": {"line": "77 Held Job Way, Tellmoor, GA 90744",\n'
+            '    "street": "77 Held Job Way", "city": "Tellmoor", "state": "GA",\n'
+            '    "zip": "90744", "asked": True,\n'
             '    "at": int(time.time() * 1000)}}), flush=True)\n'
             'time.sleep(600)\n')
     open(journal, 'w').close()
@@ -1720,13 +1720,13 @@ if shutil.which('python3'):
         if marks:
             eq('...naming the order in the car', marks[0].get('id'), 'o-held')
             eq('...and carrying the address',
-               marks[0].get('dropoff'), '77 Held Job Way, Kennesaw, GA 30144')
+               marks[0].get('dropoff'), '77 Held Job Way, Tellmoor, GA 90744')
             eq('...and saying the driver asked for it', marks[0].get('asked'), True)
         # The premise, so this cannot pass by the order having quietly expired
         # and the address landing on some other path.
         held = get(base, '/api/status').get('holding') or {}
         eq('...while the order really was still in the car',
-           held.get('dropoff'), '77 Held Job Way, Kennesaw, GA 30144')
+           held.get('dropoff'), '77 Held Job Way, Tellmoor, GA 90744')
         # The stream: the ⌖ read filed onto the hold goes out carrying that
         # hold, with no `ready`, which is how Map view pins it between
         # readings. Without it the panel learned the end only from the next
@@ -1738,7 +1738,7 @@ if shutil.which('python3'):
         _said = [m for m in heard if m.get('dropoff')]
         eq('held end: the ⌖ read filed onto the order in the car goes out carrying it',
            [((m.get('holding') or {}).get('dropoff'), 'ready' in m) for m in _said],
-           [('77 Held Job Way, Kennesaw, GA 30144', False)])
+           [('77 Held Job Way, Tellmoor, GA 90744', False)])
         ok_('...and marked as read off the screen',
             held.get('dropoffScanned') is True)
         # ...and it survives a restart, which is the whole point of writing it.
@@ -1746,7 +1746,7 @@ if shutil.which('python3'):
         mine = [o for o in (page.get('offers') or []) if o.get('id') == 'o-held']
         if mine:
             eq('...so the offers page has it off the file',
-               mine[0].get('dropoff'), '77 Held Job Way, Kennesaw, GA 30144')
+               mine[0].get('dropoff'), '77 Held Job Way, Tellmoor, GA 90744')
     finally:
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
@@ -1781,7 +1781,7 @@ if shutil.which('python3'):
     # The rows the rig would have written for the card-cornered order, so the
     # offers page can show what the fold makes of the mark.
     write(journal, [dict(offer(1, NOW - 1000), id='o-lab-corner',
-                         dropoff='Oak Dr & Elm Dr, Acworth')])
+                         dropoff='Oak Dr & Elm Dr, Ivyhame')])
     proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
                         'SCANNER_ARGS': fake}, journal)
 
@@ -1801,7 +1801,7 @@ if shutil.which('python3'):
 
     def seen(line, street, asked=False, labelled='dropoff', at=None, screen=None):
         say({'dropoff': {'found': True, 'line': line, 'street': street,
-                         'city': 'Acworth', 'state': 'GA', 'zip': '30101',
+                         'city': 'Ivyhame', 'state': 'GA', 'zip': '90701',
                          'asked': asked, 'labelled': labelled, 'ms': None,
                          'screen': screen,
                          'at': at if at is not None else int(time.time() * 1000)}})
@@ -1826,10 +1826,10 @@ if shutil.which('python3'):
         # A hold with no end: filed.
         ok_('the premise: the first order is in the car with no end',
             took('o-lab-blank', None))
-        seen('12 Made Up Way, Acworth, GA 30101', '12 Made Up Way')
+        seen('12 Made Up Way, Ivyhame, GA 90701', '12 Made Up Way')
         eq('auto-dropoff: an address under a Dropoff label is filed onto a hold with '
-           'no dropoff', held_end('12 Made Up Way, Acworth, GA 30101'),
-           '12 Made Up Way, Acworth, GA 30101')
+           'no dropoff', held_end('12 Made Up Way, Ivyhame, GA 90701'),
+           '12 Made Up Way, Ivyhame, GA 90701')
         for _ in range(60):
             if marks_for('o-lab-blank'):
                 break
@@ -1841,27 +1841,27 @@ if shutil.which('python3'):
         eq('...and goes to the panel as a ⌖ read does, carrying the order in the car',
            [((m.get('holding') or {}).get('dropoff'), m['dropoff'].get('line'))
             for m in _said][:1],
-           [('12 Made Up Way, Acworth, GA 30101', '12 Made Up Way, Acworth, GA 30101')])
+           [('12 Made Up Way, Ivyhame, GA 90701', '12 Made Up Way, Ivyhame, GA 90701')])
         put_down('o-lab-blank')
 
         # A hold whose end the card gave as a corner.
         ok_('the premise: an order is in the car with the card\'s corner as its end',
-            took('o-lab-corner', 'Oak Dr & Elm Dr, Acworth'))
-        seen('99 Unlabelled Rd, Acworth, GA 30101', '99 Unlabelled Rd', labelled=None)
+            took('o-lab-corner', 'Oak Dr & Elm Dr, Ivyhame'))
+        seen('99 Unlabelled Rd, Ivyhame, GA 90701', '99 Unlabelled Rd', labelled=None)
         eq('auto-dropoff: an address under no label is not filed over the card\'s end',
-           held_end('99 Unlabelled Rd, Acworth, GA 30101', 1.5),
-           'Oak Dr & Elm Dr, Acworth')
-        seen('34 Made Up Rd, Acworth, GA 30101', '34 Made Up Rd')
+           held_end('99 Unlabelled Rd, Ivyhame, GA 90701', 1.5),
+           'Oak Dr & Elm Dr, Ivyhame')
+        seen('34 Made Up Rd, Ivyhame, GA 90701', '34 Made Up Rd')
         eq('auto-dropoff: an address under a Dropoff label is filed over a card corner',
-           held_end('34 Made Up Rd, Acworth, GA 30101'), '34 Made Up Rd, Acworth, GA 30101')
-        seen('56 Second Label Ln, Acworth, GA 30101', '56 Second Label Ln')
+           held_end('34 Made Up Rd, Ivyhame, GA 90701'), '34 Made Up Rd, Ivyhame, GA 90701')
+        seen('56 Second Label Ln, Ivyhame, GA 90701', '56 Second Label Ln')
         eq('auto-dropoff: ...and a second label-proven one does not overwrite it',
-           held_end('56 Second Label Ln, Acworth, GA 30101', 1.5),
-           '34 Made Up Rd, Acworth, GA 30101')
+           held_end('56 Second Label Ln, Ivyhame, GA 90701', 1.5),
+           '34 Made Up Rd, Ivyhame, GA 90701')
         page = get(base, '/api/journal?days=7')
         eq('auto-dropoff: the offers page has the labelled end over the card\'s own',
            [o.get('dropoff') for o in (page.get('offers') or [])
-            if o.get('id') == 'o-lab-corner'], ['34 Made Up Rd, Acworth, GA 30101'])
+            if o.get('id') == 'o-lab-corner'], ['34 Made Up Rd, Ivyhame, GA 90701'])
         put_down('o-lab-corner')
 
         # A hold the driver pressed ⌖ for — over its own navigation, because
@@ -1870,15 +1870,15 @@ if shutil.which('python3'):
         # screened a press is the order's only on a cue the screen gives
         # (Assemble.pressBetween).
         ok_('the premise: a third order is in the car',
-            took('o-lab-press', 'Oak Dr & Elm Dr, Acworth'))
-        seen('77 Pressed Pl, Acworth, GA 30101', '77 Pressed Pl', asked=True, labelled=None,
+            took('o-lab-press', 'Oak Dr & Elm Dr, Ivyhame'))
+        seen('77 Pressed Pl, Ivyhame, GA 90701', '77 Pressed Pl', asked=True, labelled=None,
              screen='uber.nav')
         ok_('the premise: the press is filed',
-            held_end('77 Pressed Pl, Acworth, GA 30101') == '77 Pressed Pl, Acworth, GA 30101')
-        seen('88 Late Label Ln, Acworth, GA 30101', '88 Late Label Ln')
+            held_end('77 Pressed Pl, Ivyhame, GA 90701') == '77 Pressed Pl, Ivyhame, GA 90701')
+        seen('88 Late Label Ln, Ivyhame, GA 90701', '88 Late Label Ln')
         eq('auto-dropoff: an address under a Dropoff label is not filed over a ⌖ press',
-           held_end('88 Late Label Ln, Acworth, GA 30101', 1.5),
-           '77 Pressed Pl, Acworth, GA 30101')
+           held_end('88 Late Label Ln, Ivyhame, GA 90701', 1.5),
+           '77 Pressed Pl, Ivyhame, GA 90701')
         put_down('o-lab-press')
 
         # A hold whose planner lists a pickup at the address read.
@@ -1886,8 +1886,8 @@ if shutil.which('python3'):
             took('o-lab-pickup', None))
         say({'planner': {'stops': [
             {'kind': 'pickup', 'orders': 1, 'name': 'Fable Grill', 'expectedBy': 978,
-             'street': '4100 Fable Mill Pkwy NW', 'city': 'Kennesaw', 'state': 'GA',
-             'zip': None, 'line': '4100 Fable Mill Pkwy NW, Kennesaw'},
+             'street': '4100 Fable Mill Pkwy NW', 'city': 'Tellmoor', 'state': 'GA',
+             'zip': None, 'line': '4100 Fable Mill Pkwy NW, Tellmoor'},
             {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'expectedBy': 1001,
              'street': None, 'city': None, 'state': None, 'zip': None, 'line': None}],
             'unfiled': 'address', 'keep': False, 'asked': False, 'ms': None,
@@ -1896,19 +1896,19 @@ if shutil.which('python3'):
             if (get(base, '/api/status').get('holding') or {}).get('planner'):
                 break
             time.sleep(0.05)
-        seen('4100 Fable Mill Pkwy NW, Kennesaw, GA 30144', '4100 Fable Mill Pkwy NW')
+        seen('4100 Fable Mill Pkwy NW, Tellmoor, GA 90744', '4100 Fable Mill Pkwy NW')
         eq('auto-dropoff: an address that is one of the hold\'s planner pickups is not '
-           'filed', held_end('4100 Fable Mill Pkwy NW, Kennesaw, GA 30144', 1.5), None)
+           'filed', held_end('4100 Fable Mill Pkwy NW, Tellmoor, GA 90744', 1.5), None)
         put_down('o-lab-pickup')
 
         # A read older than the Took.
         ok_('the premise: a fifth order is in the car with the card\'s corner',
-            took('o-lab-stale', 'Oak Dr & Elm Dr, Acworth'))
-        seen('21 Old Screen Ct, Acworth, GA 30101', '21 Old Screen Ct',
+            took('o-lab-stale', 'Oak Dr & Elm Dr, Ivyhame'))
+        seen('21 Old Screen Ct, Ivyhame, GA 90701', '21 Old Screen Ct',
              at=int(time.time() * 1000) - 60000)
         eq('auto-dropoff: a labelled read from before the Took is not filed over the '
-           'card\'s end', held_end('21 Old Screen Ct, Acworth, GA 30101', 1.5),
-           'Oak Dr & Elm Dr, Acworth')
+           'card\'s end', held_end('21 Old Screen Ct, Ivyhame, GA 90701', 1.5),
+           'Oak Dr & Elm Dr, Ivyhame')
         put_down('o-lab-stale')
 
         # A Trip Planner's lone dropoff off a list whose end was below the
@@ -1918,45 +1918,45 @@ if shutil.which('python3'):
         # two-stop trip was left unfiled as 'list'.
         def lone(line, street):
             say({'dropoff': {'found': True, 'line': line, 'street': street,
-                             'city': 'Kennesaw', 'state': 'GA', 'zip': None,
+                             'city': 'Tellmoor', 'state': 'GA', 'zip': None,
                              'asked': False, 'labelled': 'dropoff',
                              'singleCardOnly': True, 'ms': None,
                              'at': int(time.time() * 1000)}})
         ok_('the premise: a single-trip order is in the car with the card\'s corner',
-            took('o-lone-one', 'Oak Dr & Elm Dr, Acworth', legs=1, multiOrder=False))
+            took('o-lone-one', 'Oak Dr & Elm Dr, Ivyhame', legs=1, multiOrder=False))
         # The planner it comes off, as the scanner sends it first: its one
         # dropoff left unfiled as 'list', the end of the list off the screen.
         say({'planner': {'stops': [
             {'kind': 'dropoff', 'orders': 1, 'name': 'Dana R.', 'expectedBy': 1325,
-             'street': '1180 Wrenfield Rd NW', 'city': 'Kennesaw', 'state': 'GA',
-             'zip': None, 'line': '1180 Wrenfield Rd NW, Kennesaw'}],
+             'street': '1180 Wrenfield Rd NW', 'city': 'Tellmoor', 'state': 'GA',
+             'zip': None, 'line': '1180 Wrenfield Rd NW, Tellmoor'}],
             'unfiled': 'list', 'keep': False, 'asked': False, 'ms': None,
             'at': int(time.time() * 1000)}})
         for _ in range(60):
             if (get(base, '/api/status').get('holding') or {}).get('planner'):
                 break
             time.sleep(0.05)
-        lone('1180 Wrenfield Rd NW, Kennesaw', '1180 Wrenfield Rd NW')
+        lone('1180 Wrenfield Rd NW, Tellmoor', '1180 Wrenfield Rd NW')
         eq('auto-dropoff: an unbounded planner\'s lone dropoff is filed onto a '
-           'single-trip held card', held_end('1180 Wrenfield Rd NW, Kennesaw'),
-           '1180 Wrenfield Rd NW, Kennesaw')
+           'single-trip held card', held_end('1180 Wrenfield Rd NW, Tellmoor'),
+           '1180 Wrenfield Rd NW, Tellmoor')
         eq('auto-dropoff: ...and the planner it came off stops saying its dropoff was '
            'not filed', (((get(base, '/api/status').get('holding') or {}).get('planner')
                           or {}).get('unfiled', 'absent')), None)
         put_down('o-lone-one')
         ok_('the premise: a two-leg card is in the car with the card\'s corner',
-            took('o-lone-legs', 'Oak Dr & Elm Dr, Acworth', legs=2, multiOrder=False))
-        lone('1180 Wrenfield Rd NW, Kennesaw', '1180 Wrenfield Rd NW')
+            took('o-lone-legs', 'Oak Dr & Elm Dr, Ivyhame', legs=2, multiOrder=False))
+        lone('1180 Wrenfield Rd NW, Tellmoor', '1180 Wrenfield Rd NW')
         eq('auto-dropoff: an unbounded planner\'s lone dropoff is not filed onto a held '
-           'card of two legs', held_end('1180 Wrenfield Rd NW, Kennesaw', 1.5),
-           'Oak Dr & Elm Dr, Acworth')
+           'card of two legs', held_end('1180 Wrenfield Rd NW, Tellmoor', 1.5),
+           'Oak Dr & Elm Dr, Ivyhame')
         put_down('o-lone-legs')
         ok_('the premise: a two-order card is in the car with the card\'s corner',
-            took('o-lone-two', 'Oak Dr & Elm Dr, Acworth', legs=1, multiOrder=True))
-        lone('1180 Wrenfield Rd NW, Kennesaw', '1180 Wrenfield Rd NW')
+            took('o-lone-two', 'Oak Dr & Elm Dr, Ivyhame', legs=1, multiOrder=True))
+        lone('1180 Wrenfield Rd NW, Tellmoor', '1180 Wrenfield Rd NW')
         eq('auto-dropoff: an unbounded planner\'s lone dropoff is not filed onto a '
-           'multi-order held card', held_end('1180 Wrenfield Rd NW, Kennesaw', 1.5),
-           'Oak Dr & Elm Dr, Acworth')
+           'multi-order held card', held_end('1180 Wrenfield Rd NW, Tellmoor', 1.5),
+           'Oak Dr & Elm Dr, Ivyhame')
         put_down('o-lone-two')
     finally:
         stop(proc)
@@ -2019,13 +2019,13 @@ if shutil.which('python3'):
                 if r.get('kind') == 'mark' and r.get('id') == i and r.get('dropoff')]
 
     _OSTRANDER = {'kind': 'dropoff', 'orders': 1, 'name': 'Mara T.', 'place': None,
-                  'expectedBy': 1202, 'street': '415 Ostrander Way NW', 'city': 'Kennesaw',
-                  'state': 'GA', 'zip': None, 'line': '415 Ostrander Way NW, Kennesaw',
+                  'expectedBy': 1202, 'street': '415 Ostrander Way NW', 'city': 'Tellmoor',
+                  'state': 'GA', 'zip': None, 'line': '415 Ostrander Way NW, Tellmoor',
                   'partial': None, 'label': 'dropoff'}
     _QUARRY = {'kind': 'pickup', 'orders': 1, 'name': 'Juniper Taqueria', 'place': None,
-               'expectedBy': 1180, 'street': '2210 Quarry Bend Rd NW', 'city': 'Kennesaw',
-               'state': 'GA', 'zip': '30144',
-               'line': '2210 Quarry Bend Rd NW, Kennesaw, GA 30144',
+               'expectedBy': 1180, 'street': '2210 Quarry Bend Rd NW', 'city': 'Tellmoor',
+               'state': 'GA', 'zip': '90744',
+               'line': '2210 Quarry Bend Rd NW, Tellmoor, GA 90744',
                'partial': None, 'label': 'pickup'}
 
     def page(stops, top, bottom, titled, at=None):
@@ -2046,13 +2046,13 @@ if shutil.which('python3'):
         # The old road: the scanner decided the planner's one dropoff and sent
         # it as a label-proven dropoff line.
         ok_('the premise: an order with the card\'s corner is in the car (old road)',
-            took('o-asm-old', 'Larch Way & Teal Ct, Kennesaw', legs=1, multiOrder=True))
-        say({'dropoff': {'found': True, 'line': '415 Ostrander Way NW, Kennesaw',
-                         'street': '415 Ostrander Way NW', 'city': 'Kennesaw',
+            took('o-asm-old', 'Larch Way & Teal Ct, Tellmoor', legs=1, multiOrder=True))
+        say({'dropoff': {'found': True, 'line': '415 Ostrander Way NW, Tellmoor',
+                         'street': '415 Ostrander Way NW', 'city': 'Tellmoor',
                          'state': 'GA', 'zip': None, 'asked': False,
                          'labelled': 'dropoff', 'ms': None,
                          'at': int(time.time() * 1000)}})
-        _old = held('415 Ostrander Way NW, Kennesaw')
+        _old = held('415 Ostrander Way NW, Tellmoor')
         for _ in range(60):
             if marks_for('o-asm-old'):
                 break
@@ -2061,9 +2061,9 @@ if shutil.which('python3'):
         put_down('o-asm-old')
         # The new road: the planner's sighting, and the assembler decides.
         ok_('the premise: the same order is in the car (new road)',
-            took('o-asm-new', 'Larch Way & Teal Ct, Kennesaw', legs=1, multiOrder=True))
+            took('o-asm-new', 'Larch Way & Teal Ct, Tellmoor', legs=1, multiOrder=True))
         page([_QUARRY, _OSTRANDER], True, True, True)
-        _new = held('415 Ostrander Way NW, Kennesaw')
+        _new = held('415 Ostrander Way NW, Tellmoor')
         for _ in range(60):
             if marks_for('o-asm-new'):
                 break
@@ -2073,7 +2073,7 @@ if shutil.which('python3'):
            + [m[1:] for m in marks_for('o-asm-new')],
            [(_old.get('dropoff'), _old.get('dropoffScanned'))] + _old_marks)
         ok_('the premise: the old road filed it, label-proven and unasked (%r)' % _old_marks,
-            _old.get('dropoff') == '415 Ostrander Way NW, Kennesaw'
+            _old.get('dropoff') == '415 Ostrander Way NW, Tellmoor'
             and _old_marks == [(False, True)])
         eq('...and the hold says where it came from',
            ((_new.get('fields') or {}).get('dropoff') or {}).get('from'), 'planner')
@@ -2081,9 +2081,9 @@ if shutil.which('python3'):
            (held(key='planner', patience=0.5).get('planner') or {}).get('unfiled', '<none>'),
            None)
         _told = [m for m in heard if (m.get('dropoff') or {}).get('line')
-                 == '415 Ostrander Way NW, Kennesaw' and m.get('holding')]
+                 == '415 Ostrander Way NW, Tellmoor' and m.get('holding')]
         ok_('...and the panel is told it as a dropoff, carrying the order in the car',
-            any((m.get('holding') or {}).get('dropoff') == '415 Ostrander Way NW, Kennesaw'
+            any((m.get('holding') or {}).get('dropoff') == '415 Ostrander Way NW, Tellmoor'
                 for m in _told))
         put_down('o-asm-new')
 
@@ -2091,7 +2091,7 @@ if shutil.which('python3'):
         # what the driver is looking at. A label-proven address is filed onto the
         # one hold all the same — the refused guard (AUDITS) is not written.
         ok_('the premise: an order with the card\'s corner is in the car',
-            took('o-asm-rival', 'Larch Way & Teal Ct, Kennesaw'))
+            took('o-asm-rival', 'Larch Way & Teal Ct, Tellmoor'))
         say({'offer': {'id': 'o-rival-card', 'pay': 9.5, 'minutes': 20, 'perHour': 18,
                        'dropoff': None}})
         for _ in range(60):
@@ -2100,31 +2100,31 @@ if shutil.which('python3'):
             time.sleep(0.05)
         ok_('the premise: the rival card is on the slot',
             (get(base, '/api/status').get('offer') or {}).get('id') == 'o-rival-card')
-        say({'dropoff': {'found': True, 'line': '61 Saddlebrook Ln, Acworth, GA 30101',
-                         'street': '61 Saddlebrook Ln', 'city': 'Acworth', 'state': 'GA',
-                         'zip': '30101', 'asked': False, 'labelled': 'dropoff', 'ms': None,
+        say({'dropoff': {'found': True, 'line': '61 Haddlecombe Ln, Ivyhame, GA 90701',
+                         'street': '61 Haddlecombe Ln', 'city': 'Ivyhame', 'state': 'GA',
+                         'zip': '90701', 'asked': False, 'labelled': 'dropoff', 'ms': None,
                          'at': int(time.time() * 1000)}})
         eq('a labelled dropoff with a rival card on the slot is still filed onto the one hold',
-           (held('61 Saddlebrook Ln, Acworth, GA 30101').get('dropoff'),
+           (held('61 Haddlecombe Ln, Ivyhame, GA 90701').get('dropoff'),
             (get(base, '/api/status').get('offer') or {}).get('dropoff')),
-           ('61 Saddlebrook Ln, Acworth, GA 30101', None))
+           ('61 Haddlecombe Ln, Ivyhame, GA 90701', None))
         put_down('o-asm-rival')
 
         # The gain: a list whose "Waybill" is on the page below, on a card of
         # two orders, so the first page alone files nothing.
         ok_('the premise: a two-order card is in the car with the card\'s corner',
-            took('o-asm-pages', 'Larch Way & Teal Ct, Kennesaw', legs=1, multiOrder=True))
+            took('o-asm-pages', 'Larch Way & Teal Ct, Tellmoor', legs=1, multiOrder=True))
         _p1 = page([_QUARRY, _OSTRANDER], True, False, True)
         _h1 = held(patience=1.0)
         eq('a planner page whose list runs off the screen files nothing alone, and says why',
            (_h1.get('dropoff'), (_h1.get('planner') or {}).get('unfiled')),
-           ('Larch Way & Teal Ct, Kennesaw', 'list'))
+           ('Larch Way & Teal Ct, Tellmoor', 'list'))
         page([_OSTRANDER], False, True, False, at=_p1 + 6000)
-        _h2 = held('415 Ostrander Way NW, Kennesaw')
+        _h2 = held('415 Ostrander Way NW, Tellmoor')
         eq('...and the page below it, with "Waybill", files the list\'s one dropoff',
            (_h2.get('dropoff'), ((_h2.get('fields') or {}).get('dropoff') or {}).get('from'),
             ((_h2.get('fields') or {}).get('customer') or {}).get('value')),
-           ('415 Ostrander Way NW, Kennesaw', 'planner', 'Mara T.'))
+           ('415 Ostrander Way NW, Tellmoor', 'planner', 'Mara T.'))
         put_down('o-asm-pages')
     finally:
         stop(proc)
@@ -2176,8 +2176,8 @@ if shutil.which('python3'):
         # Read here, not with lines(): that name is a list by this point.
         _rows_before = open(journal).read()
         _stop = {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'place': None,
-                 'expectedBy': 978, 'street': '4821 Kestrel Dr', 'city': 'Marietta',
-                 'state': 'GA', 'zip': None, 'line': '4821 Kestrel Dr, Marietta',
+                 'expectedBy': 978, 'street': '4821 Kestrel Dr', 'city': 'Harrowen',
+                 'state': 'GA', 'zip': None, 'line': '4821 Kestrel Dr, Harrowen',
                  'partial': None, 'label': 'dropoff'}
         _bare = dict(_stop, kind=None, orders=None, name=None, expectedBy=None, label=None)
         with open(cmds, 'a') as fh:
@@ -2229,8 +2229,8 @@ if shutil.which('python3'):
     journal = os.path.join(work, 'journal.jsonl')
     fake = os.path.join(work, 'planner.py')
     _STOPS_A = [{'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'expectedBy': 978,
-                 'street': '4821 Kestrel Dr', 'city': 'Marietta', 'state': 'GA',
-                 'zip': None, 'line': '4821 Kestrel Dr, Marietta'},
+                 'street': '4821 Kestrel Dr', 'city': 'Harrowen', 'state': 'GA',
+                 'zip': None, 'line': '4821 Kestrel Dr, Harrowen'},
                 {'kind': 'dropoff', 'orders': 1, 'name': 'Lee M.', 'expectedBy': 1001,
                  'street': None, 'city': None, 'state': None, 'zip': None,
                  'line': None}]
@@ -2385,8 +2385,8 @@ if shutil.which('python3'):
             'planner()\n'
             '# The press the test makes in this gap reads the navigation screen.\n'
             'time.sleep(2.5)\n'
-            'say({"dropoff": {"line": "12 Oak St, Marietta, GA 30060", "street":\n'
-            '     "12 Oak St", "city": "Marietta", "state": "GA", "zip": "30060",\n'
+            'say({"dropoff": {"line": "12 Oak St, Harrowen, GA 90660", "street":\n'
+            '     "12 Oak St", "city": "Harrowen", "state": "GA", "zip": "90660",\n'
             '     "found": True, "asked": True, "at": int(time.time() * 1000)}})\n'
             'time.sleep(1.0)\n'
             'planner()\n'
@@ -2458,7 +2458,7 @@ if shutil.which('python3'):
            'and the stops beside it',
            (held.get('dropoff'), held.get('dropoffScanned'),
             len((held.get('planner') or {}).get('stops') or [])),
-           ('12 Oak St, Marietta, GA 30060', True, 2))
+           ('12 Oak St, Harrowen, GA 90660', True, 2))
         ok_('the premise: a planner is held again before the next card',
             bool(_held_planner(True).get('planner')))
         # Changed 30 Oct (the owner: "after getting 3 correct drop off
@@ -2476,7 +2476,7 @@ if shutil.which('python3'):
            ((get(base, '/api/status').get('offer') or {}).get('id'),
             [s.get('name') for s in (held.get('planner') or {}).get('stops') or []],
             held.get('dropoff')),
-           ('o-next-card', ['Pat Q.', 'Lee M.'], '12 Oak St, Marietta, GA 30060'))
+           ('o-next-card', ['Pat Q.', 'Lee M.'], '12 Oak St, Harrowen, GA 90660'))
     finally:
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
@@ -2505,9 +2505,9 @@ if shutil.which('python3'):
             '              "perHour": 30.0, "target": 25, "band": 15,\n'
             '              "costPerMile": 0.35, "dropoff": None}}), flush=True)\n'
             'time.sleep(1.5)\n'
-            'print(json.dumps({"dropoff": {"line": "3100 Esquire Dr NW, Kennesaw, GA 30144",\n'
-            '    "street": "3100 Esquire Dr NW", "city": "Kennesaw", "state": "GA",\n'
-            '    "zip": "30144", "at": int(time.time() * 1000)}}), flush=True)\n'
+            'print(json.dumps({"dropoff": {"line": "3100 Elquine Dr NW, Tellmoor, GA 90744",\n'
+            '    "street": "3100 Elquine Dr NW", "city": "Tellmoor", "state": "GA",\n'
+            '    "zip": "90744", "at": int(time.time() * 1000)}}), flush=True)\n'
             'time.sleep(600)\n')
     open(journal, 'w').close()
     proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
@@ -2593,8 +2593,8 @@ _ROWS = [
     {'v': 3, 'id': 'a1', 'seq': 1, 'at': _NOW - 600_000, 'pay': 16.05,
      'minutes': 23.0, 'miles': 8.4, 'perHour': 30.0, 'state': 'go',
      'suspect': False, 'doubt': None, 'untimedMiles': None, 'whole': True,
-     'places': ['Cobb Pkwy NW, Kennesaw', 'Canton Rd, Marietta'],
-     'pickup': 'Cobb Pkwy NW, Kennesaw', 'dropoff': 'Canton Rd, Marietta',
+     'places': ['Vosk Pkwy NW, Tellmoor', 'Belvan Rd, Harrowen'],
+     'pickup': 'Vosk Pkwy NW, Tellmoor', 'dropoff': 'Belvan Rd, Harrowen',
      'text': '$16.05 3 min (1.1 mi) away\n20 min (7.3 mi) trip',
      'scans': ['$16.05 3 min\n(1.1 mi) away', '$16.05 3 min (1.1 mi) away']},
     # A row refused for a leg, carrying the field that says how much went
@@ -2603,8 +2603,8 @@ _ROWS = [
     {'v': 3, 'id': 'a2', 'seq': 1, 'at': _NOW - 300_000, 'pay': 18.40,
      'minutes': 5.0, 'miles': 2.1, 'perHour': 213.24, 'state': 'doubt',
      'suspect': True, 'doubt': 'leg', 'untimedMiles': 7.8, 'whole': False,
-     'places': ['Duval Ct & Manchester Ln, Villa Rica'],
-     'pickup': 'Duval Ct & Manchester Ln, Villa Rica', 'dropoff': None,
+     'places': ['Toval Ct & Manchester Ln, Villa Mora'],
+     'pickup': 'Toval Ct & Manchester Ln, Villa Mora', 'dropoff': None,
      'text': 'UberX $18.40 5 min (2.1 mi) away\nl hr 24 min (7.8 "mi") trip'},
 ]
 with open(_journal, 'w') as _fh:
@@ -2641,7 +2641,7 @@ try:
     # A comma inside a cell is the whole reason this file needs quoting, and
     # 72% of this driver's distinct dropoffs are cross streets.
     ok_('an address with a comma in it survives as one cell (%r)'
-        % _by.get('pickup'), _by.get('pickup') == 'Duval Ct & Manchester Ln, Villa Rica')
+        % _by.get('pickup'), _by.get('pickup') == 'Toval Ct & Manchester Ln, Villa Mora')
     # A quote in the middle of a cell is how a CSV gets cut in half. This one
     # is the reader's — a bracket read as a quote mark — and the cell-count
     # check above is what proves it did not end the field; this proves the
@@ -2811,15 +2811,15 @@ try:
     eq('...and says so rather than erroring', _empty['ok'], True)
 
     _code, _said = post(_pbase, '/api/places', {
-        'Chipotle, Marietta': {'lat': 34.02, 'lon': -84.58},
+        'Chipotle, Harrowen': {'lat': 34.02, 'lon': -44.58},
         # null is "asked, nothing there", and it is worth keeping: it is what
         # stops the next run paying a second to ask again.
         'Nowhere St': None})
     eq('places sent by the browser are accepted', _code, 200)
     eq('...and counted', _said['added'], 2)
     _back = get(_pbase, '/api/places')['places']
-    eq('...and come back on the next load', _back['Chipotle, Marietta'],
-       {'lat': 34.02, 'lon': -84.58})
+    eq('...and come back on the next load', _back['Chipotle, Harrowen'],
+       {'lat': 34.02, 'lon': -44.58})
     ok_('...including the empty answer', 'Nowhere St' in _back and _back['Nowhere St'] is None)
     ok_('...and they are on disk beside the journal',
         os.path.exists(os.path.join(_pdir, 'places.json')))
@@ -2827,14 +2827,14 @@ try:
     # MERGED, never written over. Two browsers place different days of the same
     # journal; a POST that replaced the file would have whichever finished last
     # throw the other's work away.
-    _code2, _said2 = post(_pbase, '/api/places', {'Zaxbys, Kennesaw': {'lat': 34.03, 'lon': -84.61}})
+    _code2, _said2 = post(_pbase, '/api/places', {'Zaxbys, Tellmoor': {'lat': 34.03, 'lon': -44.61}})
     eq('a second browser adds without replacing', _said2['added'], 1)
     _both = get(_pbase, '/api/places')['places']
     eq('...and both are held', sorted(_both.keys()),
-       ['Chipotle, Marietta', 'Nowhere St', 'Zaxbys, Kennesaw'])
+       ['Chipotle, Harrowen', 'Nowhere St', 'Zaxbys, Tellmoor'])
 
     # "Could not ask" is not an answer and must not be stored: one dead spot on
-    # I-75 would otherwise become a permanent "this street does not exist".
+    # I-98 would otherwise become a permanent "this street does not exist".
     _code3, _said3 = post(_pbase, '/api/places', {'Asked But Nobody Home': 'nope'})
     eq('a value that is not a coordinate is refused', _said3['added'], 0)
     no_('...and does not reach the file',
@@ -2871,7 +2871,7 @@ try:
     # on the first thing anyone pressed after it, and the one control that can
     # remove a bad geocode removed nothing.
     post(_pbase, '/api/places', {'Bad Lookup, Nowhere': {'lat': 41.9, 'lon': -87.6},
-                                 'Good One, Kennesaw': {'lat': 34.03, 'lon': -84.61}})
+                                 'Good One, Tellmoor': {'lat': 34.03, 'lon': -44.61}})
     eq('the two lookups are on the server to begin with',
        len(get(_pbase, '/api/places')['places']), 2)
     _dcode, _dsaid = delete(_pbase, '/api/places')
@@ -2908,11 +2908,11 @@ try:
     # first at 400 places the whole merge finished inside one tick, the two
     # requests never overlapped, and all three reverts of this fix passed the
     # check. A race the test cannot open is a check that cannot fail.
-    _seed = dict(('Seed St %d, Marietta' % i, {'lat': 34.0 + i * 1e-5, 'lon': -84.6})
+    _seed = dict(('Seed St %d, Harrowen' % i, {'lat': 34.0 + i * 1e-5, 'lon': -44.6})
                  for i in range(1325))
-    _batchA = dict(('A Rd %d, Acworth' % i, {'lat': 34.1, 'lon': -84.7})
+    _batchA = dict(('A Rd %d, Ivyhame' % i, {'lat': 34.1, 'lon': -44.7})
                    for i in range(600))
-    _batchB = {'B Rd 1, Kennesaw': {'lat': 34.2, 'lon': -84.5}}
+    _batchB = {'B Rd 1, Tellmoor': {'lat': 34.2, 'lon': -44.5}}
     post(_pbase, '/api/places', _seed)
     _said = {}
 
@@ -2937,7 +2937,7 @@ try:
     eq('...and both batches are in it', _after.get('stored'), 1926)
     eq('...with the big batch\'s places really there',
        sum(1 for k in (_after.get('places') or {}) if k.startswith('A Rd ')), 600)
-    ok_('...and the small one too', 'B Rd 1, Kennesaw' in (_after.get('places') or {}))
+    ok_('...and the small one too', 'B Rd 1, Tellmoor' in (_after.get('places') or {}))
     # Both replies were true AT THE MOMENT THEY WERE SENT, which is a weaker
     # claim than "both match the file" and the only one that is right: the queue
     # runs them in some order, so the first writer honestly reports a partial
@@ -2969,7 +2969,7 @@ try:
     # against it — which the mutation sweep cannot tell from a pass.
     try:
         _ncode, _nsaid = post(_pbase, '/api/places',
-                              {'C Rd 1, Woodstock': {'lat': 34.1, 'lon': -84.5}})
+                              {'C Rd 1, Marrowick': {'lat': 34.1, 'lon': -44.5}})
     except Exception as _exc:                          # noqa: BLE001
         _ncode, _nsaid = 'no answer: %s' % type(_exc).__name__, {}
     eq('a batch arriving after two at once is still answered', _ncode, 200)
@@ -3072,7 +3072,7 @@ with open(_hfake, 'w') as _fh:
         '    "offer": {"id": "h-1", "pay": 21.0, "minutes": 30.0,\n'
         '              "billedMinutes": 30.0, "miles": 5.0, "cost": 1.75,\n'
         '              "perHour": 30.0, "target": 25, "band": 15,\n'
-        '              "costPerMile": 0.35, "dropoff": "Oak Ln, Marietta"}}),\n'
+        '              "costPerMile": 0.35, "dropoff": "Oak Ln, Harrowen"}}),\n'
         '    flush=True)\n'
         'time.sleep(600)\n')
 open(_hjournal, 'w').close()
@@ -3147,7 +3147,7 @@ try:
     if _back:
         eq('...the same one', _back.get('pay'), 21.0)
         eq('...with where it ends, which is what the stack line needs',
-           _back.get('dropoff'), 'Oak Ln, Marietta')
+           _back.get('dropoff'), 'Oak Ln, Harrowen')
     # ...and putting it down removes the file, so the NEXT restart does not
     # bring back a job that has been delivered.
     post(_hbase2, '/api/delivered', {})
@@ -3389,7 +3389,7 @@ shutil.rmtree(_xdir, ignore_errors=True)
 _v1at = int(time.time() * 1000) - 5 * 60000
 with open(_hold, 'w') as _fh:
     json.dump({'id': 'h-v1', 'pay': 9.48, 'minutes': 40, 'acceptedAt': _v1at,
-               'dropoff': '12 Kestrel Dr, Marietta'}, _fh)
+               'dropoff': '12 Kestrel Dr, Harrowen'}, _fh)
 if os.path.exists(_hheld):
     os.remove(_hheld)
 _v4proc, _v4base = start({'SCANNER': '0', 'UBERSCAN_HANDOFF_DIR': _hhand}, _hjournal)
@@ -3398,7 +3398,7 @@ try:
     _v4note = json.load(open(_hheld)) if os.path.exists(_hheld) else {}
     # A pin on it rewrites the file, which is then the list's shape.
     post(_v4base, '/api/held-pickup', {'holdId': 'h-v1@%d' % _v1at,
-                                       'lat': 33.95, 'lon': -84.55})
+                                       'lat': 33.95, 'lon': -44.55})
     _v4file = json.load(open(_hold))
     eq('a v1 holding.json restores as one order, clock unchanged',
        (_v4held.get('holdId'), _v4held.get('pay'), _v4note.get('until'),
@@ -5571,7 +5571,7 @@ with open(_rxbeat, 'w') as _fh:
               '    print(json.dumps({"alive": True, "at": int(time.time() * 1000), '
               '"tooBright": False, "tooDim": False, "notSaving": None, "blind": None, '
               '"gps": {"state": "ok", "ageSeconds": 0.5, "fix": {"lat": 33.95 + n * 1e-5, '
-              '"lon": -84.55, "gpsAge": 0.5, "gpsErr": 8.0, "gpsMode": 3, "gpsOk": True, '
+              '"lon": -44.55, "gpsAge": 0.5, "gpsErr": 8.0, "gpsMode": 3, "gpsOk": True, '
               '"freshFor": 19, "speed": 3.0, "driving": True}}, "cpuC": 61.5, '
               '"throttled": "0x0", "heatGuard": False}), flush=True)\n'
               '    time.sleep(0.03)\n')
@@ -5662,8 +5662,8 @@ try:
     # An order held, searched for on the fake NucBox: searches.json says what
     # was asked and what came back.
     _o = {'id': 'rx-door', 'pay': 12.0, 'minutes': 40.0, 'billedMinutes': 40.0, 'miles': 5.0,
-          'cost': 1.75, 'dropoff': '1985 Cobb Parkway, Kennesaw', 'lat': 33.9526,
-          'lon': -84.5499, 'gpsOk': True, 'gpsErr': 10.0, 'gpsMode': 3, 'gpsAge': 0.5,
+          'cost': 1.75, 'dropoff': '1985 Vosk Parkway, Tellmoor', 'lat': 33.9526,
+          'lon': -44.5499, 'gpsOk': True, 'gpsErr': 10.0, 'gpsMode': 3, 'gpsAge': 0.5,
           'hasTotal': True, 'whole': True, 'multiOrder': False}
     post(_ru, '/api/offers/mark', {'id': 'rx-door', 'accepted': True, 'offer': _o})
     for _ in range(120):
@@ -5682,7 +5682,7 @@ try:
     ok_('searches.json names the held order\'s end search: its key, plan and disc (%r)'
         % {k: _end.get(k) for k in ('key', 'plan', 'disc')},
         (_sj.get('orders') or [{}])[0].get('held') is True
-        and 'Cobb Parkway' in (_end.get('key') or '') and (_end.get('plan') or {}).get('door')
+        and 'Vosk Parkway' in (_end.get('key') or '') and (_end.get('plan') or {}).get('door')
         and (_end.get('disc') or {}).get('miles'))
     ok_('...each question asked and the candidates it returned, trimmed (%r)'
         % (_end.get('asks') or [])[:1],
@@ -5782,8 +5782,8 @@ _bonce = os.path.join(_bdir, 'ran-once')
 # ...and the newest fix, which the beat now carries inside `gps`: the journal's
 # own fields, gps.py's judgement on it, and how long it had left inside the
 # staleness rule. Stale here, as it would be on a beat whose word is stale.
-# Marietta Square, a public place.
-_BFIX = {'lat': 33.9526, 'lon': -84.5499, 'gpsAge': 312.0, 'gpsErr': 12.0,
+# Harrowen Square, a public place.
+_BFIX = {'lat': 33.9526, 'lon': -44.5499, 'gpsAge': 312.0, 'gpsErr': 12.0,
          'gpsMode': 3, 'gpsOk': False, 'gpsWhy': 'stale', 'freshFor': 0.0}
 with open(_bfake, 'w') as fh:
     fh.write(
@@ -6021,7 +6021,7 @@ try:
         _s, _r = _nbx(_b0, "/api/nbx/search?q=McDonald%27s")
         eq('...and a search is refused as not set here, not as unreachable',
            (_s, _r.get('configured'), _r.get('unreachable')), (404, False, None))
-        _s, _r = _nbx(_b0, '/api/nbx/route?points=-84.5499,33.9526;-84.3880,33.7490')
+        _s, _r = _nbx(_b0, '/api/nbx/route?points=-44.5499,33.9526;-44.3880,33.7490')
         eq('...and so is a route', (_s, _r.get('configured')), (404, False))
         _s, _r = _nbx(_b0, '/api/nbx/cross?a=Foxglove%20Trl&b=Northgate%20Dr')
         eq('...and so is where two streets meet, naming the setting',
@@ -6045,8 +6045,8 @@ try:
         eq('with all three set, /api/nbx says all three are',
            get(_b1, '/api/nbx'), {'ok': True, 'search': True, 'route': True,
                                   'streets': True})
-        # The real install's own question: McDonald's in a box round Marietta.
-        _s, _r = _nbx(_b1, "/api/nbx/search?q=McDonald%27s&viewbox=-84.65,34.04,-84.45,33.87")
+        # The real install's own question: McDonald's in a box round Harrowen.
+        _s, _r = _nbx(_b1, "/api/nbx/search?q=McDonald%27s&viewbox=-44.65,34.04,-44.45,33.87")
         _hits = _r.get('hits') or []
         eq('a chain search answers the branches inside the box, bounded',
            (_s, len(_hits)), (200, 2))
@@ -6056,68 +6056,68 @@ try:
         eq('...and a list shorter than the limit is said to be whole',
            sorted(_r.keys()) + [_r.get('cutAt')], ['cutAt', 'hits', 'ok', None])
         ok_('...with its house number and street, as the real install answered',
-            "McDonald's, 2700, Windy Hill Road Southeast, Cumberland" in
+            "McDonald's, 2700, Gusty Hill Road Southeast, Hollowmere" in
             ' '.join(h['name'] for h in _hits))
         _last = _asked()[-1]
         eq('...asked of the NucBox with ten candidates, jsonv2, bounded — set '
            'here, not by the page',
            _last, '/search?format=jsonv2&limit=10&q=McDonald%27s'
-                  '&viewbox=-84.65%2C34.04%2C-84.45%2C33.87&bounded=1')
+                  '&viewbox=-44.65%2C34.04%2C-44.45%2C33.87&bounded=1')
         # A street, with no town — the page never sends one, and nothing
         # here adds one.
-        _s, _r = _nbx(_b1, '/api/nbx/search?street=Shadowood%20Pkwy%20SE'
-                           '&viewbox=-84.65,34.04,-84.45,33.87')
-        eq('a street search finds the two pieces of Shadowood Parkway, in '
-           'Cumberland', [h['name'].split(', ')[1] for h in _r.get('hits') or []],
-           ['Cumberland', 'Cumberland'])
+        _s, _r = _nbx(_b1, '/api/nbx/search?street=Gloamwood%20Pkwy%20SE'
+                           '&viewbox=-44.65,34.04,-44.45,33.87')
+        eq('a street search finds the two pieces of Gloamwood Parkway, in '
+           'Hollowmere', [h['name'].split(', ')[1] for h in _r.get('hits') or []],
+           ['Hollowmere', 'Hollowmere'])
         eq('...asked as street= alone, no city, no town', _asked()[-1],
-           '/search?format=jsonv2&limit=10&street=Shadowood%20Pkwy%20SE'
-           '&viewbox=-84.65%2C34.04%2C-84.45%2C33.87&bounded=1')
+           '/search?format=jsonv2&limit=10&street=Gloamwood%20Pkwy%20SE'
+           '&viewbox=-44.65%2C34.04%2C-44.45%2C33.87&bounded=1')
         # Twelve branches, ten asked for: the list stopped at the limit, and
         # says so, so the page cannot read "only one fits" off a cut list.
-        _s, _r = _nbx(_b1, '/api/nbx/search?q=Starbucks&viewbox=-84.62,34.01,-84.48,33.90')
+        _s, _r = _nbx(_b1, '/api/nbx/search?q=Starbucks&viewbox=-44.62,34.01,-44.48,33.90')
         eq('a search that stops at the limit says where it was cut (cutAt 10)',
            (_s, len(_r.get('hits') or []), _r.get('cutAt')), (200, 10, 10))
         # The same question twice is asked of the NucBox once.
         _n = len(_asked())
-        _nbx(_b1, "/api/nbx/search?q=McDonald%27s&viewbox=-84.65,34.04,-84.45,33.87")
+        _nbx(_b1, "/api/nbx/search?q=McDonald%27s&viewbox=-44.65,34.04,-44.45,33.87")
         eq('the same search a second time is answered from the cache', len(_asked()), _n)
 
         # The route the driver measured on the real install.
-        _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.3880,33.7490')
+        _s, _r = _nbx(_b1, '/api/nbx/route?points=-44.5499,33.9526;-44.3880,33.7490')
         eq('a route answers the road metres OSRM gave (31307.4 m on the real '
            'install), how far it moved each point to reach a road, and the '
            'road\'s shape to draw as [lat, lon]',
            (_s, _r), (200, {'ok': True, 'metres': 31307.4, 'snaps': [3.1, 3.1],
-                            'line': [[33.9526, -84.5499], [33.9526, -84.388],
-                                     [33.749, -84.388]], 'duration': 1659.8}))
+                            'line': [[33.9526, -44.5499], [33.9526, -44.388],
+                                     [33.749, -44.388]], 'duration': 1659.8}))
         no_('...and the router\'s own duration in seconds, the owner\'s decision of 20 Oct '
             '2026, and nothing else of time: no weight, no minutes',
             re.search(r'second|minute|weight', json.dumps(_r)))
         eq('...asked for the simplified shape as GeoJSON, fixed here, the points '
            'as the page wrote them',
-           _asked()[-1], '/route/v1/driving/-84.5499,33.9526;-84.3880,33.7490'
+           _asked()[-1], '/route/v1/driving/-44.5499,33.9526;-44.3880,33.7490'
                          '?overview=simplified&geometries=geojson')
-        _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.5400,33.9600;'
-                           '-84.5300,33.9700;-84.5200,33.9800;-84.5100,33.9900')
+        _s, _r = _nbx(_b1, '/api/nbx/route?points=-44.5499,33.9526;-44.5400,33.9600;'
+                           '-44.5300,33.9700;-44.5200,33.9800;-44.5100,33.9900')
         eq('a route of five points (the car and two orders\' four stops) is relayed, with '
            'its duration', (_s, _r.get('ok'), len(_r.get('snaps') or []),
                             isinstance(_r.get('duration'), (int, float))), (200, True, 5, True))
-        _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.3880,33.7490'
+        _s, _r = _nbx(_b1, '/api/nbx/route?points=-44.5499,33.9526;-44.3880,33.7490'
                            '&overview=full')
         eq('...and the page cannot choose the shape: any other parameter is refused',
            (_s, _r.get('error')), (400, 'refused: overview'))
-        _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.7,33.9')
+        _s, _r = _nbx(_b1, '/api/nbx/route?points=-44.5499,33.9526;-44.7,33.9')
         ok_('a route whose shape is not one keeps its metres and sends no line: the '
             'page draws it straight (%r)' % (_r,),
             _s == 200 and isinstance(_r.get('metres'), (int, float)) and _r.get('line') is None)
-        _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.5499,33.9830;'
-                           '-84.3880,33.7490')
+        _s, _r = _nbx(_b1, '/api/nbx/route?points=-44.5499,33.9526;-44.5499,33.9830;'
+                           '-44.3880,33.7490')
         ok_('...and three points is a route too (%r)' % (_r,),
             _s == 200 and isinstance(_r.get('metres'), (int, float)))
         # OSRM's own "no road between these" is HTTP 400 with code NoRoute: an
         # answer about the points, not a NucBox that failed.
-        _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.5560,34.0010')
+        _s, _r = _nbx(_b1, '/api/nbx/route?points=-44.5499,33.9526;-44.5560,34.0010')
         eq('the router saying there is no road is an answer, not unreachable',
            (_s, _r.get('ok'), _r.get('noRoute'), _r.get('unreachable')),
            (200, False, True, None))
@@ -6125,26 +6125,26 @@ try:
         # HTTP 400 with a string code; those are the router not answering —
         # said as unreachable and never kept, so the next press asks again.
         _n = len(_asked())
-        _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.6,34.1')
+        _s, _r = _nbx(_b1, '/api/nbx/route?points=-44.5499,33.9526;-44.6,34.1')
         eq('a router refusing the question with a code that is not NoRoute is '
            'down, not "no road"', (_s, _r.get('unreachable'), _r.get('noRoute'), _r.get('error')),
            (502, True, None, 'the NucBox router answered InvalidQuery, not a route'))
-        _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.6,34.1')
+        _nbx(_b1, '/api/nbx/route?points=-44.5499,33.9526;-44.6,34.1')
         eq('...and is not cached: asked twice, the router was asked twice',
            len(_asked()), _n + 2)
 
         # The street index, on the NucBox's own server.js: where two streets
         # meet, and the stretch of one, each inside a box.
         _s, _r = _nbx(_b1, '/api/nbx/cross?a=Foxglove%20Trl&b=Northgate%20Dr'
-                           '&box=-84.6,34.0,-84.5,33.9')
+                           '&box=-44.6,34.0,-44.5,33.9')
         eq('where two streets meet is relayed, as the corners and the names it '
            'matched and nothing else',
            (_s, sorted(_r.keys()), _r.get('meets')),
            (200, ['a', 'b', 'cutAt', 'meets', 'ok'],
-            [{'lat': 33.96, 'lon': -84.55, 'n': 1, 'spanM': 0, 'shared': True}]))
+            [{'lat': 33.96, 'lon': -44.55, 'n': 1, 'spanM': 0, 'shared': True}]))
         eq('...asked of the NucBox at its own path with the same three parameters',
            _asked()[-1], '/api/streets/cross?a=Foxglove%20Trl&b=Northgate%20Dr'
-                         '&box=-84.6%2C34.0%2C-84.5%2C33.9')
+                         '&box=-44.6%2C34.0%2C-44.5%2C33.9')
         _s, _r = _nbx(_b1, '/api/nbx/stretch?name=Larkspur%20Pkwy%20SE')
         eq('the stretch of a street is relayed, its lines and nothing else, with no '
            'box when none is asked', (_s, sorted(_r.keys()), _asked()[-1]),
@@ -6181,26 +6181,26 @@ try:
                 ('/api/nbx/search', 'one of q or street'),
                 ('/api/nbx/search?q=' + 'x' * 121, 'q must be 1 to 120'),
                 ('/api/nbx/search?q=a&viewbox=1,2,3', 'viewbox is'),
-                ('/api/nbx/search?q=a&viewbox=-84.6,34,-84.4,9999', 'viewbox is'),
-                ('/api/nbx/route?points=-84.5,33.9', 'points is two to five'),
-                ('/api/nbx/route?points=-84.5,33.9;-84.4,33.8;-84.3,33.7;-84.2,33.6;'
-                 '-84.1,33.5;-84.0,33.4', 'points is two to five'),
-                ('/api/nbx/route?points=-84.5,33.9;../../etc', 'points is two to five'),
-                ('/api/nbx/route?points=-84.5,33.9;-84.4,33.8&alternatives=true',
+                ('/api/nbx/search?q=a&viewbox=-44.6,34,-44.4,9999', 'viewbox is'),
+                ('/api/nbx/route?points=-44.5,33.9', 'points is two to five'),
+                ('/api/nbx/route?points=-44.5,33.9;-44.4,33.8;-44.3,33.7;-44.2,33.6;'
+                 '-44.1,33.5;-44.0,33.4', 'points is two to five'),
+                ('/api/nbx/route?points=-44.5,33.9;../../etc', 'points is two to five'),
+                ('/api/nbx/route?points=-44.5,33.9;-44.4,33.8&alternatives=true',
                  'refused: alternatives'),
                 # (The table is relayed since the planner's fastest order, 31
                 # Oct: its own refusals in place of "no such endpoint".)
-                ('/api/nbx/table?points=-84.5,33.9', 'points is two to 10'),
-                ('/api/nbx/table?points=' + ';'.join(['-84.5,33.9'] * 11), 'points is two to 10'),
-                ('/api/nbx/table?points=-84.5,33.9;-84.4,33.8&annotations=distance',
+                ('/api/nbx/table?points=-44.5,33.9', 'points is two to 10'),
+                ('/api/nbx/table?points=' + ';'.join(['-44.5,33.9'] * 11), 'points is two to 10'),
+                ('/api/nbx/table?points=-44.5,33.9;-44.4,33.8&annotations=distance',
                  'refused: annotations'),
-                ('/api/nbx/table?points=-84.5,33.9;../../etc', 'points is two to 10'),
+                ('/api/nbx/table?points=-44.5,33.9;../../etc', 'points is two to 10'),
                 ('/api/nbx/cross?a=x&b=y&limit=5', 'refused: limit'),
                 ('/api/nbx/cross?a=x&a=y&b=z', 'given more than once: a'),
                 ('/api/nbx/cross?a=x', 'a and b must each be'),
                 ('/api/nbx/cross?a=x&b=' + 'y' * 121, 'a and b must each be'),
-                ('/api/nbx/cross?a=x&b=y&box=-84.6,34,-84.4', 'box is left,top,right,bottom'),
-                ('/api/nbx/cross?a=x&b=y&viewbox=-84.6,34,-84.4,33.9', 'refused: viewbox'),
+                ('/api/nbx/cross?a=x&b=y&box=-44.6,34,-44.4', 'box is left,top,right,bottom'),
+                ('/api/nbx/cross?a=x&b=y&viewbox=-44.6,34,-44.4,33.9', 'refused: viewbox'),
                 ('/api/nbx/stretch?name=x&a=y', 'refused: a'),
                 ('/api/nbx/stretch?street=x', 'refused: street'),
                 ('/api/nbx/streets?name=x', 'no such NucBox endpoint'),
@@ -6221,7 +6221,7 @@ try:
         # map-view.js fastestOrder): the drive seconds between every two
         # points, square, cached; a refusal is the router not answering.
         _n = len(_asked())
-        _tq = '/api/nbx/table?points=-84.5,33.9;-84.4,33.8;-84.45,33.85'
+        _tq = '/api/nbx/table?points=-44.5,33.9;-44.4,33.8;-44.45,33.85'
         _s, _r = _nbx(_b1, _tq)
         _sec = _r.get('seconds') or []
         ok_('[fastest order] the table relay answers the drive seconds between every two points, '
@@ -6232,8 +6232,8 @@ try:
         _nbx(_b1, _tq)
         eq('[fastest order] ...asked of the NucBox once, the second from the cache',
            [x for x in _asked()[_n:] if x.startswith('/table/v1/driving/')],
-           ['/table/v1/driving/-84.5,33.9;-84.4,33.8;-84.45,33.85?annotations=duration'])
-        _s, _r = _nbx(_b1, '/api/nbx/table?points=-84.6,34.1;-84.4,33.8')
+           ['/table/v1/driving/-44.5,33.9;-44.4,33.8;-44.45,33.85?annotations=duration'])
+        _s, _r = _nbx(_b1, '/api/nbx/table?points=-44.6,34.1;-44.4,33.8')
         eq('[fastest order] ...and a router refusing the table is the router not answering, '
            'which the page falls back to straight lines on',
            (_s, _r.get('unreachable'), 'not a table' in str(_r.get('error', ''))),
@@ -6262,7 +6262,7 @@ try:
         eq('a NucBox that is not there is said plainly, with the reason',
            (_s, _r.get('unreachable'), _r.get('error')),
            (502, True, 'the NucBox did not answer (ECONNREFUSED)'))
-        _s, _r = _nbx(_b2, '/api/nbx/route?points=-84.5499,33.9526;-84.3880,33.7490')
+        _s, _r = _nbx(_b2, '/api/nbx/route?points=-44.5499,33.9526;-44.3880,33.7490')
         eq('...and so is its router', (_s, _r.get('unreachable')), (502, True))
     finally:
         stop(_p2)
@@ -6273,22 +6273,23 @@ try:
     _idx = os.path.join(_ndir, 'streets.json')
     subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'street_index.py'),
                     os.path.join(ROOT, 'tests', 'fixtures', 'streets.osm'), _idx,
-                    '--opl', os.path.join(ROOT, 'tests', 'fixtures', 'streets.opl')],
+                    '--opl', os.path.join(ROOT, 'tests', 'fixtures', 'streets.opl'),
+                    '--bbox=-45.00,33.50,-43.95,34.40'],
                    check=True, capture_output=True)
     _pn, _bn = start({'SCANNER': '0', 'NUCBOX_STREETS_FILE': _idx}, _nj)
     _pr, _br = start({'SCANNER': '0', 'NUCBOX_STREETS': _bn}, _nj)
     try:
         _s, _r = _nbx(_br, '/api/nbx/cross?a=Foxglove%20Tri&b=Northgate%20Dr'
-                           '&box=-84.6,34.0,-84.5,33.9')
+                           '&box=-44.6,34.0,-44.5,33.9')
         eq("a rig relaying to a NucBox's own index answers where the two streets "
            'meet, the misread "Tri" matched as Trail',
            (_s, _r.get('a'), _r.get('meets')),
            (200, {'names': ['Foxglove Trail'], 'how': 'ocr'},
-            [{'lat': 33.96, 'lon': -84.55, 'n': 1, 'spanM': 0, 'shared': True}]))
+            [{'lat': 33.96, 'lon': -44.55, 'n': 1, 'spanM': 0, 'shared': True}]))
         _s, _r = _nbx(_br, '/api/nbx/stretch?name=Larkspur%20Pkwy%20SE'
-                           '&box=-84.56,33.95,-84.54,33.94')
+                           '&box=-44.56,33.95,-44.54,33.94')
         eq('...and the stretch of a street inside the box, cut at its edge',
-           (_s, [_l[0] for _l in _r.get('lines') or []]), (200, [[33.948, -84.56]]))
+           (_s, [_l[0] for _l in _r.get('lines') or []]), (200, [[33.948, -44.56]]))
     finally:
         stop(_pr)
         stop(_pn)
@@ -6334,7 +6335,7 @@ try:
            (_s, _r.get('unreachable'), _r.get('error')),
            (502, True, 'the NucBox did not answer within 0.8 s'))
         ok_('...after the timeout, connecting included (%.2fs)' % _took, _took < 2.0)
-        (_s, _r), _took = _slow_ask('/api/nbx/route?points=-84.5499,33.9526;-84.3880,33.7490')
+        (_s, _r), _took = _slow_ask('/api/nbx/route?points=-44.5499,33.9526;-44.3880,33.7490')
         ok_('...and so is its router (%r, %.2fs)' % (_s, _took),
             _s == 502 and _r.get('unreachable') is True and _took < 2.0)
     finally:
@@ -6388,8 +6389,8 @@ _FSCAN_SRC = (
         '    open(q, "w").write(str(n))\n')
 with open(_gfake, 'w') as _fh:
     _fh.write(_FSCAN_SRC)
-_PIN = (33.9000, -84.5000)
-_DOOR = '4821 Kestrel Dr, Marietta'
+_PIN = (33.9000, -44.5000)
+_DOOR = '4821 Kestrel Dr, Harrowen'
 _seq = [0]
 
 
@@ -6429,7 +6430,7 @@ def _took(base, oid, dropoff=_DOOR, multi=False):
     return (get(base, '/api/status').get('holding') or {})
 
 
-def _pin(base, held, dropoff=_DOOR, name='4821, Kestrel Drive, Marietta, Cobb County'):
+def _pin(base, held, dropoff=_DOOR, name='4821, Kestrel Drive, Harrowen, Vosk County'):
     return post(base, '/api/held-end', {
         'holdId': held.get('holdId'), 'dropoff': dropoff, 'lat': _PIN[0],
         'lon': _PIN[1], 'name': name, 'doorLevel': True})
@@ -6501,13 +6502,13 @@ try:
         for r in _drops('g-gate')], [('gps', True, True)])
 
     # A pin that is not a door is refused, and with none the GPS never drops.
-    _h = _took(_gb, 'g-street', dropoff='Kestrel Dr, Marietta')
+    _h = _took(_gb, 'g-street', dropoff='Kestrel Dr, Harrowen')
     eq('[gps drop] a street-level end is refused',
-       _pin(_gb, _h, dropoff='Kestrel Dr, Marietta', name='Kestrel Drive, Marietta'),
+       _pin(_gb, _h, dropoff='Kestrel Dr, Harrowen', name='Kestrel Drive, Harrowen'),
        (409, {'ok': False, 'error': 'not door level'}))
     _h = _took(_gb, 'g-street2')
     eq('[gps drop] ...and so is a door the answer does not carry',
-       _pin(_gb, _h, name='Kestrel Drive, Marietta')[1].get('error'), 'not door level')
+       _pin(_gb, _h, name='Kestrel Drive, Harrowen')[1].get('error'), 'not door level')
     _beats(_DWELL + _LEAVE)
     ok_('[gps drop] an end that is not door-level never drops', _holding(_gb))
     post(_gb, '/api/delivered', {})
@@ -6568,14 +6569,14 @@ try:
     _pin(_gb, _h)
     ok_('[gps drop] (the premise: the order was pinned)',
         (_holding(_gb) or {}).get('endPinned'))
-    _beats([{'_line': {'dropoff': {'found': True, 'line': '77 Elsewhere Ct, Marietta',
-                                   'street': '77 Elsewhere Ct', 'city': 'Marietta',
+    _beats([{'_line': {'dropoff': {'found': True, 'line': '77 Elsewhere Ct, Harrowen',
+                                   'street': '77 Elsewhere Ct', 'city': 'Harrowen',
                                    'state': 'GA', 'zip': None, 'asked': True,
                                    'ms': None}}}])
     eq('[gps drop] a ⌖ read that moves the order\'s end disarms the pin made for the '
        'old one', ((_holding(_gb) or {}).get('dropoff'),
                    (_holding(_gb) or {}).get('endPinned')),
-       ('77 Elsewhere Ct, Marietta', False))
+       ('77 Elsewhere Ct, Harrowen', False))
     _beats(_DWELL + _LEAVE)
     ok_('[gps drop] ...so stopping at the old door and leaving drops nothing',
         _holding(_gb))
@@ -6629,9 +6630,9 @@ try:
     eq('[gps drop] the beat carries the GPS drop\'s state for the panel',
        (get(_gb, '/api/status').get('beat') or {}).get('heldEnd'),
        {'endPinned': True, 'arrived': False, 'endBy': None,
-        'endAt': {'lat': 33.9, 'lon': -84.5},
+        'endAt': {'lat': 33.9, 'lon': -44.5},
         # ...and its pickup's pin, the map's last rung (MV.routeLadder).
-        'pickAt': {'lat': 33.9009, 'lon': -84.5},
+        'pickAt': {'lat': 33.9009, 'lon': -44.5},
         'endWhy': 'door next to the pickup', 'visited': [],
         # ...and no general area beside a pin (refuseHeldEnd's endArea; the
         # owner, 24 Oct): a door pinned is never routed to roughly.
@@ -6641,7 +6642,7 @@ try:
     _r = post(_gb, '/api/offers/mark', {
         'id': 'g-stream', 'accepted': True,
         'offer': {'id': 'g-stream', 'pay': 12.0, 'minutes': 40.0, 'billedMinutes': 40.0,
-                  'miles': 5.0, 'cost': 1.75, 'dropoff': 'Kestrel Dr, Marietta',
+                  'miles': 5.0, 'cost': 1.75, 'dropoff': 'Kestrel Dr, Harrowen',
                   'multiOrder': False}})[1]
     eq('[gps drop] ...and the order the stream describes carries it too',
        _state(_r.get('held')), {'endPinned': False, 'arrived': False, 'endWhy': None})
@@ -6664,13 +6665,13 @@ def _bstop(kind, name, by, street, city):
             'partial': None, 'label': kind}
 
 
-_BFIRST = '88 Hollin Ct, Marietta'
-_BLAST = '517 Tarrow Ridge Dr NW, Marietta'
-_BSTOPS = [_bstop('pickup', 'Tamsin Bakehouse', 1040, '40 Quarrel St', 'Smyrna'),
-           _bstop('pickup', 'Orrin Noodle Co', 1046, '12 Pellow Ave', 'Smyrna'),
-           _bstop('dropoff', 'Vesna R.', 1062, '88 Hollin Ct', 'Marietta'),
-           _bstop('dropoff', 'Corvin D.', 1080, '517 Tarrow Ridge Dr NW', 'Marietta')]
-_BCARD = 'Tarrow Ridge Dr & Brisk Ln, Marietta'
+_BFIRST = '88 Hollin Ct, Harrowen'
+_BLAST = '517 Pimrow Ridge Dr NW, Harrowen'
+_BSTOPS = [_bstop('pickup', 'Tamsin Bakehouse', 1040, '40 Quarrel St', 'Pyrnel'),
+           _bstop('pickup', 'Ossel Noodle Co', 1046, '12 Pellow Ave', 'Pyrnel'),
+           _bstop('dropoff', 'Vesna R.', 1062, '88 Hollin Ct', 'Harrowen'),
+           _bstop('dropoff', 'Corvin D.', 1080, '517 Pimrow Ridge Dr NW', 'Harrowen')]
+_BCARD = 'Pimrow Ridge Dr & Brisk Ln, Harrowen'
 
 
 def _bplanner(stops=_BSTOPS, top=True, bottom=True):
@@ -6712,11 +6713,11 @@ try:
        [(True, 2, _BLAST, False)])
     eq('[batch] the last door\'s pin is kept',
        _pin(_gb, _bh, dropoff=_BLAST,
-            name='517, Tarrow Ridge Drive Northwest, Marietta, Cobb County')[0], 200)
+            name='517, Pimrow Ridge Drive Northwest, Harrowen, Vosk County')[0], 200)
     eq('[batch] ...and a pin for the first door is not the order\'s end',
        post(_gb, '/api/held-end', {'holdId': _bh.get('holdId'), 'dropoff': _BFIRST,
                                    'lat': _PIN[0] + _BFAR, 'lon': _PIN[1],
-                                   'name': '88, Hollin Court, Marietta',
+                                   'name': '88, Hollin Court, Harrowen',
                                    'doorLevel': True})[0], 409)
     _beats([_fix(_BFAR)] * 7 + [_fix(_BFAR + _FAR)] * 3)
     eq('[batch] arriving at the FIRST door and leaving does not put the order down',
@@ -6726,12 +6727,12 @@ try:
        ([r.get('by') for r in _drops('b-trip')], _holding(_gb)), (['gps'], None))
 
     # The guard: the card's corner is on none of the planner's dropoffs.
-    _took(_gb, 'b-else', dropoff='Wexley Pkwy & Brisk Ln, Kennesaw')
+    _took(_gb, 'b-else', dropoff='Wexley Pkwy & Brisk Ln, Tellmoor')
     _bplanner()
     _bh = _holding(_gb) or {}
     eq('[batch] a card whose end is on none of the planner\'s dropoffs is no batch, and '
        '/api/status says why', (_bh.get('dropoff'), _bh.get('batch'), _bh.get('batchWhy')),
-       ('Wexley Pkwy & Brisk Ln, Kennesaw', False, 'card end elsewhere'))
+       ('Wexley Pkwy & Brisk Ln, Tellmoor', False, 'card end elsewhere'))
     post(_gb, '/api/delivered', {})
     # A list whose foot is off the screen. Its customers named afresh: this
     # harness sends no offer line, so every Took here is dated from the same
@@ -6746,12 +6747,12 @@ try:
     _bplanner(_BOFF)
     ok_('[batch] (the premise: the list seen whole makes it a batch)',
         (_holding(_gb) or {}).get('batch'))
-    _took(_gb, 'b-next', dropoff='Kestrel Dr, Marietta')
+    _took(_gb, 'b-next', dropoff='Kestrel Dr, Harrowen')
     _bh = _holding(_gb) or {}
     eq('[batch] ...and a later Took replaces it, the batch with it',
        (_bh.get('dropoff'), _bh.get('batch'), _bh.get('drops'),
         [r.get('by') for r in _drops_soon('b-off')]),
-       ('Kestrel Dr, Marietta', False, None, ['replaced']))
+       ('Kestrel Dr, Harrowen', False, None, ['replaced']))
     post(_gb, '/api/delivered', {})
     # An add-on trip is untouched: two orders held, the planner's doors are
     # theirs by cues, and neither is a batch.
@@ -6891,11 +6892,11 @@ finally:
 # level only — and says on /api/status why when it did not pin. Two NucBoxes:
 # tests/fake-nucbox.js for the answers, and a stand-in below that is down
 # (503) or slow on cue and counts every search it was sent. Card fixes at
-# Marietta Square, as the fake's own; addresses invented.
-_SQ = {'lat': 33.9526, 'lon': -84.5499, 'gpsOk': True, 'gpsErr': 10.0, 'gpsMode': 3,
+# Harrowen Square, as the fake's own; addresses invented.
+_SQ = {'lat': 33.9526, 'lon': -44.5499, 'gpsOk': True, 'gpsErr': 10.0, 'gpsMode': 3,
        'gpsAge': 0.5, 'hasTotal': True, 'whole': True, 'multiOrder': False}
-_COBB = '1985 Cobb Parkway, Kennesaw'      # three door answers, 3.4 mi from the Square
-_KES = '4821 Kestrel Dr, Marietta'         # its street only, no number
+_VOSK = '1985 Vosk Parkway, Tellmoor'      # three door answers, 3.4 mi from the Square
+_KES = '4821 Kestrel Dr, Harrowen'         # its street only, no number
 
 
 class _Stub(object):
@@ -6917,8 +6918,8 @@ def _stub_app():
                 self.end_headers()
                 return
             time.sleep(1.0)
-            body = json.dumps([{'lat': '34.0010000', 'lon': '-84.5560000',
-                                'display_name': '1985, Cobb Parkway, Kennesaw, Cobb County'}])
+            body = json.dumps([{'lat': '34.0010000', 'lon': '-44.5560000',
+                                'display_name': '1985, Vosk Parkway, Tellmoor, Vosk County'}])
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -6983,13 +6984,13 @@ try:
     _ap, _ab = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _asay,
                       'NUCBOX_SEARCH': _afake_base, 'NUCBOX_TIMEOUT_MS': '800'}, _aj)
     try:
-        _atook(_ab, 'a-door', _COBB)
+        _atook(_ab, 'a-door', _VOSK)
         _h = _settled(_ab)
         eq('[auto arm] a door-level answer inside the held card\'s disc arms the GPS drop',
            (_h.get('endPinned'), _h.get('endBy'), _h.get('endWhy')), (True, 'server', None))
         _s, _r = post(_ab, '/api/held-end', {
-            'holdId': _h.get('holdId'), 'dropoff': _COBB, 'lat': 34.0, 'lon': -84.55,
-            'name': '1985, Cobb Parkway, Kennesaw', 'doorLevel': True})
+            'holdId': _h.get('holdId'), 'dropoff': _VOSK, 'lat': 34.0, 'lon': -44.55,
+            'name': '1985, Vosk Parkway, Tellmoor', 'doorLevel': True})
         eq('[auto arm] a later page pin for the same dropoff is a no-op: the first wins',
            (_s, (_holding(_ab) or {}).get('endBy')), (200, 'server'))
 
@@ -6999,7 +7000,7 @@ try:
            (_h.get('endPinned'), _h.get('endWhy')), (False, 'street found, not that door'))
         eq('[auto arm] ...asked once for that dropoff', len(_aasked('4821')), 1)
 
-        _atook(_ab, 'a-far', _COBB, miles=2.0)
+        _atook(_ab, 'a-far', _VOSK, miles=2.0)
         _h = _settled(_ab)
         eq('[auto arm] an answer outside the held card\'s disc does not arm',
            (_h.get('endPinned'), _h.get('endWhy')), (False, "no such door in the reach's box"))
@@ -7009,7 +7010,7 @@ try:
         # more with the type word left out (MV.streetRetry), the door on the
         # same street pinned, never the same number on another type of street.
         _n = len(_aasked('Tansy'))
-        _atook(_ab, 'a-retry', '1830 Tansy Creek Cts SW, Marietta')
+        _atook(_ab, 'a-retry', '1830 Tansy Creek Cts SW, Harrowen')
         _h = _settled(_ab)
         eq('[street retry] a door printed "Cts" and answered with nothing is asked once more '
            'with its type left out, pinned at the same street\'s door, and says how',
@@ -7019,22 +7020,22 @@ try:
            (True, 'server', '1830 Tansy Creek SW', None,
             ['1830 Tansy Creek Cts SW', '1830 Tansy Creek SW']))
         _n = len(_aasked('Tansy'))
-        _atook(_ab, 'a-retry2', '1830 Tansy Creek Cts SW, Marietta')
+        _atook(_ab, 'a-retry2', '1830 Tansy Creek Cts SW, Harrowen')
         _h = _settled(_ab)
         eq('[street retry] ...the next order to that door is answered from the cache, both '
            'questions', (_h.get('endPinned'), _h.get('endAsked'), len(_aasked('Tansy')) - _n),
            (True, '1830 Tansy Creek SW', 0))
-        _atook(_ab, 'a-retry-drive', '2040 Tansy Creek Cts SW, Marietta')
+        _atook(_ab, 'a-retry-drive', '2040 Tansy Creek Cts SW, Harrowen')
         _h = _settled(_ab)
         eq('[street retry] the same number on another type of street is not the door: the '
            'first question\'s refusal stands',
            (_h.get('endPinned'), _h.get('endAsked'), _h.get('endWhy')),
            (False, None, "no such door in the reach's box"))
-        _atook(_ab, 'a-retry-far', '1830 Tansy Creek Cts SW, Marietta', miles=1.0)
+        _atook(_ab, 'a-retry-far', '1830 Tansy Creek Cts SW, Harrowen', miles=1.0)
         _h = _settled(_ab)
         eq('[street retry] ...and the door found outside the held card\'s disc is refused',
            (_h.get('endPinned'), _h.get('endWhy')), (False, "no such door in the reach's box"))
-        _atook(_ab, 'a-door2', _COBB)
+        _atook(_ab, 'a-door2', _VOSK)
         _h = _settled(_ab)
         eq('[street retry] a door found as printed says no other street',
            (_h.get('endPinned'), _h.get('endAsked')), (True, None))
@@ -7044,7 +7045,7 @@ try:
         # the door; asked once more with "W" (MV.dirRetry), the door on the
         # same street pinned, never a house of that number on another street.
         _n = len(_aasked('Ardley'))
-        _atook(_ab, 'a-dir', '810 Ardley West Corwin Parkway, Kennesaw, GA 30144')
+        _atook(_ab, 'a-dir', '810 Ardley West Corwin Parkway, Tellmoor, GA 90744')
         _h = _settled(_ab)
         eq('[directional retry] a door whose road is found and not the door is asked once more '
            'with the directional as its letter, pinned at the same street\'s door, and says how',
@@ -7053,12 +7054,12 @@ try:
              for u in _aasked('Ardley')[_n:]]),
            (True, 'server', '810 Ardley W Corwin Parkway', None,
             ['810 Ardley West Corwin Parkway', '810 Ardley W Corwin Parkway']))
-        _atook(_ab, 'a-dir-circle', '812 Ardley West Corwin Parkway, Kennesaw, GA 30144')
+        _atook(_ab, 'a-dir-circle', '812 Ardley West Corwin Parkway, Tellmoor, GA 90744')
         _h = _settled(_ab)
         eq('[directional retry] a house of that number on another street is not the door: the '
            'road\'s refusal stands', (_h.get('endPinned'), _h.get('endAsked'), _h.get('endWhy')),
            (False, None, 'street found, not that door'))
-        _atook(_ab, 'a-dir-far', '810 Ardley West Corwin Parkway, Kennesaw, GA 30144', miles=1.0)
+        _atook(_ab, 'a-dir-far', '810 Ardley West Corwin Parkway, Tellmoor, GA 90744', miles=1.0)
         _h = _settled(_ab)
         eq('[directional retry] ...nor the door outside the held card\'s disc',
            (_h.get('endPinned'), _h.get('endWhy')), (False, 'street found, not that door'))
@@ -7068,9 +7069,9 @@ try:
         _settled(_ab)
         _n = len(_aasked('1985'))
         with open(os.path.join(_adir, 'say-0.json.tmp'), 'w') as _fh:
-            json.dump([{'dropoff': {'line': '1985 Cobb Parkway, Kennesaw, GA 30152',
-                                    'street': '1985 Cobb Parkway', 'city': 'Kennesaw',
-                                    'state': 'GA', 'zip': '30152', 'found': True,
+            json.dump([{'dropoff': {'line': '1985 Vosk Parkway, Tellmoor, GA 90752',
+                                    'street': '1985 Vosk Parkway', 'city': 'Tellmoor',
+                                    'state': 'GA', 'zip': '90752', 'found': True,
                                     'asked': True}}], _fh)
         os.rename(os.path.join(_adir, 'say-0.json.tmp'), os.path.join(_adir, 'say-0.json'))
         _h = _settled(_ab, lambda h: h.get('endPinned'))
@@ -7080,7 +7081,7 @@ try:
         stop(_ap)
 
     # The 19 Oct night fault, invented: the planner's "1106 <Name> Ln" read off
-    # a dark frame as "L106 <Nam..>r" and filed "1106 Tamaror", which the
+    # a dark frame as "L106 <Nam..>r" and filed "1106 Pelaror", which the
     # NucBox's search answers with nothing, and with no type word to leave
     # out. With NUCBOX_STREETS set the street index (the fake's, by the real
     # streets.js) is asked which one street that read is, and the door asked
@@ -7091,21 +7092,21 @@ try:
     _nmp, _nmb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _afake_base,
                         'NUCBOX_STREETS': _afake_base, 'NUCBOX_TIMEOUT_MS': '800'}, _nmj)
     try:
-        _n = len(_aasked('Tamar'))
-        _atook(_nmb, 'n-door', '1106 Tamaror, Marietta')
+        _n = len(_aasked('Pelar'))
+        _atook(_nmb, 'n-door', '1106 Pelaror, Harrowen')
         _h = _settled(_nmb)
         eq('[name rescue] a door filed under a name read short is pinned by the one street the '
            'street index says it is, and says which',
            (_h.get('endPinned'), _h.get('endBy'), _h.get('endAsked'), _h.get('endWhy'),
             [urllib.parse.unquote(re.search(r'[?&](?:street|name)=([^&]*)', u).group(1))
-             for u in _aasked('Tamar')[_n:]]),
-           (True, 'server', '1106 Tamarons Lane', None,
-            ['1106 Tamaror', 'Tamaror', '1106 Tamarons Lane']))
+             for u in _aasked('Pelar')[_n:]]),
+           (True, 'server', '1106 Pelarons Lane', None,
+            ['1106 Pelaror', 'Pelaror', '1106 Pelarons Lane']))
         eq('[name rescue] ...the index asked at /api/streets/named inside the disc\'s box',
-           [u.split('?')[0] for u in _aasked('Tamar')[_n:]],
+           [u.split('?')[0] for u in _aasked('Pelar')[_n:]],
            ['/search', '/api/streets/named', '/search'])
-        _n = len(_aasked('Tamar'))
-        _atook(_nmb, 'n-door2', '1106 Tamaror, Marietta')
+        _n = len(_aasked('Pelar'))
+        _atook(_nmb, 'n-door2', '1106 Pelaror, Harrowen')
         _h = _settled(_nmb)
         time.sleep(0.3)
         _nrow = [json.loads(x) for x in open(_nmj) if x.strip()]
@@ -7115,16 +7116,16 @@ try:
             for r in _nrow if r.get('kind') == 'drop' and r.get('id') == 'n-door'],
            [('rescue', 'street')])
         eq('[name rescue] ...the next order to that door is answered from the cache, all three',
-           (_h.get('endPinned'), _h.get('endAsked'), len(_aasked('Tamar')) - _n),
-           (True, '1106 Tamarons Lane', 0))
-        _atook(_nmb, 'n-two', '1106 Brindler, Marietta')
+           (_h.get('endPinned'), _h.get('endAsked'), len(_aasked('Pelar')) - _n),
+           (True, '1106 Pelarons Lane', 0))
+        _atook(_nmb, 'n-two', '1106 Brindler, Harrowen')
         _h = _settled(_nmb)
         eq('[name rescue] a read two near streets can be is neither: the first refusal stands '
            'and no door is asked by either name',
            (_h.get('endPinned'), _h.get('endAsked'), _h.get('endWhy'),
             len(_aasked('Brindlewood')) + len(_aasked('Brindleton'))),
            (False, None, "no such door in the reach's box", 0))
-        _atook(_nmb, 'n-far', '1106 Tamaror, Marietta', miles=1.0)
+        _atook(_nmb, 'n-far', '1106 Pelaror, Harrowen', miles=1.0)
         _h = _settled(_nmb)
         eq('[name rescue] ...and the door found outside a 1.0 mi card is refused',
            (_h.get('endPinned'), _h.get('endWhy')), (False, "no such door in the reach's box"))
@@ -7133,9 +7134,9 @@ try:
         _atook(_nmb, 'n-page', _KES)
         _h = _settled(_nmb)
         post(_nmb, '/api/held-end', {'holdId': _h.get('holdId'), 'dropoff': _KES,
-                                     'lat': 33.9600, 'lon': -84.5400, 'doorLevel': True,
-                                     'name': '4821, Kestrel Drive, Marietta, Cobb County'})
-        _atook(_nmb, 'n-cobb', _COBB)
+                                     'lat': 33.9600, 'lon': -44.5400, 'doorLevel': True,
+                                     'name': '4821, Kestrel Drive, Harrowen, Vosk County'})
+        _atook(_nmb, 'n-vosk', _VOSK)
         _h = _settled(_nmb)
         time.sleep(0.3)
         _nrow = [json.loads(x) for x in open(_nmj) if x.strip()]
@@ -7145,26 +7146,26 @@ try:
            [('page', None)])
         eq('[name rescue] a door found as printed never asks the index',
            (_h.get('endPinned'), _h.get('endAsked'), len(_aasked('named?name=1985')),
-            len(_aasked('named?name=Cobb'))), (True, None, 0, 0))
-        _s, _r, _ = raw(_nmb, '/api/nbx/named?name=Tamaror')
+            len(_aasked('named?name=Vosk'))), (True, None, 0, 0))
+        _s, _r, _ = raw(_nmb, '/api/nbx/named?name=Pelaror')
         eq('[name rescue] the relay passes the question on only with a box',
            (_s, json.loads(_r).get('error')), (400, 'named needs a box'))
-        _r = get(_nmb, '/api/nbx/named?name=Tamaror&box=-84.65,34.04,-84.45,33.87')
+        _r = get(_nmb, '/api/nbx/named?name=Pelaror&box=-44.65,34.04,-44.45,33.87')
         eq('[name rescue] ...and relays the index\'s answer, from the cache',
-           (_r.get('names'), _r.get('how'), _r.get('among')), (['Tamarons Lane'], 'cut', 1))
+           (_r.get('names'), _r.get('how'), _r.get('among')), (['Pelarons Lane'], 'cut', 1))
         # Mutation catch-up (21 Oct): a door whose street kept its type word,
-        # "1106 Tamarons Ln", asked as printed and without "Ln", neither of
+        # "1106 Pelarons Ln", asked as printed and without "Ln", neither of
         # which the fake answers: the index is asked after the type-word retry
         # too, and the door found by the street's own name (its search from
-        # the cache: "1106 Tamarons Lane" was asked for n-door above).
-        _n = len(_aasked('Tamarons'))
-        _atook(_nmb, 'n-typed', '1106 Tamarons Ln, Marietta')
+        # the cache: "1106 Pelarons Lane" was asked for n-door above).
+        _n = len(_aasked('Pelarons'))
+        _atook(_nmb, 'n-typed', '1106 Pelarons Ln, Harrowen')
         _h = _settled(_nmb)
         eq('[name rescue] after the type-word retry found nothing, the index is asked and the '
            'door pinned by the street\'s own name',
            (_h.get('endPinned'), _h.get('endAsked'),
-            [u.split('?')[0] for u in _aasked('Tamarons')[_n:]]),
-           (True, '1106 Tamarons Lane', ['/search', '/search', '/api/streets/named']))
+            [u.split('?')[0] for u in _aasked('Pelarons')[_n:]]),
+           (True, '1106 Pelarons Lane', ['/search', '/search', '/api/streets/named']))
     finally:
         stop(_nmp)
     # Without NUCBOX_STREETS: the server above (_ab) refused "2040 Tansy Creek
@@ -7173,7 +7174,7 @@ try:
     eq('[name rescue] with NUCBOX_STREETS unset the index is never asked',
        len(_aasked('named?name=Tansy')), 0)
 
-    # Mutation catch-up (21 Oct): "1106 Tamaror" with no type word to leave
+    # Mutation catch-up (21 Oct): "1106 Pelaror" with no type word to leave
     # out, on a server with NUCBOX_STREETS unset, keeps the door search's own
     # refusal, not a question to an index that is not there ('NucBox down');
     # and on one whose index answers names beside two streets (not "the one
@@ -7193,7 +7194,7 @@ try:
 
             def do_GET(self):
                 _BadIx.asked.append(self.path)
-                body = json.dumps({'ok': True, 'names': ['Tamarons Lane'], 'how': 'cut',
+                body = json.dumps({'ok': True, 'names': ['Pelarons Lane'], 'how': 'cut',
                                    'among': 2})
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -7214,13 +7215,13 @@ try:
                                  'NUCBOX_TIMEOUT_MS': '800', 'NUCBOX_RETRY_MS': '60000'},
                                 **_ixenv), _ixj)
         try:
-            _atook(_ixb, 'ix-' + _ixname, '1106 Tamaror, Marietta')
+            _atook(_ixb, 'ix-' + _ixname, '1106 Pelaror, Harrowen')
             _h = _settled(_ixb)
-            eq('[name rescue] the index %s: "1106 Tamaror" refused as %r' % (
+            eq('[name rescue] the index %s: "1106 Pelaror" refused as %r' % (
                 'unset' if _ixname == 'unset' else 'answering names beside two streets',
                 _ixwant), (_h.get('endPinned'), _h.get('endWhy')), (False, _ixwant))
             if _ixname == 'bad':
-                _s, _r, _ = raw(_ixb, '/api/nbx/named?name=Tamaror&box=-84.65,34.04,-84.45,33.87')
+                _s, _r, _ = raw(_ixb, '/api/nbx/named?name=Pelaror&box=-44.65,34.04,-44.45,33.87')
                 eq('[name rescue] ...and the relay refuses that answer as the index not answering',
                    (_s, json.loads(_r).get('unreachable')), (502, True))
         finally:
@@ -7248,9 +7249,9 @@ try:
                         'NUCBOX_RETRY_MS': '60000'}, _sdj)
     try:
         _sdgot = []
-        for _sdid, _sddoor in (('sd-name', '1106 Tamaror, Marietta'),
-                               ('sd-court', '306 Larkmoor Ct, Marietta'),
-                               ('sd-area', '10495 Pellmore Street, Marietta')):
+        for _sdid, _sddoor in (('sd-name', '1106 Pelaror, Harrowen'),
+                               ('sd-court', '306 Larkmoor Ct, Harrowen'),
+                               ('sd-area', '10495 Pellmore Street, Harrowen')):
             _atook(_sdb, _sdid, _sddoor)
             _h = _settled(_sdb)
             _sdgot.append((_h.get('endPinned'), _h.get('endWhy'), bool(_h.get('endArea'))))
@@ -7261,7 +7262,7 @@ try:
            'street index refuses the connection: the name rescue, the short court, the area',
            _sdgot, [(False, "no such door in the reach's box", False), (False, 'street found, not that door', True),
                     (False, "no such door in the reach's box", False)])
-        _atook(_sdb, 'sd-next', _COBB)
+        _atook(_sdb, 'sd-next', _VOSK)
         _settled(_sdb, lambda h: h.get('endPinned'))
         time.sleep(0.3)
         _sdrows = [json.loads(x) for x in open(_sdj) if x.strip()]
@@ -7277,7 +7278,7 @@ try:
         stop(_sdp)
 
     # ...and the whole search asked once more after NUCBOX_RETRY_MS, ONCE,
-    # however many of its index questions went unanswered: "1106 Tamaror"
+    # however many of its index questions went unanswered: "1106 Pelaror"
     # asks the index twice in one chain (named, then whole for the area), both
     # answered 503 by a stub that counts them.
     class _DownIx(object):
@@ -7305,7 +7306,7 @@ try:
                         'NUCBOX_STREETS': 'http://127.0.0.1:%d' % _downix.server_address[1],
                         'NUCBOX_TIMEOUT_MS': '800', 'NUCBOX_RETRY_MS': '400'}, _sdj2)
     try:
-        _atook(_sdb, 'sd-retry', '1106 Tamaror, Marietta')
+        _atook(_sdb, 'sd-retry', '1106 Pelaror, Harrowen')
         _h = _settled(_sdb)
         time.sleep(1.5)
         _h = _settled(_sdb)
@@ -7320,12 +7321,12 @@ try:
 
     # The owner's planner of 21 Oct, 13:57, end to end, every name and street
     # invented: one Uber order held, carrying two on, its card read badly
-    # (legs 0, hasTotal false, multiOrder false) with the corner "Corbins Dr,
-    # Marietta" as its end. The Trip Planner read whole with its title scrolled
+    # (legs 0, hasTotal false, multiOrder false) with the corner "Marbins Dr,
+    # Harrowen" as its end. The Trip Planner read whole with its title scrolled
     # off — the shared case, made into the sighting rpi/scan_pi.py sends by
-    # offer_parser itself — files its lone dropoff "2282 Corbin, Marietta" as
+    # offer_parser itself — files its lone dropoff "2282 Marbin, Harrowen" as
     # the planner's (assemble.js framedTrip), and the street-index rescue finds
-    # the door by "2282 Corbins Drive": the last letter and the type lost.
+    # the door by "2282 Marbins Drive": the last letter and the type lost.
     import offer_parser as _OP                                # noqa: E402
     _ftext = [c['text'] for c in json.load(open(os.path.join(
         ROOT, 'tests', 'fixtures', 'cases.json')))['planner']
@@ -7382,34 +7383,34 @@ try:
     try:
         post(_fb, '/api/offers/mark', {'id': 'f-one', 'accepted': True, 'offer': dict(
             _SQ, id='f-one', pay=9.75, minutes=21.0, billedMinutes=21.0, miles=5.0, cost=1.75,
-            legs=0, hasTotal=False, multiOrder=False, dropoff='Corbins Dr, Marietta')})
+            legs=0, hasTotal=False, multiOrder=False, dropoff='Marbins Dr, Harrowen')})
         _h = _settled(_fb, lambda h: h.get('endWhy'))
         eq('[framed] (the premise: the card\'s corner is held, no house number, carrying two on)',
            (_h.get('dropoff'), _h.get('endWhy'), get(_fb, '/api/status').get('carryTwo')),
-           ('Corbins Dr, Marietta', 'no house number', True))
+           ('Marbins Dr, Harrowen', 'no house number', True))
         # As the reader saw it before: the page not framed, the old refusal.
         # (Its door is searched already, warmEarly: the rescue's answer is in
         # the cache by the time the framed read files the door.)
-        _n = len(_aasked('Corbin'))
+        _n = len(_aasked('Marbin'))
         _fsay(_fread(_ftext, framed=False))
         time.sleep(1.0)
         _h = _holding(_fb) or {}
         eq('[framed] an unframed read of the page files nothing: the panel says the list was cut '
            'off', (_h.get('dropoff'), (_h.get('planner') or {}).get('unfiled')),
-           ('Corbins Dr, Marietta', 'list'))
+           ('Marbins Dr, Harrowen', 'list'))
         _fsay(_fread(_ftext))
         _h = _settled(_fb, lambda h: h.get('endPinned'))
         eq('[framed] the 21 Oct page, title scrolled off, files its lone dropoff onto a card whose '
            'legs read 0, and the planner line says nothing unfiled',
            (_h.get('dropoff'), _h.get('dropoffScanned'),
             (_h.get('planner') or {}).get('unfiled')),
-           ('2282 Corbin, Marietta', True, None))
-        eq('[framed] ...and the street-index rescue pins the door as "2282 Corbins Drive"',
+           ('2282 Marbin, Harrowen', True, None))
+        eq('[framed] ...and the street-index rescue pins the door as "2282 Marbins Drive"',
            (_h.get('endPinned'), _h.get('endBy'), _h.get('endAsked'), _h.get('endWhy')),
-           (True, 'server', '2282 Corbins Drive', None))
+           (True, 'server', '2282 Marbins Drive', None))
         eq('[framed] ...asked as printed, of the index inside the disc\'s box, then by the '
            'street\'s own name, once each',
-           [u.split('?')[0] for u in _aasked('Corbin')[_n:]],
+           [u.split('?')[0] for u in _aasked('Marbin')[_n:]],
            ['/search', '/api/streets/named', '/search'])
         eq('[framed] ...and the store\'s street kept without its suite',
            [p.get('street') for p in (_h.get('planner') or {}).get('stops') or []
@@ -7419,9 +7420,9 @@ try:
 
     # The owner's card-box read of 21 Oct, 15:00, end to end, every street
     # invented: one Uber order held, its end the card's corner "<A> Flat Ct &
-    # <B> Rd, Marietta" (no house number). The planner read in the card box,
+    # <B> Rd, Harrowen" (no house number). The planner read in the card box,
     # its Dropoff header above the crop: "Address / 3259 <Name> Oaks Dr /
-    # Marietta, GA / View details / Waybill / ... / Stop New Requests" — the
+    # Harrowen, GA / View details / Waybill / ... / Stop New Requests" — the
     # shared case, made into the sighting rpi/scan_pi.py sends by offer_parser
     # itself. The trip ends on a dropoff, so that block is the order's end,
     # filed at rank `label` over the corner (assemble.js footDropoff).
@@ -7478,7 +7479,7 @@ try:
             _SQ, id='w-one', pay=17.62, minutes=30.0, billedMinutes=30.0, miles=8.0, cost=2.8,
             legs=1, hasTotal=True, multiOrder=False,
             pickup='Fable Grill (3400 Fable International Blvd NW)',
-            dropoff='Wren Flat Ct & Oriel Rd, Marietta')})
+            dropoff='Wren Flat Ct & Oriel Rd, Harrowen')})
         time.sleep(0.5)
         # As the reader saw it before: no shape, nothing filed.
         _wsay(_wread(_wtext, footed=False))
@@ -7486,17 +7487,17 @@ try:
         _h = _holding(_wb) or {}
         eq('[waybill last] (the premise: a card-box read without the shape files nothing; the '
            'corner is held)', (_h.get('dropoff'), _h.get('dropoffScanned')),
-           ('Wren Flat Ct & Oriel Rd, Marietta', False))
+           ('Wren Flat Ct & Oriel Rd, Harrowen', False))
         # ...and a press on it is the press's rule: the cropped block is no answer.
         _wsay(_wread(_wtext, asked=True))
         time.sleep(1.0)
         eq('[waybill last] ...nor a pressed one', (_holding(_wb) or {}).get('dropoff'),
-           'Wren Flat Ct & Oriel Rd, Marietta')
+           'Wren Flat Ct & Oriel Rd, Harrowen')
         _wsay(_wread(_wtext))
         _h = _settled(_wb, lambda h: h.get('dropoffScanned'))
         eq('[waybill last] the 21 Oct 15:00 card-box read files the trip\'s last stop over the '
            'card\'s corner', (_h.get('dropoff'), _h.get('dropoffScanned')),
-           ('3259 Wrenfield Oaks Dr, Marietta', True))
+           ('3259 Wrenfield Oaks Dr, Harrowen', True))
     finally:
         stop(_wp)
 
@@ -7508,7 +7509,7 @@ try:
     try:
         _Stub.mode = 'down'
         _Stub.searches[:] = []
-        _atook(_bb, 'b-down', _COBB)
+        _atook(_bb, 'b-down', _VOSK)
         time.sleep(4.0)
         _h = _holding(_bb) or {}
         # (Asked again at NUCBOX_RETRY_MS, 1.5 s, and next at twice that, 4.5
@@ -7522,7 +7523,7 @@ try:
 
         # The answer for an order already put down lands on nothing.
         _Stub.mode = 'slow'
-        _atook(_bb, 'b-old', _COBB)
+        _atook(_bb, 'b-old', _VOSK)
         time.sleep(0.3)
         post(_bb, '/api/delivered', {})
         _atook(_bb, 'b-new', None)
@@ -7540,7 +7541,7 @@ try:
     _cp, _cb = start({'SCANNER': '0'}, _cj)
     try:
         _n = len(_aasked('')), len(_Stub.searches)
-        _atook(_cb, 'c-unset', _COBB)
+        _atook(_cb, 'c-unset', _VOSK)
         time.sleep(1.0)
         _h = _holding(_cb) or {}
         eq('[auto arm] with NUCBOX_SEARCH unset nothing is sent and nothing is said',
@@ -7583,9 +7584,9 @@ try:
     with open(_dfake, 'w') as _fh:
         _fh.write('import json, time\n'
                   'time.sleep(0.5)\n'
-                  'print(json.dumps({"dropoff": {"line": "1985 Cobb Parkway, Kennesaw, GA 30152",\n'
-                  '    "street": "1985 Cobb Parkway", "city": "Kennesaw", "state": "GA",\n'
-                  '    "zip": "30152", "found": True, "asked": True,\n'
+                  'print(json.dumps({"dropoff": {"line": "1985 Vosk Parkway, Tellmoor, GA 90752",\n'
+                  '    "street": "1985 Vosk Parkway", "city": "Tellmoor", "state": "GA",\n'
+                  '    "zip": "90752", "found": True, "asked": True,\n'
                   '    "at": int(time.time() * 1000)}}), flush=True)\n'
                   'time.sleep(600)\n')
     _dp, _db = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
@@ -7594,7 +7595,7 @@ try:
         _h = _settled(_db, lambda h: (h.get('dropoff') or '').startswith('1985'))
         eq('[auto arm] a reason given for an earlier dropoff is not said of a new one',
            (_h.get('dropoff'), _h.get('endPinned'), _h.get('endWhy')),
-           ('1985 Cobb Parkway, Kennesaw, GA 30152', False, None))
+           ('1985 Vosk Parkway, Tellmoor, GA 90752', False, None))
     finally:
         stop(_dp)
 finally:
@@ -7609,7 +7610,7 @@ finally:
 # read lands on the hold and NUCBOX_SEARCH is set, server.js asks the NucBox
 # for each pickup that has a street (searchHeldPickup), inside the HELD card's
 # disc, and keeps the position as /api/held-pickup does (keepPickupPin). The
-# fake's "1975 Cobb Parkway" is a restaurant 87 m from the door at 1985 Cobb
+# fake's "1975 Vosk Parkway" is a restaurant 87 m from the door at 1985 Vosk
 # Parkway, inside the guard's 150 m; "250 Example Road" one 1.66 mi from the
 # Square. Addresses and points invented.
 _hkfake = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
@@ -7678,7 +7679,7 @@ def _hkplanner(*picks):
     return {'planner': {'stops': stops, 'unfiled': 'dropoffs', 'asked': False}}
 
 
-_HK_DOOR = (34.0010, -84.5560)    # the fake's three answers' middle
+_HK_DOOR = (34.0010, -44.5560)    # the fake's three answers' middle
 
 
 def _hkbeat(dlat):
@@ -7716,9 +7717,9 @@ try:
                         'GPS_DWELL_MS': '1000'}, _hkj)
     try:
         # The end armed by the server, then the planner read: no Map view.
-        _atook(_hkb, 'k-guard', _COBB)
+        _atook(_hkb, 'k-guard', _VOSK)
         _settled(_hkb, lambda h: h.get('endPinned'))
-        _hksays([_hkplanner(('Example Diner', '1975 Cobb Parkway'))])
+        _hksays([_hkplanner(('Example Diner', '1975 Vosk Parkway'))])
         _h = _settled(_hkb, lambda h: h.get('pickupsPinned'))
         _q = _hkasked('street=1975')
         ok_('[held pickups] a planner pickup with a street is searched on the NucBox inside '
@@ -7733,10 +7734,10 @@ try:
 
         # A planner pickup with a street and no house number: door level only
         # (pickupDoorPlan, the owner's decision of 18 Oct), so not asked.
-        _atook(_hkb, 'k-nonum', _COBB)
+        _atook(_hkb, 'k-nonum', _VOSK)
         _settled(_hkb, lambda h: h.get('endPinned'))
         _n = len(_hkasked(''))
-        _hksays([_hkplanner(('Example Diner', 'Cobb Parkway'))])
+        _hksays([_hkplanner(('Example Diner', 'Vosk Parkway'))])
         _h = _settled(_hkb, lambda h: (h.get('planner') or {}).get('stops'))
         time.sleep(0.3)
         eq('[held pickups] a planner pickup with no house number is not asked, and /api/status '
@@ -7749,7 +7750,7 @@ try:
         # search inside the disc, for the held end and the pickup alike.
         post(_hkb, '/api/offers/mark', {'id': 'k-notown', 'accepted': True, 'offer': dict(
             _SQ, id='k-notown', pay=12.0, minutes=40.0, billedMinutes=40.0, miles=5.0,
-            cost=1.75, dropoff='1985 Cobb Parkway', pickupLine='1975 Cobb Parkway')})
+            cost=1.75, dropoff='1985 Vosk Parkway', pickupLine='1975 Vosk Parkway')})
         _h = _settled(_hkb, lambda h: h.get('endWhy') and h.get('pickupsPinned'))
         eq('[held pickups] a door with no town is asked inside the disc, end and pickup both, '
            'and pinned at door level',
@@ -7763,7 +7764,7 @@ try:
         # disc, pinned where one place of that name answers...
         post(_hkb, '/api/offers/mark', {'id': 'k-name', 'accepted': True, 'offer': dict(
             _SQ, id='k-name', pay=12.0, minutes=40.0, billedMinutes=40.0, miles=5.0,
-            cost=1.75, dropoff=_COBB, pickup='Example Grill')})
+            cost=1.75, dropoff=_VOSK, pickup='Example Grill')})
         _h = _settled(_hkb, lambda h: h.get('pickupsPinned'))
         _qn = _hkasked('q=Example')
         eq('[held pickups] a card\'s pickup with no door is asked by its store\'s name inside the '
@@ -7775,7 +7776,7 @@ try:
         # ...and a chain's several branches inside the disc are no pin.
         post(_hkb, '/api/offers/mark', {'id': 'k-chain', 'accepted': True, 'offer': dict(
             _SQ, id='k-chain', pay=12.0, minutes=40.0, billedMinutes=40.0, miles=5.0,
-            cost=1.75, dropoff=_COBB, pickup='Starbucks')})
+            cost=1.75, dropoff=_VOSK, pickup='Starbucks')})
         _h = _settled(_hkb, lambda h: h.get('pickupsWhy') not in (None,))
         time.sleep(0.5)
         _h = _holding(_hkb) or {}
@@ -7786,12 +7787,12 @@ try:
 
         # The end armed AND arrived at — the car waiting at the restaurant —
         # before the planner read says where the restaurant is.
-        _atook(_hkb, 'k-late', _COBB)
+        _atook(_hkb, 'k-late', _VOSK)
         _settled(_hkb, lambda h: h.get('endPinned'))
         _hksays([_hkbeat(0.0002)] * 7)
         ok_('[held pickups] (the premise: the car waiting there arrived at the door)',
             (_holding(_hkb) or {}).get('arrived'))
-        _hksays([_hkplanner(('Example Diner', '1975 Cobb Parkway'))])
+        _hksays([_hkplanner(('Example Diner', '1975 Vosk Parkway'))])
         _h = _settled(_hkb, lambda h: h.get('pickupsPinned'))
         eq('[held pickups] a pickup that lands after the end was armed asks the guard again: '
            'the arrival counted at the restaurant is taken back',
@@ -7801,7 +7802,7 @@ try:
 
         # A held card of 1.0 mi: its disc is 1.5 mi, and the restaurant at
         # 250 Example Road is 1.66 mi from its fix.
-        _atook(_hkb, 'k-far', _COBB, miles=1.0)
+        _atook(_hkb, 'k-far', _VOSK, miles=1.0)
         _settled(_hkb)
         _n = len(_hkasked('street=250'))
         _hksays([_hkplanner(('Example Grill', '250 Example Road'))])
@@ -7837,7 +7838,7 @@ try:
             'lat': lat, 'lon': lon, 'gpsAge': 0.1, 'gpsErr': 25.0, 'gpsMode': 3,
             'gpsOk': True, 'gpsWhy': None, 'freshFor': 10.0}}}
     try:
-        _atook(_hkb, 'k-area', '3150 Thornbury Mill Rd SE, Marietta')
+        _atook(_hkb, 'k-area', '3150 Gorsebury Mill Rd SE, Harrowen')
         _h = _settled(_hkb)
         _ea = _h.get('endArea') or {}
         eq('[area] two doors 0.33 mi apart inside the held card\'s disc: no pin, the refusal '
@@ -7845,10 +7846,10 @@ try:
            (_h.get('endPinned'), _h.get('endBy'), _h.get('endAt'), _h.get('endWhy'),
             _ea.get('approx'), _ea.get('n'), round(_ea.get('lat') or 0, 4),
             round(_ea.get('lon') or 0, 4)),
-           (False, None, None, 'several answers', True, 2, 33.962, -84.5435))
+           (False, None, None, 'several answers', True, 2, 33.962, -44.5435))
         _s, _r = post(_hkb, '/api/held-end', {
-            'holdId': _h.get('holdId'), 'dropoff': '3150 Thornbury Mill Rd SE, Marietta',
-            'lat': _ea.get('lat'), 'lon': _ea.get('lon'), 'name': 'Thornbury Mill Road',
+            'holdId': _h.get('holdId'), 'dropoff': '3150 Gorsebury Mill Rd SE, Harrowen',
+            'lat': _ea.get('lat'), 'lon': _ea.get('lon'), 'name': 'Gorsebury Mill Road',
             'doorLevel': False})
         eq('[area] ...the area posted as the held end is refused as not door level',
            (_s, _r.get('error'), (_holding(_hkb) or {}).get('endPinned')),
@@ -7858,9 +7859,9 @@ try:
         _h = _holding(_hkb) or {}
         eq('[area] ...a car that waits at the area and leaves arrives nowhere and drops nothing',
            (_h.get('dropoff'), _h.get('arrived'), _h.get('endPinned'), _h.get('endWhy')),
-           ('3150 Thornbury Mill Rd SE, Marietta', False, False, 'several answers'))
+           ('3150 Gorsebury Mill Rd SE, Harrowen', False, False, 'several answers'))
         post(_hkb, '/api/delivered', {})
-        _atook(_hkb, 'k-area-far', '3152 Thornbury Mill Rd SE, Marietta')
+        _atook(_hkb, 'k-area-far', '3152 Gorsebury Mill Rd SE, Harrowen')
         _h = _settled(_hkb)
         eq('[area] two doors 2.5 mi apart are no area: refused as ever, nothing kept',
            (_h.get('endPinned'), _h.get('endWhy'), _h.get('endArea')),
@@ -7881,7 +7882,7 @@ try:
                         'NUCBOX_SEARCH': _hkfake_base, 'NUCBOX_STREETS': _hkfake_base,
                         'NUCBOX_TIMEOUT_MS': '800', 'GPS_DWELL_MS': '1000'}, _hkj)
     try:
-        _atook(_hkb, 'k-cut', '10800 Vessington Hwy, Marietta')
+        _atook(_hkb, 'k-cut', '10800 Vessington Hwy, Harrowen')
         _h = _settled(_hkb)
         _ea = _h.get('endArea') or {}
         eq('[area more] a cut list whose ten answers are one area: no pin, "too many answers", '
@@ -7894,10 +7895,10 @@ try:
         _h = _holding(_hkb) or {}
         eq('[area more] ...a car that waits at it and leaves arrives nowhere and drops nothing',
            (_h.get('dropoff'), _h.get('arrived'), _h.get('endPinned')),
-           ('10800 Vessington Hwy, Marietta', False, False))
+           ('10800 Vessington Hwy, Harrowen', False, False))
         post(_hkb, '/api/delivered', {})
         _n = len(_hkasked('/api/streets/whole?name=Pellmore'))
-        _atook(_hkb, 'k-street', '10495 Pellmore Street, Marietta')
+        _atook(_hkb, 'k-street', '10495 Pellmore Street, Harrowen')
         _h = _settled(_hkb)
         _ea = _h.get('endArea') or {}
         eq('[area more] a door nothing answered: its street asked alone, once, of the index; no '
@@ -7912,7 +7913,7 @@ try:
         eq('[area more] ...and waiting there drops nothing either',
            (_h.get('arrived'), _h.get('endPinned')), (False, False))
         post(_hkb, '/api/delivered', {})
-        _atook(_hkb, 'k-long', '10497 Dunmere Parkway, Marietta')
+        _atook(_hkb, 'k-long', '10497 Dunmere Parkway, Harrowen')
         _h = _settled(_hkb)
         eq('[area more] a door nothing answered on a street too long to be one area: refused, '
            'no area', (_h.get('endPinned'), _h.get('endWhy'), _h.get('endArea')),
@@ -7920,7 +7921,7 @@ try:
         post(_hkb, '/api/delivered', {})
         # A held pickup whose door is the cut list's: the area is the page's
         # to draw and nothing of it is kept as a pin.
-        _atook(_hkb, 'k-pick', _COBB)
+        _atook(_hkb, 'k-pick', _VOSK)
         _settled(_hkb, lambda h: h.get('endPinned'))
         _hksays([_hkplanner(('Example Cafe', '10800 Vessington Hwy'))])
         _h = _settled(_hkb, lambda h: h.get('pickupsWhy'))
@@ -7944,7 +7945,7 @@ try:
     # nothing is kept and the refusal stands as it was.
     def _bandtook(base, oid):
         o = dict(_SQ, id=oid, pay=12.0, minutes=40.0, billedMinutes=40.0, miles=5.0,
-                 toPickupMiles=4.3, cost=1.75, dropoff='3152 Thornbury Mill Rd SE, Marietta')
+                 toPickupMiles=4.3, cost=1.75, dropoff='3152 Gorsebury Mill Rd SE, Harrowen')
         post(base, '/api/offers/mark', {'id': oid, 'accepted': True, 'offer': o})
 
     for _bwhich, _broute in (('up', _hkfake_base), ('down', 'http://127.0.0.1:9')):
@@ -7959,7 +7960,7 @@ try:
                'placed' % _bwhich, (_h.get('endPinned'), _h.get('endWhy'), _h.get('endArea')),
                (False, 'several answers', None))
             post(_hkb, '/api/held-pickup', {'holdId': _h.get('holdId'), 'lat': 33.9526,
-                                            'lon': -84.5499, 'q': 'Example Cafe'})
+                                            'lon': -44.5499, 'q': 'Example Cafe'})
             if _bwhich == 'up':
                 _h = _settled(_hkb, lambda h: (h.get('endArea') or {}).get('band'))
                 _ea = _h.get('endArea') or {}
@@ -7968,9 +7969,9 @@ try:
                    (_h.get('endPinned'), _h.get('endBy'), _h.get('endAt'), _h.get('endWhy'),
                     _ea.get('approx'), _ea.get('band'), _ea.get('n'), _ea.get('cardMi'),
                     round(_ea.get('lat') or 0, 4), round(_ea.get('lon') or 0, 4)),
-                   (False, None, None, 'several answers', True, True, 1, 0.7, 33.96, -84.545))
+                   (False, None, None, 'several answers', True, True, 1, 0.7, 33.96, -44.545))
                 eq('[band] ...asked of the router as two-point routes, no more than the doors',
-                   len([a for a in _hkasked('/route/v1/driving/-84.549900,33.952600;')
+                   len([a for a in _hkasked('/route/v1/driving/-44.549900,33.952600;')
                         if 'overview=false' in a]) >= 2, True)
                 _hksays([_areabeat(_ea.get('lat'), _ea.get('lon'))] * 7
                         + [_areabeat(_ea.get('lat') + 0.02, _ea.get('lon'))] * 3)
@@ -7978,7 +7979,7 @@ try:
                 eq('[band] ...a car that waits at the band\'s area and leaves arrives nowhere and '
                    'drops nothing', (_h.get('dropoff'), _h.get('arrived'), _h.get('endPinned'),
                                      _h.get('endWhy')),
-                   ('3152 Thornbury Mill Rd SE, Marietta', False, False, 'several answers'))
+                   ('3152 Gorsebury Mill Rd SE, Harrowen', False, False, 'several answers'))
             else:
                 time.sleep(1.5)
                 _h = _holding(_hkb) or {}
@@ -8010,12 +8011,12 @@ try:
         dict(_MP_NONE, kind='pickup', orders=2, name='Example Grill', expectedBy=None,
              street='250 Example Road', line='250 Example Road'),
         dict(_MP_NONE, kind='dropoff', orders=1, name='Pat Q.', expectedBy=1403,
-             street='4821 Kestrel Dr', city='Marietta', line='4821 Kestrel Dr, Marietta'),
+             street='4821 Kestrel Dr', city='Harrowen', line='4821 Kestrel Dr, Harrowen'),
         dict(_MP_NONE, kind='dropoff', orders=1, name=None, expectedBy=None, street=None,
              line=None)], 'unfiled': 'dropoffs', 'asked': False}}
     _mp2 = {'planner': {'stops': [
         dict(_MP_NONE, kind='dropoff', orders=1, name='Lee R.', expectedBy=1416,
-             street='1985 Cobb Parkway', city='Kennesaw', line='1985 Cobb Parkway, Kennesaw')],
+             street='1985 Vosk Parkway', city='Tellmoor', line='1985 Vosk Parkway, Tellmoor')],
         'unfiled': None, 'asked': False}}
 
     def _mpstops(h):
@@ -8024,13 +8025,13 @@ try:
     # ...and then a ⌖ press over page 2 (the owner, 24 Oct: "Would there be a
     # way to have the scan button also merge?"): its read MERGES too, the
     # press's fields winning — Pat Q.'s door as the press read it, "4823",
-    # over the fuller "4821 …, Marietta" kept — and page 1's pickup, which
+    # over the fuller "4821 …, Harrowen" kept — and page 1's pickup, which
     # the pressed page does not show, still kept.
     _mp3 = {'planner': {'stops': [
         dict(_MP_NONE, kind='dropoff', orders=1, name='Pat Q.', expectedBy=1403,
              street='4823 Kestrel Dr', line='4823 Kestrel Dr'),
         dict(_MP_NONE, kind='dropoff', orders=1, name='Lee R.', expectedBy=1416,
-             street='1985 Cobb Parkway', city='Kennesaw', line='1985 Cobb Parkway, Kennesaw')],
+             street='1985 Vosk Parkway', city='Tellmoor', line='1985 Vosk Parkway, Tellmoor')],
         'unfiled': 'dropoffs', 'asked': True}}
     _mphand = os.path.join(_mpdir, 'handoff')
     os.makedirs(_mphand)
@@ -8038,17 +8039,17 @@ try:
                         'NUCBOX_SEARCH': 'http://127.0.0.1:%d' % _hkdown.server_address[1],
                         'NUCBOX_RETRY_MS': '60000', 'UBERSCAN_HANDOFF_DIR': _mphand}, _mpj)
     try:
-        _atook(_mpb, 'k-pages', _COBB)
+        _atook(_mpb, 'k-pages', _VOSK)
         _mpsays([_mp1, _mp2])
         _h = _holding(_mpb) or {}
         eq('[planner pages] two pages on one hold are merged: page 1\'s pickup kept with its '
            'door, page 2\'s dropoff in place of the header page 1 cut off',
            _mpstops(_h),
            [('pickup', 'Example Grill', '250 Example Road'),
-            ('dropoff', 'Pat Q.', '4821 Kestrel Dr, Marietta'),
-            ('dropoff', 'Lee R.', '1985 Cobb Parkway, Kennesaw')])
+            ('dropoff', 'Pat Q.', '4821 Kestrel Dr, Harrowen'),
+            ('dropoff', 'Lee R.', '1985 Vosk Parkway, Tellmoor')])
         eq('[planner pages] ...and the end is still the card\'s, not filed off a planner line',
-           (_h.get('dropoff'), _h.get('batch')), (_COBB, False))
+           (_h.get('dropoff'), _h.get('batch')), (_VOSK, False))
         _s, _ = post(_mpb, '/api/dropoff', {})
         eq('[press merge] a ⌖ press keeps the pages the hold merged (it forgot them)',
            (_s, len(_mpstops(_holding(_mpb)))), (200, 3))
@@ -8058,10 +8059,10 @@ try:
            _mpstops(_holding(_mpb)),
            [('pickup', 'Example Grill', '250 Example Road'),
             ('dropoff', 'Pat Q.', '4823 Kestrel Dr'),
-            ('dropoff', 'Lee R.', '1985 Cobb Parkway, Kennesaw')])
+            ('dropoff', 'Lee R.', '1985 Vosk Parkway, Tellmoor')])
         eq('[press merge] ...its reason the pressed read\'s, and the end still the card\'s',
            (((_holding(_mpb) or {}).get('planner') or {}).get('unfiled'),
-            (_holding(_mpb) or {}).get('dropoff')), ('dropoffs', _COBB))
+            (_holding(_mpb) or {}).get('dropoff')), ('dropoffs', _VOSK))
         # The owner's snap of 31 Oct (invented here): a scrolled read that
         # lost the house number's first digits at the screen's left edge,
         # read the name tight to its initial and the time a minute on, used
@@ -8075,7 +8076,7 @@ try:
         eq('[slip] a read with the door\'s first digits lost and the name and time slipped is '
            'the same stop on the hold, at the full door; the end still the card\'s',
            ([x[2] for x in _mpstops(_holding(_mpb))], (_holding(_mpb) or {}).get('dropoff')),
-           (['250 Example Road', '4823 Kestrel Dr', '1985 Cobb Parkway, Kennesaw'], _COBB))
+           (['250 Example Road', '4823 Kestrel Dr', '1985 Vosk Parkway, Tellmoor'], _VOSK))
     finally:
         stop(_mpp)
     # (A scanner of its own: the first one's would say its pages again.)
@@ -8094,26 +8095,26 @@ try:
            'asked and pinned, from the planner, and the end armed at its own door',
            (_h.get('pickupsPinned'), _h.get('pickupsHow'), _h.get('endPinned'),
             _h.get('dropoff')),
-           (1, [{'by': 'server', 'from': 'planner', 'asked': None}], True, _COBB))
+           (1, [{'by': 'server', 'from': 'planner', 'asked': None}], True, _VOSK))
         _s, _r = post(_mpb, '/api/held-end', {
-            'holdId': _h.get('holdId'), 'dropoff': '4821 Kestrel Dr, Marietta',
-            'lat': 33.9700, 'lon': -84.5300, 'name': 'Kestrel Drive', 'doorLevel': True})
+            'holdId': _h.get('holdId'), 'dropoff': '4821 Kestrel Dr, Harrowen',
+            'lat': 33.9700, 'lon': -44.5300, 'name': 'Kestrel Drive', 'doorLevel': True})
         eq('[planner pages] the first dropoff posted as the held end is refused: the GPS drop '
-           'arms on the end alone', (_s, (_holding(_mpb) or {}).get('dropoff')), (409, _COBB))
+           'arms on the end alone', (_s, (_holding(_mpb) or {}).get('dropoff')), (409, _VOSK))
         # Kestrel Drive, the fake's point for the first dropoff's street.
-        _mpsays([_mpbeat(33.9700, -84.5300)] * 7 + [_mpbeat(33.9900, -84.5300)] * 3)
+        _mpsays([_mpbeat(33.9700, -44.5300)] * 7 + [_mpbeat(33.9900, -44.5300)] * 3)
         _h = _holding(_mpb) or {}
         eq('[planner pages] ...and a car that waits at the first dropoff and leaves drops '
            'nothing: still held, its end armed at its own door, nothing arrived',
            (bool(_h), _h.get('dropoff'), _h.get('endPinned'), _h.get('arrived')),
-           (True, _COBB, True, False))
+           (True, _VOSK, True, False))
         post(_mpb, '/api/delivered', {})
         # A NEW trip after that one ends starts with no planner: its first
         # page is all it keeps.
-        _atook(_mpb, 'k-pages-next', _COBB)
+        _atook(_mpb, 'k-pages-next', _VOSK)
         _mpsays([_mp2])
         eq('[planner pages] the next order\'s planner merges with nothing of the last',
-           _mpstops(_holding(_mpb)), [('dropoff', 'Lee R.', '1985 Cobb Parkway, Kennesaw')])
+           _mpstops(_holding(_mpb)), [('dropoff', 'Lee R.', '1985 Vosk Parkway, Tellmoor')])
         post(_mpb, '/api/delivered', {})
     finally:
         stop(_mpp)
@@ -8136,18 +8137,18 @@ try:
                  cost=1.75, gpsOk=False, gpsWhy='rough', gpsErr=err, gpsMode=3, gpsAge=0.2)
         post(_hkb, '/api/offers/mark', {'id': oid, 'accepted': True, 'offer': o})
 
-    def _planner_end(street='1985 Cobb Parkway'):
+    def _planner_end(street='1985 Vosk Parkway'):
         """A whole Trip Planner page, unpressed, its sighting then its planner
         line under one stamp (as Stage 3 sends them): an invented pickup with
         no NucBox answer, and the fake's door as the order's end."""
         at = int(time.time() * 1000)
         stops = [{'kind': 'pickup', 'orders': 1, 'name': 'Example Wok', 'place': None,
-                  'expectedBy': 1180, 'street': '2210 Quarry Bend Rd NW', 'city': 'Kennesaw',
-                  'state': 'GA', 'zip': None, 'line': '2210 Quarry Bend Rd NW, Kennesaw',
+                  'expectedBy': 1180, 'street': '2210 Quarry Bend Rd NW', 'city': 'Tellmoor',
+                  'state': 'GA', 'zip': None, 'line': '2210 Quarry Bend Rd NW, Tellmoor',
                   'partial': None, 'label': 'pickup'},
                  {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'place': None,
-                  'expectedBy': 1202, 'street': street, 'city': 'Kennesaw',
-                  'state': 'GA', 'zip': None, 'line': street + ', Kennesaw',
+                  'expectedBy': 1202, 'street': street, 'city': 'Tellmoor',
+                  'state': 'GA', 'zip': None, 'line': street + ', Tellmoor',
                   'partial': None, 'label': 'dropoff'}]
         _hksays([{'sighting': {'at': at, 'asked': False, 'whole': True, 'titled': True,
                                'app': 'uber', 'screen': 'uber.planner',
@@ -8165,7 +8166,7 @@ try:
            'the Trip Planner: searched, pinned by the server, armed — not "no card fix"',
            (_h.get('dropoff'), ((_h.get('fields') or {}).get('dropoff') or {}).get('from'),
             _h.get('endPinned'), _h.get('endBy'), _h.get('endWhy')),
-           ('1985 Cobb Parkway, Kennesaw', 'planner', True, 'server', None))
+           ('1985 Vosk Parkway, Tellmoor', 'planner', True, 'server', None))
         _hksays([_hkbeat(0.0002)] * 7)
         ok_('[rough disc] ...and the GPS arrival at it counts (arrived)',
             (_holding(_hkb) or {}).get('arrived'))
@@ -8176,7 +8177,7 @@ try:
         # whose street names its type replaces the one that did not, and the
         # end is searched again for the new text.
         _rough_took('k-typed', 25.0)
-        _planner_end('1985 Cobb')
+        _planner_end('1985 Vosk')
         _h = _settled(_hkb, lambda h: h.get('endWhy'))
         _was = (_h.get('dropoff'), _h.get('endPinned'))
         _planner_end()
@@ -8184,7 +8185,7 @@ try:
         eq('[typed street] a clean reading of the same planner stop replaces a garbled one '
            'with no street type, and the end is searched and pinned anew',
            (_was, _h.get('dropoff'), _h.get('endPinned'), _h.get('endBy')),
-           (('1985 Cobb, Kennesaw', False), '1985 Cobb Parkway, Kennesaw', True, 'server'))
+           (('1985 Vosk, Tellmoor', False), '1985 Vosk Parkway, Tellmoor', True, 'server'))
         post(_hkb, '/api/delivered', {})
 
         # The owner's 19 Oct 21:41 fault, invented: the planner's dropoff read
@@ -8192,7 +8193,7 @@ try:
         # stop and as complete. The reading seen most of the last few of that
         # stop replaces the filed one, and the end is searched and pinned.
         _rough_took('k-vote', 25.0)
-        _planner_end('1385 Cobb Parkway')
+        _planner_end('1385 Vosk Parkway')
         _h = _settled(_hkb, lambda h: h.get('endWhy'))
         _was = (_h.get('dropoff'), _h.get('endPinned'))
         for _ in range(3):
@@ -8202,7 +8203,7 @@ try:
            '"1985" is filed, searched and pinned, and its point is on status',
            (_was, _h.get('dropoff'), _h.get('endPinned'), _h.get('endBy'),
             sorted((_h.get('endAt') or {}).keys())),
-           (('1385 Cobb Parkway, Kennesaw', False), '1985 Cobb Parkway, Kennesaw', True,
+           (('1385 Vosk Parkway, Tellmoor', False), '1985 Vosk Parkway, Tellmoor', True,
             'server', ['lat', 'lon']))
         post(_hkb, '/api/delivered', {})
 
@@ -8211,7 +8212,7 @@ try:
         _h = _settled(_hkb, lambda h: h.get('endPinned') or h.get('endWhy'))
         eq('[rough disc] ...but a rough stamp over the cap (250 m) is still no disc',
            (_h.get('dropoff'), _h.get('endPinned'), _h.get('endWhy')),
-           ('1985 Cobb Parkway, Kennesaw', False, 'no card fix'))
+           ('1985 Vosk Parkway, Tellmoor', False, 'no card fix'))
         eq('[rough disc] ...and its planner pickup, a door, is not asked either, and says why',
            (_h.get('pickupsPinned'), _h.get('pickupsWhy')), (0, 'no card fix'))
         post(_hkb, '/api/delivered', {})
@@ -8219,10 +8220,10 @@ try:
         stop(_hkp)
 
     # The owner's 20 Oct 20:44 fault, invented, carrying two on: the planner's
-    # dropoff read whole-screen as "1985 Cobb Pa" and filed from 'planner';
+    # dropoff read whole-screen as "1985 Vosk Pa" and filed from 'planner';
     # the NucBox found nothing. Every read after was a card-box read of the
     # planner — a dropoff line under a Dropoff label, rank `label`, no stop key
-    # — saying "1985 Cobb Parkway" cleanly, and the hold kept the garbled one.
+    # — saying "1985 Vosk Parkway" cleanly, and the hold kept the garbled one.
     # Now the same house number with its street's type replaces it
     # (Assemble.labelTyped), the end is searched again and pinned; a press
     # filed garbled is never replaced.
@@ -8235,7 +8236,7 @@ try:
         """The scanner's dropoff line off a card-box read of the planner (or a
         ⌖ press over it, `asked`)."""
         _bxsays([{'dropoff': {'found': True, 'line': line, 'street': line.split(',')[0],
-                              'city': 'Kennesaw', 'state': 'GA', 'zip': None, 'place': None,
+                              'city': 'Tellmoor', 'state': 'GA', 'zip': None, 'place': None,
                               'asked': asked, 'labelled': None if asked else 'dropoff',
                               'ms': None, 'app': 'uber', 'screen': 'uber.planner',
                               'expectedBy': 1202, 'at': int(time.time() * 1000)}}])
@@ -8243,12 +8244,12 @@ try:
     def _bx_planner(street):
         at = int(time.time() * 1000)
         stops = [{'kind': 'pickup', 'orders': 1, 'name': 'Example Wok', 'place': None,
-                  'expectedBy': 1180, 'street': '2210 Quarry Bend Rd NW', 'city': 'Kennesaw',
-                  'state': 'GA', 'zip': None, 'line': '2210 Quarry Bend Rd NW, Kennesaw',
+                  'expectedBy': 1180, 'street': '2210 Quarry Bend Rd NW', 'city': 'Tellmoor',
+                  'state': 'GA', 'zip': None, 'line': '2210 Quarry Bend Rd NW, Tellmoor',
                   'partial': None, 'label': 'pickup'},
                  {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'place': None,
-                  'expectedBy': 1202, 'street': street, 'city': 'Kennesaw',
-                  'state': 'GA', 'zip': None, 'line': street + ', Kennesaw',
+                  'expectedBy': 1202, 'street': street, 'city': 'Tellmoor',
+                  'state': 'GA', 'zip': None, 'line': street + ', Tellmoor',
                   'partial': None, 'label': 'dropoff'}]
         _bxsays([{'sighting': {'at': at, 'asked': False, 'whole': True, 'titled': True,
                                'app': 'uber', 'screen': 'uber.planner',
@@ -8265,29 +8266,29 @@ try:
 
     try:
         _bx_took('x-boxtyped')
-        _bx_planner('1985 Cobb Pa')
+        _bx_planner('1985 Vosk Pa')
         _h = _settled(_bxb, lambda h: h.get('endWhy'))
         _was = (_h.get('dropoff'), ((_h.get('fields') or {}).get('dropoff') or {}).get('from'),
                 _h.get('endPinned'))
-        _bx_box('1985 Cobb Parkway, Kennesaw')
+        _bx_box('1985 Vosk Parkway, Tellmoor')
         _h = _settled(_bxb, lambda h: h.get('endPinned'))
-        eq('[box typed] carrying two on: a planner dropoff filed garbled ("1985 Cobb Pa") is '
+        eq('[box typed] carrying two on: a planner dropoff filed garbled ("1985 Vosk Pa") is '
            'replaced by a card-box read of it typed, searched anew and pinned by the server',
            (_was, _h.get('dropoff'), ((_h.get('fields') or {}).get('dropoff') or {}).get('from'),
             _h.get('endPinned'), _h.get('endBy')),
-           (('1985 Cobb Pa, Kennesaw', 'planner', False), '1985 Cobb Parkway, Kennesaw', 'label',
+           (('1985 Vosk Pa, Tellmoor', 'planner', False), '1985 Vosk Parkway, Tellmoor', 'label',
             True, 'server'))
         post(_bxb, '/api/delivered', {})
 
         _bx_took('x-boxpress')
-        _bx_box('1985 Cobb Pa, Kennesaw', asked=True)
+        _bx_box('1985 Vosk Pa, Tellmoor', asked=True)
         _settled(_bxb, lambda h: h.get('endWhy'))
-        _bx_box('1985 Cobb Parkway, Kennesaw')
+        _bx_box('1985 Vosk Parkway, Tellmoor')
         time.sleep(1.0)
         _h = _holding(_bxb) or {}
         eq('[box typed] ...but never over a ⌖ press, garbled or not',
            (_h.get('dropoff'), ((_h.get('fields') or {}).get('dropoff') or {}).get('from')),
-           ('1985 Cobb Pa, Kennesaw', 'press'))
+           ('1985 Vosk Pa, Tellmoor', 'press'))
         post(_bxb, '/api/delivered', {})
     finally:
         stop(_bxp)
@@ -8316,7 +8317,7 @@ try:
 
     try:
         _n = len(_hkasked('/api/streets/whole'))
-        _atook(_stb, 's-court', '306 Larkmoor Ct, Marietta')
+        _atook(_stb, 's-court', '306 Larkmoor Ct, Harrowen')
         _h = _settled(_stb)
         eq('[street arm] a short court the NucBox holds without house 306 arms the GPS drop on '
            'the street, says so, and asked the index once',
@@ -8325,42 +8326,42 @@ try:
            (True, 'street', None, 1))
         # The far end of the court, about 270 m from the street's first point
         # (the pin's lat/lon) and 30 m from the street itself.
-        _stsays([_stbeat(33.9613, -84.5373)] * 7)
+        _stsays([_stbeat(33.9613, -44.5373)] * 7)
         ok_('[street arm] ...a dwell anywhere along the street is an arrival (its far end)',
             (_holding(_stb) or {}).get('arrived'))
-        _stsays([_stbeat(33.9620, -84.5373)] * 3)
+        _stsays([_stbeat(33.9620, -44.5373)] * 3)
         ok_('[street arm] ...staying near the street does not drop', _holding(_stb))
-        _stsays([_stbeat(33.9680, -84.5373)] * 3)
+        _stsays([_stbeat(33.9680, -44.5373)] * 3)
         eq('[street arm] ...and leaving it puts the order down, once, by the GPS',
            (_holding(_stb), _stdrops('s-court')), (None, ['gps']))
 
-        _atook(_stb, 's-road', '512 Hollin Rd, Marietta')
+        _atook(_stb, 's-road', '512 Hollin Rd, Harrowen')
         _h = _settled(_stb)
         eq('[street arm] a road of 1.2 km is never armed by its street: the refusal stands',
            (_h.get('endPinned'), _h.get('endBy'), _h.get('endWhy')),
            (False, None, 'street found, not that door'))
-        _atook(_stb, 's-two', '77 Fennick Ct, Marietta')
+        _atook(_stb, 's-two', '77 Fennick Ct, Harrowen')
         _h = _settled(_stb)
         eq('[street arm] two short courts of one name inside the disc are neither',
            (_h.get('endPinned'), _h.get('endWhy')), (False, 'street found, not that door'))
         # Mutation catch-up (21 Oct). A 0.7 mi card (a 1.2 mi disc): the box
         # still holds both Fennick Courts, the disc only the one by the Square.
-        _atook(_stb, 's-near', '77 Fennick Ct, Marietta', miles=0.7)
+        _atook(_stb, 's-near', '77 Fennick Ct, Harrowen', miles=0.7)
         _h = _settled(_stb)
         eq('[street arm] ...but one of them alone touching a smaller card\'s disc, the other only '
            'in its box, arms on that one',
            (_h.get('endPinned'), _h.get('endBy')), (True, 'street'))
-        _atook(_stb, 's-ocr', '21 Eliis Ct, Marietta')
+        _atook(_stb, 's-ocr', '21 Eliis Ct, Harrowen')
         _h = _settled(_stb)
         eq('[street arm] a street the index reads as the name only by its ocr rule is not the same '
            'name: the refusal stands',
            (_h.get('endPinned'), _h.get('endWhy')), (False, 'street found, not that door'))
-        _atook(_stb, 's-long', '40 Quarrel Ct, Marietta')
+        _atook(_stb, 's-long', '40 Quarrel Ct, Harrowen')
         _h = _settled(_stb)
         eq('[street arm] a short court beside a street of its name too long to send its shape is '
            'one of two (unknown is not none): neither',
            (_h.get('endPinned'), _h.get('endWhy')), (False, 'street found, not that door'))
-        _atook(_stb, 's-untyped', '12 Pembury, Marietta')
+        _atook(_stb, 's-untyped', '12 Pembury, Harrowen')
         _h = _settled(_stb)
         eq('[street arm] a street read with no type word is no street name to ask the index by, '
            'even one the index holds with none (Pembury, 120 m)',
@@ -8370,8 +8371,8 @@ try:
         for _pn, _pl in (('s-place', 'Nowhere Hall'), ('s-shortplace', 'Inn')):
             _atook(_stb, _pn, None)
             _stsays([{'dropoff': {
-                'found': True, 'line': '306 Larkmoor Ct, Marietta, GA 30060',
-                'street': '306 Larkmoor Ct', 'city': 'Marietta', 'state': 'GA', 'zip': '30060',
+                'found': True, 'line': '306 Larkmoor Ct, Harrowen, GA 90660',
+                'street': '306 Larkmoor Ct', 'city': 'Harrowen', 'state': 'GA', 'zip': '90660',
                 'asked': True, 'labelled': None, 'ms': 10, 'app': 'uber', 'screen': 'uber.nav',
                 'expectedBy': None, 'place': _pl, 'at': int(time.time() * 1000)}}])
             _h = _settled(_stb, lambda h: h.get('endPinned') or h.get('endWhy'))
@@ -8380,17 +8381,17 @@ try:
                (_h.get('place'), _h.get('endPinned'), _h.get('endBy')), (_pl, True, 'street'))
 
         _n = len(_hkasked('/api/streets/whole'))
-        _atook(_stb, 's-guard', '306 Larkmoor Ct, Marietta')
+        _atook(_stb, 's-guard', '306 Larkmoor Ct, Harrowen')
         _h = _settled(_stb)
         eq('[street arm] the next order to that court is armed from the cache',
            (_h.get('endPinned'), _h.get('endBy'), len(_hkasked('/api/streets/whole')) - _n),
            (True, 'street', 0))
         # A pickup 55 m from the court's far end, 280 m from its first point.
         post(_stb, '/api/held-pickup', {'holdId': _h.get('holdId'),
-                                        'lat': 33.9615, 'lon': -84.5373})
+                                        'lat': 33.9615, 'lon': -44.5373})
         eq('[street arm] a held pickup within 150 m of ANY point of the street disarms it',
            (_holding(_stb) or {}).get('endWhy'), 'door next to the pickup')
-        _stsays([_stbeat(33.9613, -84.5373)] * 7 + [_stbeat(33.9680, -84.5373)] * 3)
+        _stsays([_stbeat(33.9613, -44.5373)] * 7 + [_stbeat(33.9680, -44.5373)] * 3)
         eq('[street arm] ...so waiting there and leaving drops nothing',
            (bool(_holding(_stb)), _stdrops('s-guard')), (True, []))
         post(_stb, '/api/delivered', {})
@@ -8401,7 +8402,7 @@ try:
                         'NUCBOX_TIMEOUT_MS': '800'}, _stj)
     try:
         _n = len(_hkasked('/api/streets/whole'))
-        _atook(_stb, 's-unset', '306 Larkmoor Ct, Marietta', miles=4.0)
+        _atook(_stb, 's-unset', '306 Larkmoor Ct, Harrowen', miles=4.0)
         _h = _settled(_stb)
         eq('[street arm] with NUCBOX_STREETS unset the index is never asked, nothing armed',
            (_h.get('endPinned'), _h.get('endWhy'), len(_hkasked('/api/streets/whole')) - _n),
@@ -8417,10 +8418,10 @@ try:
                         'NUCBOX_SEARCH': 'http://127.0.0.1:%d' % _hkdown.server_address[1],
                         'NUCBOX_RETRY_MS': '60000'}, _hkj)
     try:
-        _atook(_hkb, 'k-once', _COBB)
+        _atook(_hkb, 'k-once', _VOSK)
         _settled(_hkb)
         _n = len(_HkDown.searches)
-        _hksays([_hkplanner(('Example Diner', '1975 Cobb Parkway'))] * 3
+        _hksays([_hkplanner(('Example Diner', '1975 Vosk Parkway'))] * 3
                 + [_hkplanner(('Example Wok', None))])
         time.sleep(0.5)
         _new = _HkDown.searches[_n:]
@@ -8440,10 +8441,10 @@ try:
     with open(os.path.join(_hkr, 'holding.json'), 'w') as _fh:
         json.dump({'id': 'k-boot', 'acceptedAt': int(time.time() * 1000) - 60000,
                    'pay': 12.0, 'minutes': 40.0, 'miles': 5.0,
-                   'dropoff': 'Kestrel Dr, Marietta', 'endWhy': 'no house number',
-                   'endWhyFor': 'Kestrel Dr, Marietta',
+                   'dropoff': 'Kestrel Dr, Harrowen', 'endWhy': 'no house number',
+                   'endWhyFor': 'Kestrel Dr, Harrowen',
                    'card': dict(_SQ, miles=5.0),
-                   'planner': {'stops': _hkplanner(('Example Diner', '1975 Cobb Parkway'))
+                   'planner': {'stops': _hkplanner(('Example Diner', '1975 Vosk Parkway'))
                                ['planner']['stops'], 'unfiled': 'dropoffs'}}, _fh)
     _hkp, _hkb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _hkfake_base},
                        os.path.join(_hkr, 'offers.jsonl'))
@@ -8462,11 +8463,11 @@ try:
     # number (server.js pickupAsks): DoorDash's printed door under the store's
     # name (`pickupLine`, now carried onto the hold at Took), an Uber card's
     # "Store (<n> <street>)", a popup's door filed on the hold. The fake's
-    # "1981 Cobb Parkway" is a restaurant 60 m from the door at 1985 Cobb
+    # "1981 Vosk Parkway" is a restaurant 60 m from the door at 1985 Vosk
     # Parkway. Every name and address invented.
-    _SP_DOOR = '1981 Cobb Pkwy, Kennesaw, GA 30152'
+    _SP_DOOR = '1981 Vosk Pkwy, Tellmoor, GA 90752'
 
-    def _sptook(base, oid, pickup, line=None, dropoff=_COBB, app='doordash'):
+    def _sptook(base, oid, pickup, line=None, dropoff=_VOSK, app='doordash'):
         o = dict(_SQ, id=oid, pay=9.0, minutes=35.0, billedMinutes=35.0, miles=5.0,
                  cost=1.5, pickup=pickup, app=app)
         if dropoff:
@@ -8487,7 +8488,7 @@ try:
                                 p.get('from')) for p in o.get('pickupPins') or []])
                 for o in f.get('orders') or []}
 
-    _SP_AT = (34.001, -84.55535)          # the fake's restaurant at 1981
+    _SP_AT = (34.001, -44.55535)          # the fake's restaurant at 1981
 
     _spj = os.path.join(_hkdir, 'sp', 'offers.jsonl')
     os.makedirs(os.path.dirname(_spj))
@@ -8496,7 +8497,7 @@ try:
                         'NUCBOX_TIMEOUT_MS': '800'}, _spj)
     try:
         _n = len(_hkasked('street=1981'))
-        _sptook(_spb, 's-uber', 'Example Burger (1981 Cobb Pkwy)', app='uber')
+        _sptook(_spb, 's-uber', 'Example Burger (1981 Vosk Pkwy)', app='uber')
         _h = _spsettled(_spb)
         _spq = _hkasked('street=1981')[_n:]
         ok_('[server pickups] the card\'s door is asked once, on the NucBox, inside the held '
@@ -8527,7 +8528,7 @@ try:
         post(_spb, '/api/delivered', {})
 
         # The street-type retry, as the end's: "Cts" asked again without it.
-        _sptook(_spb, 's-retry', 'Example Wok', '1830 Tansy Creek Cts SW, Marietta, GA 30064',
+        _sptook(_spb, 's-retry', 'Example Wok', '1830 Tansy Creek Cts SW, Harrowen, GA 90664',
                 dropoff=_KES)
         _h = _settled(_spb, lambda h: h.get('pickupsPinned') or h.get('pickupsWhy'))
         eq('[server pickups] a printed door the NucBox holds under another type word is asked '
@@ -8565,7 +8566,7 @@ try:
         eq('[server pickups] ...so a door 60 m from it is not armed, and says why',
            (_h.get('endPinned'), _h.get('endWhy')), (True, 'door next to the pickup'))
         _code = post(_spb, '/api/held-pickup', {'holdId': _h.get('holdId'), 'lat': 34.0,
-                                                 'lon': -84.55, 'q': _SP_DOOR})[0]
+                                                 'lon': -44.55, 'q': _SP_DOOR})[0]
         eq('[server pickups] the first valid pin for a pickup text wins: Map view\'s post for '
            'it after the server pinned it moves nothing',
            (_code, _sporders(_spj).get('s-dd')[1]),
@@ -8601,7 +8602,7 @@ try:
     # its name along that street (pickupTail, MV.pickStoreAlong) — the card's
     # own search the moment it is read, and the Took's from the cache — and
     # never asks any of it for a dropoff.
-    _TW = '164 Wrenley Pkwy, Marietta, GA 30066'
+    _TW = '164 Wrenley Pkwy, Harrowen, GA 90666'
     _twj = os.path.join(_hkdir, 'tw', 'offers.jsonl')
     os.makedirs(os.path.dirname(_twj))
     open(_twj, 'w').close()
@@ -8617,14 +8618,14 @@ try:
            'pinned, by the server from the card',
            (_h.get('pickupsPinned'), _h.get('pickupsHow'), _sporders(_twj).get('t-wr')),
            (1, [{'by': 'server', 'from': 'card', 'asked': None}],
-            (_TW, [(33.9612, -84.545, _TW, 'server', 'card')])))
+            (_TW, [(33.9612, -44.545, _TW, 'server', 'card')])))
         ok_('[store along] ...asked as /api/streets/tail in the disc\'s box, then the store by '
             'name in the street\'s box (%r)' % _tws,
             any(a.startswith('/api/streets/tail?name=Wrenley Pkwy&box=') for a in _tws)
             and any('q=Lark Owl Grill' in a and 'bounded=1' in a for a in _tws))
         post(_twb, '/api/delivered', {})
         _n = len(_hkasked(''))
-        _sptook(_twb, 't-pz', 'Fable Pizza', '180 Wrenley Pkwy, Marietta, GA 30066', dropoff=_KES)
+        _sptook(_twb, 't-pz', 'Fable Pizza', '180 Wrenley Pkwy, Harrowen, GA 90666', dropoff=_KES)
         _h = _settled(_twb, lambda h: h.get('pickupsPinned') or h.get('pickupsWhy'))
         eq('[store along] ...two places of that name along the street: no pin, the door\'s own '
            'refusal said', (_h.get('pickupsPinned'), _h.get('pickupsWhy')),
@@ -8651,12 +8652,12 @@ try:
         eq('[uber store] an Uber store\'s bracketed door on a street printed short, read with a '
            'slip: pinned by the name before its bracket along that street, by the server from '
            'the card', (_h.get('pickupsPinned'), _sporders(_twj).get('t-ub')),
-           (1, (None, [(33.9612, -84.545, _TU, 'server', 'card')])))
+           (1, (None, [(33.9612, -44.545, _TU, 'server', 'card')])))
         post(_twb, '/api/delivered', {})
         # The same shape as an Uber DROPOFF, with a store's name no question has
         # asked on this server: never asked by that name.
         _n = len(_hkasked(''))
-        _sptook(_twb, 't-ubdrop', 'Example Wok (1981 Cobb Pkwy)',
+        _sptook(_twb, 't-ubdrop', 'Example Wok (1981 Vosk Pkwy)',
                 dropoff='Kestrel Tacos (190 Wrenley Pkwy)', app='uber')
         _settled(_twb)
         time.sleep(0.5)
@@ -8669,7 +8670,7 @@ try:
     # ...the card's own search the moment it is read (earlyDoor, searchCardEarly),
     # so the Took's questions are the cache's.
     _tec = dict(_SQ, id='t-early', pay=4.6, minutes=22.0, billedMinutes=22.0, miles=5.0,
-                cost=0.9, pickup='Wren Hollow Deli', pickupLine='200 Wrenley Pkwy, Marietta, GA 30066',
+                cost=0.9, pickup='Wren Hollow Deli', pickupLine='200 Wrenley Pkwy, Harrowen, GA 90666',
                 app='doordash', screen='dd.offer', stops=2, dropoffs=1, endRefused=True)
     _tes, _tesays, _tesj = _hksayer('tail-early')
     _tep, _teb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _tes,
@@ -8690,7 +8691,7 @@ try:
            'it from those answers with no new request (one of two branches on the street)',
            (len(_hkasked('Wren%20Hollow%20Deli')) - _nd, _h.get('pickupsPinned'),
             len(_hkasked('')) - _nall, _sporders(_tesj).get('t-early', (None, []))[1]),
-           (1, 1, 0, [(33.9603, -84.548, _tec['pickupLine'], 'server', 'card')]))
+           (1, 1, 0, [(33.9603, -44.548, _tec['pickupLine'], 'server', 'card')]))
         post(_teb, '/api/delivered', {})
         # ...and an Uber card's "<Store> (<n> <street>)" the same: the name
         # before the bracket asked along the street the moment the card is read
@@ -8718,7 +8719,7 @@ try:
            'before its bracket ("Phy" read for Pkwy), and ✓ Took pins it with no new request',
            (len(_hkasked('Lark%20Owl%20Grill')) - _nl, _h.get('pickupsPinned'),
             len(_pick_asks()) - _nall, _sporders(_tesj).get('t-early-ub', (None, []))[1]),
-           (1, 1, 0, [(33.9612, -84.545, _tuc['pickup'], 'server', 'card')]))
+           (1, 1, 0, [(33.9612, -44.545, _tuc['pickup'], 'server', 'card')]))
     finally:
         stop(_tep)
 
@@ -8732,7 +8733,7 @@ try:
     # the status and the beat give them back in the CARD's order with each
     # one's pin (heldStoresOf) for Map view's run. The fake's two restaurants
     # on one invented block stand in for the two stores.
-    _SM_DOOR1 = '1975 Cobb Parkway'
+    _SM_DOOR1 = '1975 Vosk Parkway'
     _smj = os.path.join(_hkdir, 'sm', 'offers.jsonl')
     os.makedirs(os.path.dirname(_smj))
     open(_smj, 'w').close()
@@ -8832,7 +8833,7 @@ try:
         _n82 = len(_hkasked('street=1982'))
         _sssays([{'offer': dict(_ssc, id='s-early-uber', app='uber', pickupLine=None,
                                 stores=[{'name': 'Example Diner', 'door': _SM_DOOR1},
-                                        {'name': 'Example Grill', 'door': '1982 Cobb Pkwy'}])}])
+                                        {'name': 'Example Grill', 'door': '1982 Vosk Pkwy'}])}])
         time.sleep(0.5)
         eq('[dd stores] ...an Uber card\'s list asks nothing for its stores',
            len(_hkasked('street=1982')) - _n82, 0)
@@ -8852,7 +8853,7 @@ try:
                    'miles': 5.0, 'pickup': 'Example Grill (250 Example Rd)', 'dropoff': None,
                    'card': dict(_SQ, miles=5.0),
                    'fields': {'dropoff': None, 'customer': None, 'expectedBy': None,
-                              'pickupAddr': {'value': '1981 Cobb Pkwy, Kennesaw',
+                              'pickupAddr': {'value': '1981 Vosk Pkwy, Tellmoor',
                                              'from': 'popup', 'conf': 2, 'at': _at}}}, _fh)
     _spp, _spb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _hkfake_base},
                        os.path.join(_spr, 'offers.jsonl'))
@@ -8874,7 +8875,7 @@ try:
                         'NUCBOX_TIMEOUT_MS': '800'}, _spj2)
     try:
         _sptook(_spb, 's-two-a', 'Example Taqueria', _SP_DOOR)
-        _sptook(_spb, 's-two-b', 'Example Grill', '250 Example Rd, Marietta, GA 30060',
+        _sptook(_spb, 's-two-b', 'Example Grill', '250 Example Rd, Harrowen, GA 90660',
                 dropoff=None)
         _two = []
         for _ in range(120):
@@ -8890,7 +8891,7 @@ try:
             [(p[0], p[1]) for p in _o.get('s-two-b', (None, []))[1]]),
            ([(1, 1, [{'by': 'server', 'from': 'card', 'asked': None}]),
              (2, 1, [{'by': 'server', 'from': 'card', 'asked': None}])],
-            [_SP_AT], [(33.97, -84.53)]))
+            [_SP_AT], [(33.97, -44.53)]))
     finally:
         stop(_spp)
 
@@ -8932,11 +8933,11 @@ try:
     # `place`) onto the hold (Assemble.file `dropoffPlace`). The server asks
     # the place, q= alone, in the held card's disc (searchHeldPlace), and pins
     # only a named feature, not a road, of that name, inside the disc.
-    _PL_LINE = '4821 Kestrel Dr, Marietta, GA 30060'
+    _PL_LINE = '4821 Kestrel Dr, Harrowen, GA 90660'
 
     def _plpress(place, line=_PL_LINE, street='4821 Kestrel Dr'):
-        return {'dropoff': {'found': True, 'line': line, 'street': street, 'city': 'Marietta',
-                            'state': 'GA', 'zip': '30060', 'asked': True, 'labelled': None,
+        return {'dropoff': {'found': True, 'line': line, 'street': street, 'city': 'Harrowen',
+                            'state': 'GA', 'zip': '90660', 'asked': True, 'labelled': None,
                             'ms': 10, 'app': 'uber', 'screen': 'uber.nav', 'expectedBy': None,
                             'place': place, 'at': int(time.time() * 1000)}}
 
@@ -8965,7 +8966,7 @@ try:
         # The restaurant guard holds a place pin as it holds a door: a pickup
         # pinned 60 m from the deck.
         post(_hkb, '/api/held-pickup', {'holdId': (_holding(_hkb) or {}).get('holdId'),
-                                        'lat': 33.9717, 'lon': -84.5288,
+                                        'lat': 33.9717, 'lon': -44.5288,
                                         'q': 'Example Grill, 9 Kestrel Dr'})
         _h = _holding(_hkb) or {}
         eq('[place] ...and a place within 150 m of a held pickup is not armed, and says why',
@@ -8992,8 +8993,8 @@ try:
         # The door on the NucBox: the place is never asked.
         _n = len(_hkasked('q='))
         eq('[place] a door the NucBox holds is pinned by the door, and the place never asked',
-           (_plend(_hkb, 'p-door', 'Wrenfield Parking Deck', '1985 Cobb Parkway, Kennesaw',
-                   '1985 Cobb Parkway'), len(_hkasked('q=')) - _n),
+           (_plend(_hkb, 'p-door', 'Wrenfield Parking Deck', '1985 Vosk Parkway, Tellmoor',
+                   '1985 Vosk Parkway'), len(_hkasked('q=')) - _n),
            (('Wrenfield Parking Deck', True, 'server', None), 0))
         post(_hkb, '/api/delivered', {})
         _n = len(_hkasked('q='))
@@ -9049,7 +9050,7 @@ try:
         return [r for r in rows if r.get('kind') == 'drop' and r.get('id') == oid]
 
     _ECARD = dict(_SQ, id='e-card', pay=9.0, minutes=35.0, billedMinutes=35.0, miles=5.0,
-                  cost=1.5, pickup='Example Burger (1981 Cobb Pkwy)', dropoff=_COBB, app='uber')
+                  cost=1.5, pickup='Example Burger (1981 Vosk Pkwy)', dropoff=_VOSK, app='uber')
     _hks, _hksays, _hkj = _hksayer('early')
     # The warming window is EARLY_WARM_MS (60 s on the rig), 3 s here.
     _hkp, _hkb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _hks,
@@ -9084,14 +9085,14 @@ try:
         # (Its times left out: a millisecond clock can hold "1981" by chance.)
         _rt = json.dumps({k: v for k, v in _r.items() if k not in ('at', 'seq', 'acceptedAt')})
         eq('[pin log] ...and carries no address or coordinate it did not already carry',
-           [w for w in ('Cobb', '1985', '1981', 'Burger', '34.0', '-84.5', 'lat', 'lon')
+           [w for w in ('Vosk', '1985', '1981', 'Burger', '34.0', '-44.5', 'lat', 'lon')
             if w in _rt], [])
 
         # No door on the NucBox: the refusal, said in the row a Took that
         # replaced the order writes.
         _atook(_hkb, 'e-street', _KES)
         _settled(_hkb, lambda h: h.get('endWhy'))
-        _atook(_hkb, 'e-two', _COBB)
+        _atook(_hkb, 'e-two', _VOSK)
         _h = _settled(_hkb, lambda h: h.get('endPinned') and (h.get('holdId') or '')
                       .startswith('e-two'))
         time.sleep(0.3)
@@ -9108,7 +9109,7 @@ try:
             return {'planner': {'stops': [
                 {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'street': None,
                  'city': None, 'state': None, 'zip': None,
-                 'line': '%d Quillon Way, Marietta' % (base + i)} for i in range(9)],
+                 'line': '%d Quillon Way, Harrowen' % (base + i)} for i in range(9)],
                 'unfiled': 'dropoffs', 'asked': False}}
 
         def _enumbers():
@@ -9154,7 +9155,7 @@ try:
            {'pinned': 0, 'why': "no such door in the reach's box"})
         # [early search] A card read before its fix is asked on the next reading.
         _n90 = len(_hkasked('street=1990'))
-        _nofix = dict(_ECARD, id='e-nofix', dropoff='1990 Cobb Parkway, Kennesaw',
+        _nofix = dict(_ECARD, id='e-nofix', dropoff='1990 Vosk Parkway, Tellmoor',
                       pickup='Nowhere Two')
         _hksays([{'offer': dict(_nofix, lat=None, lon=None, gpsOk=False)}])
         time.sleep(0.5)
@@ -9187,12 +9188,12 @@ try:
         _n = _downs('Quillon')
         _hksays([{'planner': {'stops': [{'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.',
                                         'street': None, 'city': None, 'state': None,
-                                        'zip': None, 'line': '10 Quillon Way, Marietta'}],
+                                        'zip': None, 'line': '10 Quillon Way, Harrowen'}],
                               'unfiled': 'dropoffs', 'asked': False}}])
         time.sleep(0.8)
         _hksays([{'planner': {'stops': [{'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.',
                                         'street': None, 'city': None, 'state': None,
-                                        'zip': None, 'line': '10 Quillon Way, Marietta'}],
+                                        'zip': None, 'line': '10 Quillon Way, Harrowen'}],
                               'unfiled': 'dropoffs', 'asked': False}}])
         time.sleep(0.5)
         eq('[early warm] a door the NucBox did not answer is asked again past END_RETRY_MS',
@@ -9332,7 +9333,7 @@ _A = _card('c-a', 9.48, minutes=40.0, deliver_by=(_NOWMIN + 40) % 1440,
            pickup='Wren Street Noodles')
 _B = _card('c-b', 28.08, minutes=55.0, deliver_by=(_NOWMIN + 75) % 1440,
            pickup='Larkspur Tacos')
-_BNAV = ('77 Birch Ln, Roswell, GA 30075', '77 Birch Ln', 'Roswell')
+_BNAV = ('77 Birch Ln, Ruswold, GA 90675', '77 Birch Ln', 'Ruswold')
 
 _cp, _cb, _cj, _ch = _cserver('two', CARRY_TWO='1', CHOOSER_MS='1500')
 try:
@@ -9362,7 +9363,7 @@ try:
             and (m.get('holding') or {}).get('pay') == 9.48 for m in _seen))
 
     # The same press with nothing on the screen to say whose: the chooser.
-    _KNAV = ('4821 Kestrel Dr, Marietta, GA 30060', '4821 Kestrel Dr', 'Marietta')
+    _KNAV = ('4821 Kestrel Dr, Harrowen, GA 90660', '4821 Kestrel Dr', 'Harrowen')
     _seen = listen(_cb, 2.0)
     _say(_nav(_KNAV[0], _KNAV[1], _KNAV[2]))
     _ch1 = get(_cb, '/api/status').get('chooser') or {}
@@ -9400,7 +9401,7 @@ try:
     # ...and a card being screened when the press comes is a row of its own,
     # which files the address on that card.
     _say(_card('c-s', 12.5, minutes=25.0, miles=3.0))
-    _SNAV = ('9 Elm Ct, Smyrna, GA 30080', '9 Elm Ct', 'Smyrna')
+    _SNAV = ('9 Elm Ct, Pyrnel, GA 90680', '9 Elm Ct', 'Pyrnel')
     _say(_nav(_SNAV[0], _SNAV[1], _SNAV[2]))
     _ch3 = get(_cb, '/api/status').get('chooser') or {}
     _pc = post(_cb, '/api/choose', {'id': _ch3.get('id'), 'pick': 'card'})
@@ -9424,10 +9425,10 @@ try:
                                             'state': None, 'zip': None}, **s) for s in stops],
                             'unfiled': None, 'asked': True, 'ms': 10}}
     _PU = {'kind': 'pickup', 'name': 'Larkspur Tacos', 'street': '310 Mill St',
-           'line': '310 Mill St, Roswell, GA 30075'}
-    _DB = {'kind': 'dropoff', 'name': 'Lee M.', 'street': '77 Birch Ln', 'line': '77 Birch Ln, Roswell'}
+           'line': '310 Mill St, Ruswold, GA 90675'}
+    _DB = {'kind': 'dropoff', 'name': 'Lee M.', 'street': '77 Birch Ln', 'line': '77 Birch Ln, Ruswold'}
     _DK = {'kind': 'dropoff', 'name': 'Pat Q.', 'street': '4821 Kestrel Dr',
-           'line': '4821 Kestrel Dr, Marietta'}
+           'line': '4821 Kestrel Dr, Harrowen'}
     #
     # Each planner below on a hold that keeps none: a pressed read MERGES
     # with the stops kept since 24 Oct (the owner's "Would there be a way to
@@ -9543,11 +9544,11 @@ def _held_end(base):
     return (h.get('dropoff'), ((h.get('fields') or {}).get('dropoff') or {}).get('from'))
 
 
-_CORNER = 'Oak Dr & Elm Dr, Acworth'
+_CORNER = 'Oak Dr & Elm Dr, Ivyhame'
 _np, _nb, _nj, _nh = _cserver('nav', CARRY_TWO='1')
 try:
     _took2(_nb, _card('n-a', 12.0, dropoff=_CORNER))
-    _L1 = ('2950 Kestrel Dr, Woodstock, GA 30188', '2950 Kestrel Dr', 'Woodstock', '30188')
+    _L1 = ('2950 Kestrel Dr, Marrowick, GA 90788', '2950 Kestrel Dr', 'Marrowick', '90788')
     _say(_navsight(*_L1))
     eq('a navigation screen under "Deliver to" fills the held order\'s destination with no '
        'press', _held_end(_nb), (_L1[0], 'nav'))
@@ -9556,55 +9557,55 @@ try:
         if r.get('id') == 'n-a' and r.get('dropoff') == _L1[0]], [(False, True)])
     # A press, then the screen again: a different address, and the pressed one
     # read fuller. Neither moves it.
-    _say(_nav('77 Birch Ln, Woodstock', '77 Birch Ln', 'Woodstock'))
-    ok_('the premise: the press is filed', _held_end(_nb) == ('77 Birch Ln, Woodstock', 'press'))
-    _say(_navsight('77 Birch Ln, Woodstock, GA 30188', '77 Birch Ln', 'Woodstock', '30188'),
-         _navsight('9 Fable Ct, Woodstock, GA 30188', '9 Fable Ct', 'Woodstock', '30188'))
-    eq('...never over a ⌖ press', _held_end(_nb), ('77 Birch Ln, Woodstock', 'press'))
+    _say(_nav('77 Birch Ln, Marrowick', '77 Birch Ln', 'Marrowick'))
+    ok_('the premise: the press is filed', _held_end(_nb) == ('77 Birch Ln, Marrowick', 'press'))
+    _say(_navsight('77 Birch Ln, Marrowick, GA 90788', '77 Birch Ln', 'Marrowick', '90788'),
+         _navsight('9 Fable Ct, Marrowick, GA 90788', '9 Fable Ct', 'Marrowick', '90788'))
+    eq('...never over a ⌖ press', _held_end(_nb), ('77 Birch Ln, Marrowick', 'press'))
     post(_nb, '/api/offers/mark', {'id': 'n-a', 'accepted': None})
 
     # A store's navigation — even one that names the next stop under
     # "Deliver to" — and an address under no label, each over the card's own
     # corner, which a navigation destination would replace.
     _took2(_nb, _card('n-b', 15.0, dropoff=_CORNER))
-    _say(_navsight('2950 Kestrel Dr, Woodstock, GA 30188', '2950 Kestrel Dr', 'Woodstock',
-                   '30188', screen='uber.pickupNav'))
+    _say(_navsight('2950 Kestrel Dr, Marrowick, GA 90788', '2950 Kestrel Dr', 'Marrowick',
+                   '90788', screen='uber.pickupNav'))
     eq('a pickup navigation screen files nothing', _held_end(_nb), (_CORNER, 'card'))
-    _say(_navsight('31 Larch Way, Woodstock, GA 30188', '31 Larch Way', 'Woodstock', '30188',
+    _say(_navsight('31 Larch Way, Marrowick, GA 90788', '31 Larch Way', 'Marrowick', '90788',
                    kind=None))
     eq('an unlabelled navigation address files nothing', _held_end(_nb), (_CORNER, 'card'))
-    _say(_navsight('31 Larch Way, Woodstock, GA 30188', '31 Larch Way', 'Woodstock', '30188'))
+    _say(_navsight('31 Larch Way, Marrowick, GA 90788', '31 Larch Way', 'Marrowick', '90788'))
     eq('...and the premise: the same address under its label is filed',
-       _held_end(_nb), ('31 Larch Way, Woodstock, GA 30188', 'nav'))
+       _held_end(_nb), ('31 Larch Way, Marrowick, GA 90788', 'nav'))
 
     # Two orders in the car: the existing cues, and with none it waits.
     _took2(_nb, _card('n-c', 22.0, minutes=50.0, dropoff=_CORNER,
                       deliver_by=(_NOWMIN + 70) % 1440))
     ok_('the premise: two orders in the car', len(_orders(_nb)) == 2)
-    _L4 = ('4 Heron Bend, Smyrna, GA 30080', '4 Heron Bend', 'Smyrna', '30080')
+    _L4 = ('4 Heron Bend, Pyrnel, GA 90680', '4 Heron Bend', 'Pyrnel', '90680')
     _say(_navsight(*_L4))
     eq('[carry two] auto-nav: with two orders held, a navigation destination no cue decides '
        'files nothing and waits', ([o.get('dropoff') for o in _orders(_nb)],
                                    get(_nb, '/api/status').get('unowned'),
                                    get(_nb, '/api/status').get('chooser')),
-       (['31 Larch Way, Woodstock, GA 30188', _CORNER], 1, None))
-    _say(_navsight('8 Wren Pl, Smyrna, GA 30080', '8 Wren Pl', 'Smyrna', '30080',
+       (['31 Larch Way, Marrowick, GA 90788', _CORNER], 1, None))
+    _say(_navsight('8 Wren Pl, Pyrnel, GA 90680', '8 Wren Pl', 'Pyrnel', '90680',
                    expected=(_NOWMIN + 71) % 1440))
     eq('[carry two] auto-nav: ...and one whose bar\'s "Expected by" is one card\'s "Deliver by" '
        'files on that order, by the deadline cue',
        ([o.get('dropoff') for o in _orders(_nb)],
         [(r.get('id'), r.get('cue')) for r in _rows(_nj, 'mark')
-         if r.get('dropoff') == '8 Wren Pl, Smyrna, GA 30080']),
-       (['31 Larch Way, Woodstock, GA 30188', '8 Wren Pl, Smyrna, GA 30080'],
+         if r.get('dropoff') == '8 Wren Pl, Pyrnel, GA 90680']),
+       (['31 Larch Way, Marrowick, GA 90788', '8 Wren Pl, Pyrnel, GA 90680'],
         [('n-c', 'deadline')]))
 finally:
     stop(_np)
 
 # Drop with two in the car, and the GPS drop at one door.
-_PA = (33.9100, -84.5100)
-_PB = (33.9400, -84.5400)
-_AD = '4821 Kestrel Dr, Marietta'
-_BD = '77 Birch Ln, Roswell'
+_PA = (33.9100, -44.5100)
+_PB = (33.9400, -44.5400)
+_AD = '4821 Kestrel Dr, Harrowen'
+_BD = '77 Birch Ln, Ruswold'
 
 
 def _pin2(base, hid, dropoff, at, name):
@@ -9622,8 +9623,8 @@ def _pinned_pair(base):
     _took2(base, _card('d-a', 11.0, minutes=40.0, dropoff=_AD))
     _took2(base, _card('d-b', 17.5, minutes=50.0, dropoff=_BD))
     o = _orders(base)
-    _pin2(base, o[0]['holdId'], _AD, _PA, '4821, Kestrel Drive, Marietta')
-    _pin2(base, o[1]['holdId'], _BD, _PB, '77, Birch Lane, Roswell')
+    _pin2(base, o[0]['holdId'], _AD, _PA, '4821, Kestrel Drive, Harrowen')
+    _pin2(base, o[1]['holdId'], _BD, _PB, '77, Birch Lane, Ruswold')
     return _orders(base)
 
 
@@ -9632,7 +9633,7 @@ try:
     _o = _pinned_pair(_db)
     ok_('[carry two] (both doors pinned)', all(x.get('endPinned') for x in _o))
     # Nowhere near either door: Drop does not guess.
-    _say(_beat((33.80, -84.40)))
+    _say(_beat((33.80, -44.40)))
     _code, _rep = post(_db, '/api/delivered', {})
     eq('[carry two] Drop with two in the car and no door to go by offers ①, ② and puts '
        'nothing down',
@@ -9684,7 +9685,7 @@ try:
        'is neither pinned nor an area (its disc alone would hold nearly any door); the '
        'first keeps nothing',
        ['after' in (x.get('card') or {}) for x in _o], [False, False])
-    _pin2(_fb, _o[0]['holdId'], _AD, _PA, '4821, Kestrel Drive, Marietta')
+    _pin2(_fb, _o[0]['holdId'], _AD, _PA, '4821, Kestrel Drive, Harrowen')
     _o = _orders(_fb)
     eq('[after] ...and once that end is pinned, the door itself, read again',
        (_o[1].get('card') or {}).get('after'),
@@ -9710,12 +9711,12 @@ finally:
 # planner that grows with nobody pressing Took.
 _rp, _rb2, _rj, _rh = _cserver('reoffer', CARRY_TWO='1')
 try:
-    _X = dict(minutes=35.0, miles=6.2, pickup='Wren Street Noodles', dropoff='12 Oak St, Marietta')
+    _X = dict(minutes=35.0, miles=6.2, pickup='Wren Street Noodles', dropoff='12 Oak St, Harrowen')
     _took2(_rb2, _card('r-1', 12.40, **_X))
     _took2(_rb2, _card('r-2', 13.15, **_X))
     _after_re = [x.get('pay') for x in _orders(_rb2)]
     _took2(_rb2, _card('r-3', 7.80, minutes=22.0, miles=3.1, pickup='Larkspur Tacos',
-                       dropoff='9 Elm Ct, Smyrna'))
+                       dropoff='9 Elm Ct, Pyrnel'))
     eq('a re-offer replaces, a different card adds',
        (_after_re, [x.get('pay') for x in _orders(_rb2)],
         [(r.get('id'), r.get('by')) for r in _rows(_rj, 'drop')]),
@@ -9743,13 +9744,13 @@ try:
     # A Trip Planner that grows by a stop, with no Took: no order is added.
     def _plan(drops):
         stops = [{'kind': 'pickup', 'orders': 1, 'name': 'Wren Street Noodles',
-                  'expectedBy': 700, 'street': '5 Mill St', 'city': 'Roswell', 'state': 'GA',
-                  'zip': None, 'line': '5 Mill St, Roswell', 'partial': None}]
+                  'expectedBy': 700, 'street': '5 Mill St', 'city': 'Ruswold', 'state': 'GA',
+                  'zip': None, 'line': '5 Mill St, Ruswold', 'partial': None}]
         for i, nm in enumerate(drops):
             stops.append({'kind': 'dropoff', 'orders': 1, 'name': nm, 'expectedBy': 720 + i,
-                          'street': '%d Pine Rd' % (10 + i), 'city': 'Roswell',
+                          'street': '%d Pine Rd' % (10 + i), 'city': 'Ruswold',
                           'state': 'GA', 'zip': None,
-                          'line': '%d Pine Rd, Roswell' % (10 + i), 'partial': None})
+                          'line': '%d Pine Rd, Ruswold' % (10 + i), 'partial': None})
         return {'sighting': {'asked': False, 'whole': True, 'titled': True, 'app': 'uber',
                              'screen': 'uber.planner', 'page': {'top': True, 'bottom': True},
                              'stops': stops, 'orderCount': None, 'keep': False}}
@@ -9780,11 +9781,11 @@ def _tplan(picks, drops, bottom=True):
     (customer, street, Expected by) — the list seen to its foot unless
     `bottom` is False."""
     stops = [{'kind': 'pickup', 'orders': 1, 'name': nm, 'expectedBy': 700 + i,
-              'street': '%d Mill St' % (5 + i), 'city': 'Smyrna', 'state': 'GA', 'zip': None,
-              'line': '%d Mill St, Smyrna' % (5 + i), 'partial': None}
+              'street': '%d Mill St' % (5 + i), 'city': 'Pyrnel', 'state': 'GA', 'zip': None,
+              'line': '%d Mill St, Pyrnel' % (5 + i), 'partial': None}
              for i, nm in enumerate(picks)]
     stops += [{'kind': 'dropoff', 'orders': 1, 'name': nm, 'expectedBy': by, 'street': st,
-               'city': 'Smyrna', 'state': 'GA', 'zip': None, 'line': st + ', Smyrna',
+               'city': 'Pyrnel', 'state': 'GA', 'zip': None, 'line': st + ', Pyrnel',
                'partial': None} for nm, st, by in drops]
     return {'sighting': {'asked': False, 'whole': True, 'titled': True, 'app': 'uber',
                          'screen': 'uber.planner', 'page': {'top': True, 'bottom': bottom},
@@ -9806,7 +9807,7 @@ try:
     _took2(_ab, _card('u-a', 25.03, minutes=31.0, miles=9.4, pickup='Fable Grill'))
     _say(_tplan(['Fable Grill'], [_MARA]))
     eq('[add-on] the premise: the order in the car has its planner door',
-       _held_end(_ab), ('4821 Kestrel Dr, Smyrna', 'planner'))
+       _held_end(_ab), ('4821 Kestrel Dr, Pyrnel', 'planner'))
     # The add-on, typed by the parser's `addon` alone (its leg lost its plus
     # signs, so the screen type says uber.offer).
     _rep = _took2(_ab, _card('u-b', 9.50, minutes=8.0, miles=1.3, pickup='Kestrel Noodle Bar',
@@ -9816,7 +9817,7 @@ try:
        'add-on beside it, carrying two off: no drop row, the first order\'s door kept',
        ([o.get('pay') for o in _orders(_ab)], _rows(_aj, 'drop'), _st.get('carryTwo'),
         _held_end(_ab)),
-       ([25.03, 9.5], [], False, ('4821 Kestrel Dr, Smyrna', 'planner')))
+       ([25.03, 9.5], [], False, ('4821 Kestrel Dr, Pyrnel', 'planner')))
     _hf = _holdfile(_aj)
     _aend = _hf[0]['acceptedAt'] + 31 * 1.5 * 60000 + _HOLD_GRACE
     eq('[add-on] ...joined to it, and held to its end and then its own +8 min, half again — '
@@ -9838,15 +9839,15 @@ try:
     _say(_tplan(['Fable Grill', 'Kestrel Noodle Bar'], [_JULES], bottom=False))
     eq('[add-on] a planner whose foot is off the screen files nothing onto either order',
        ([o.get('dropoff') for o in _orders(_ab)], get(_ab, '/api/status').get('unowned')),
-       (['4821 Kestrel Dr, Smyrna', None], 0))
+       (['4821 Kestrel Dr, Pyrnel', None], 0))
     _say(_tplan(['Fable Grill', 'Kestrel Noodle Bar'], [_MARA, _JULES]))
     _st = get(_ab, '/api/status')
     eq('[add-on] the Trip Planner with both orders\' stops, read with nobody pressing: each '
        'door onto its own order — the add-on\'s by growth — nothing waiting, no chooser',
        ([o.get('dropoff') for o in _orders(_ab)], _st.get('unowned'), _st.get('chooser'),
         [(r.get('id'), r.get('cue')) for r in _rows(_aj, 'mark')
-         if r.get('dropoff') == '77 Birch Ln, Smyrna']),
-       (['4821 Kestrel Dr, Smyrna', '77 Birch Ln, Smyrna'], 0, None, [('u-b', 'growth')]))
+         if r.get('dropoff') == '77 Birch Ln, Pyrnel']),
+       (['4821 Kestrel Dr, Pyrnel', '77 Birch Ln, Pyrnel'], 0, None, [('u-b', 'growth')]))
     _pl = _tplan(['Fable Grill', 'Kestrel Noodle Bar'], [_MARA, _JULES])['sighting']['stops']
     _say({'planner': {'stops': _pl, 'unfiled': None, 'asked': False, 'ms': None,
                       'at': int(time.time() * 1000)}})
@@ -9877,12 +9878,12 @@ try:
        ([25.03, 9.5, 6.89], [None, _hf[0]['holdId'], _hf[0]['holdId']], _bend, []))
     # The manual ⌖ Scan stays the backup: with no cue, the chooser, over all
     # three, and nothing filed.
-    _say(_nav('3 Ash Way, Smyrna, GA 30080', '3 Ash Way', 'Smyrna'))
+    _say(_nav('3 Ash Way, Pyrnel, GA 90680', '3 Ash Way', 'Pyrnel'))
     _ch = get(_ab, '/api/status').get('chooser') or {}
     eq('[add-on] ⌖ Scan with the trip in the car and no cue opens the chooser over its '
        'three orders and files nothing',
        ([r.get('n') for r in _ch.get('rows') or []], [o.get('dropoff') for o in _orders(_ab)]),
-       ([1, 2, 3], ['4821 Kestrel Dr, Smyrna', '77 Birch Ln, Smyrna', None]))
+       ([1, 2, 3], ['4821 Kestrel Dr, Pyrnel', '77 Birch Ln, Pyrnel', None]))
     post(_ab, '/api/choose', {'id': _ch.get('id'), 'pick': 'neither'})
     # Drop with nothing to say which was delivered: the Drop chooser, as with
     # two carried, and nothing put down.
@@ -9963,7 +9964,7 @@ try:
        ([o.get('dropoff') for o in _orders(_qb)], _st.get('unowned'), _st.get('chooser'),
         [r for r in _rows(_qj, 'mark') if r.get('dropoff')]),
        ([None, None], 2, None, []))
-    _say(_nav('4821 Kestrel Dr, Smyrna', '4821 Kestrel Dr', 'Smyrna'))
+    _say(_nav('4821 Kestrel Dr, Pyrnel', '4821 Kestrel Dr', 'Pyrnel'))
     _ch = get(_qb, '/api/status').get('chooser') or {}
     post(_qb, '/api/choose', {'id': _ch.get('id'), 'pick': (_ch.get('rows') or [{}])[0].get('pick')})
     time.sleep(0.4)
@@ -9972,7 +9973,7 @@ try:
        'the add-on\'s by elimination, nothing left waiting',
        ([o.get('dropoff') for o in _orders(_qb)], _st.get('unowned'),
         sorted((r.get('id'), r.get('cue')) for r in _rows(_qj, 'mark') if r.get('dropoff'))),
-       (['4821 Kestrel Dr, Smyrna', '77 Birch Ln, Smyrna'], 0,
+       (['4821 Kestrel Dr, Pyrnel', '77 Birch Ln, Pyrnel'], 0,
         [('q-a', 'chooser'), ('q-b', 'elimination')]))
     # An add-on card offered against the trip: its minutes are what the trip
     # grows by (addOnAsCarded), and the reading carries the orders.
@@ -9987,12 +9988,12 @@ try:
        (round((_lx.get('minMinutes') or 0) - (_lx.get('leftMinutes') or 0), 1),
         [o.get('pay') for o in _last.get('orders') or []]),
        (15.0, [22.46, 9.64]))
-    _say(_beat((33.80, -84.40)))
+    _say(_beat((33.80, -44.40)))
     time.sleep(0.3)
     eq('[add-on] the beat and the filed door both carry the trip\'s orders to the panel',
        ([len(m.get('orders') or []) for m in _qseen if m.get('alive') and 'orders' in m][-1:],
         [len(m.get('orders') or []) for m in _qseen
-         if (m.get('dropoff') or {}).get('line') == '77 Birch Ln, Smyrna' and 'orders' in m][:1]),
+         if (m.get('dropoff') or {}).get('line') == '77 Birch Ln, Pyrnel' and 'orders' in m][:1]),
        ([2], [2]))
 finally:
     stop(_qp)
@@ -10014,15 +10015,15 @@ def _ppage(top, drops):
 _sp, _sb, _sj, _sh = _cserver('cardstreet', CARRY_TWO='0')
 try:
     _took2(_sb, _card('s-a', 8.14, minutes=22.0, pickup='Fable Grill',
-                      dropoff='Larkspur Rd NW & Ombre Cir NW, Kennesaw'))
+                      dropoff='Larkspur Rd NW & Ombre Cir NW, Tellmoor'))
     _took2(_sb, _card('s-b', 16.43, minutes=18.0, addon=True, pickup='Kestrel Noodle Bar'))
-    _say(_ppage(True, [('Ines B.', '608 Wickerby St NW', 'Marietta', 1188)]))
+    _say(_ppage(True, [('Ines B.', '608 Wickerby St NW', 'Harrowen', 1188)]))
     _st = get(_sb, '/api/status')
     eq('[card street] a planner page not seen whole, its door on no card\'s street: '
        'nothing filed, it waits',
        ([o.get('dropoff') for o in _orders(_sb)], _st.get('unowned')),
-       (['Larkspur Rd NW & Ombre Cir NW, Kennesaw', None], 1))
-    _say(_ppage(False, [('Rhea A.', '1800 Ombre Cir NW', 'Kennesaw', 1170)]))
+       (['Larkspur Rd NW & Ombre Cir NW, Tellmoor', None], 1))
+    _say(_ppage(False, [('Rhea A.', '1800 Ombre Cir NW', 'Tellmoor', 1170)]))
     time.sleep(0.3)
     _st = get(_sb, '/api/status')
     eq('[card street] the next page\'s door on the card\'s own corner is the order\'s '
@@ -10031,8 +10032,8 @@ try:
        ([(o.get('dropoff'), o.get('cue')) for o in _orders(_sb)], _st.get('unowned'),
         _st.get('chooser'),
         sorted((r.get('id'), r.get('cue')) for r in _rows(_sj, 'mark') if r.get('dropoff'))),
-       ([('1800 Ombre Cir NW, Kennesaw', 'cardStreet'),
-         ('608 Wickerby St NW, Marietta', 'elimination')], 0, None,
+       ([('1800 Ombre Cir NW, Tellmoor', 'cardStreet'),
+         ('608 Wickerby St NW, Harrowen', 'elimination')], 0, None,
         [('s-a', 'cardStreet'), ('s-b', 'elimination')]))
     eq('[card street] ...both ends filed from the planner, and kept in holding.json',
        [(((o.get('fields') or {}).get('dropoff') or {}).get('from'), o.get('endCue'))
@@ -10072,21 +10073,21 @@ finally:
 
 # The owner's snap of 30 Oct, 20:21 (names and streets invented): the first
 # order's door filed with its quadrant slipped ("... Way NUP"), and an add-on
-# whose card parsed as "Kennesaw J <E> Way & <S> Plains Rd Marietta" — a town
+# whose card parsed as "Tellmoor J <E> Way & <S> Plains Rd Harrowen" — a town
 # and a stray letter glued in front of its corner, its town run on. A box read
-# of the planner then listing "1433 <E> Way, Marietta" and "... Way NW": the
+# of the planner then listing "1433 <E> Way, Harrowen" and "... Way NW": the
 # first is the add-on's (cardStreet, past the glued town), the second the
 # first order's door read better (sameDoor), which replaces the NUP; nothing
 # waits "whose?".
 _qp, _qb, _qj, _qh = _cserver('quadslip', CARRY_TWO='0')
 try:
     _took2(_qb, _card('q-a', 19.01, minutes=33.0, pickup='Fable Grill (77 Halden Rd NW)'))
-    _say(_ppage(True, [('Stacia A.', '3344 Wexmoor Brook Way NUP', 'Kennesaw', 1266)]))
+    _say(_ppage(True, [('Stacia A.', '3344 Wexmoor Brook Way NUP', 'Tellmoor', 1266)]))
     _q0 = [(get(_qb, '/api/status').get('holding') or {}).get('dropoff')]
-    _took2(_qb, _card('q-b', 15.02, minutes=31.0, addon=True, pickup='Granite Tavern - Kennesaw',
-                      dropoff='Kennesaw J Fernbrook Way & Sallow Plains Rd Marietta'))
-    _qbox = _ppage(False, [('Lena R.', '1433 Fernbrook Way', 'Marietta', 1250),
-                           ('Stacia A.', '3344 Wexmoor Brook Way NW', 'Kennesaw', 1268)])
+    _took2(_qb, _card('q-b', 15.02, minutes=31.0, addon=True, pickup='Granite Tavern - Tellmoor',
+                      dropoff='Tellmoor J Fernbrook Way & Sallow Plains Rd Harrowen'))
+    _qbox = _ppage(False, [('Lena R.', '1433 Fernbrook Way', 'Harrowen', 1250),
+                           ('Stacia A.', '3344 Wexmoor Brook Way NW', 'Tellmoor', 1268)])
     _qbox['sighting']['whole'] = False
     _say(_qbox)
     time.sleep(0.3)
@@ -10096,9 +10097,9 @@ try:
        'NUP; nothing waits',
        (_q0, [(o.get('dropoff'), o.get('cue')) for o in _orders(_qb)], _st.get('unowned'),
         _st.get('chooser')),
-       (['3344 Wexmoor Brook Way NUP, Kennesaw'],
-        [('3344 Wexmoor Brook Way NW, Kennesaw', 'sameDoor'),
-         ('1433 Fernbrook Way, Marietta', 'cardStreet')], 0, None))
+       (['3344 Wexmoor Brook Way NUP, Tellmoor'],
+        [('3344 Wexmoor Brook Way NW, Tellmoor', 'sameDoor'),
+         ('1433 Fernbrook Way, Harrowen', 'cardStreet')], 0, None))
 finally:
     stop(_qp)
 
@@ -10182,7 +10183,7 @@ try:
     _took2(_gb, _card('g-a', 22.46, minutes=40.0, dropoff=_AD))
     _took2(_gb, _card('g-b', 9.64, minutes=19.0, addon=True))
     _o = _orders(_gb)
-    _pin2(_gb, _o[0]['holdId'], _AD, _PA, '4821, Kestrel Drive, Marietta')
+    _pin2(_gb, _o[0]['holdId'], _AD, _PA, '4821, Kestrel Drive, Harrowen')
     _say(*([_beat(_PA)] * 16))
     _say(*([_beat((_PA[0] + 0.006, _PA[1]))] * 3))
     eq('[add-on] the GPS drop at the original\'s door keeps its add-on',
@@ -10284,21 +10285,21 @@ finally:
 # the address searched on the NucBox inside each card's disc and found at
 # door level inside exactly one. Both cards here print the same "Deliver by"
 # and the navigation screen that time: a tie. The first card came up at
-# Marietta Square, 5 mi; the second at Cumberland, 1 mi — and the fake
-# NucBox's 1985 Cobb Parkway door is 3.4 mi from the Square.
+# Harrowen Square, 5 mi; the second at Hollowmere, 1 mi — and the fake
+# NucBox's 1985 Vosk Parkway door is 3.4 mi from the Square.
 _tfake = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
 _tfake_base = 'http://127.0.0.1:%d' % json.loads(_tfake.stdout.readline())['port']
 _tp, _tb, _tj, _th = _cserver('tie', CARRY_TWO='1', NUCBOX_SEARCH=_tfake_base,
                               NUCBOX_TIMEOUT_MS='800', CHOOSER_MS='8000')
 try:
-    _SQFIX = {'lat': 33.9526, 'lon': -84.5499, 'gpsOk': True, 'gpsErr': 10.0, 'gpsMode': 3,
+    _SQFIX = {'lat': 33.9526, 'lon': -44.5499, 'gpsOk': True, 'gpsErr': 10.0, 'gpsMode': 3,
               'gpsAge': 0.5, 'hasTotal': True, 'whole': True}
-    _CUFIX = dict(_SQFIX, lat=33.9010, lon=-84.4770)
+    _CUFIX = dict(_SQFIX, lat=33.9010, lon=-44.4770)
     _due = (_NOWMIN + 50) % 1440
     _took2(_tb, _card('t-a', 15.0, minutes=40.0, miles=5.0, deliver_by=_due, **_SQFIX))
     _took2(_tb, _card('t-b', 11.0, minutes=40.0, miles=1.0, deliver_by=_due, **_CUFIX))
-    _say(_nav('1985 Cobb Parkway, Kennesaw, GA 30144', '1985 Cobb Parkway', 'Kennesaw',
+    _say(_nav('1985 Vosk Parkway, Tellmoor, GA 90744', '1985 Vosk Parkway', 'Tellmoor',
               expected=_due))
     _tie = {}
     for _ in range(80):
@@ -10310,8 +10311,8 @@ try:
        'cue that tied',
        (_tie.get('chooser'), [o.get('dropoff') for o in _tie.get('orders') or []],
         [(r.get('id'), r.get('cue')) for r in _rows(_tj, 'mark')
-         if r.get('dropoff') == '1985 Cobb Parkway, Kennesaw, GA 30144']),
-       (None, ['1985 Cobb Parkway, Kennesaw, GA 30144', None], [('t-a', 'deadline')]))
+         if r.get('dropoff') == '1985 Vosk Parkway, Tellmoor, GA 90744']),
+       (None, ['1985 Vosk Parkway, Tellmoor, GA 90744', None], [('t-a', 'deadline')]))
 finally:
     stop(_tp)
     _tfake.kill()
@@ -10330,13 +10331,13 @@ finally:
 # the driver picks from the chooser (Assemble.pressBetween), carrying two off
 # as well as on; and a place popup is never an order's end. The same run on a
 # server each way, held to one set of answers. Invented stores, streets, doors.
-_SN_END = '9 Heron Ct, Smyrna, GA 30080'
-_SH_CARD = 'Pine St & Elm St, Roswell'
-_SC_END = '412 Wrenfield Ct NE, Marietta, GA 30062'
-_SP_END = '15 Alder Ct, Roswell'
-_SX, _SY = '61 Saddlebrook Ln, Acworth, GA 30101', '8 Gallant Rise Ct, Acworth, GA 30101'
-_SZ = ('310 Mill St, Roswell, GA 30075', '88 Quill Ln NE, Marietta, GA 30062',
-       '4821 Kestrel Dr, Marietta, GA 30060')
+_SN_END = '9 Heron Ct, Pyrnel, GA 90680'
+_SH_CARD = 'Pine St & Elm St, Ruswold'
+_SC_END = '412 Wrenfield Ct NE, Harrowen, GA 90662'
+_SP_END = '15 Alder Ct, Ruswold'
+_SX, _SY = '61 Haddlecombe Ln, Ivyhame, GA 90701', '8 Gallant Rise Ct, Ivyhame, GA 90701'
+_SZ = ('310 Mill St, Ruswold, GA 90675', '88 Quill Ln NE, Harrowen, GA 90662',
+       '4821 Kestrel Dr, Harrowen, GA 90660')
 
 
 def _sline(line, screen, app='doordash', at=None):
@@ -10414,7 +10415,7 @@ def _screened(carry):
         # ⌖ over the held order's Trip Planner: its store and its one dropoff,
         # the list seen whole.
         _say(_ssight(True, 'uber.planner', 'uber',
-                     [_sstop('pickup', '310 Mill St, Roswell', 'Larkspur Tacos', 1180),
+                     [_sstop('pickup', '310 Mill St, Ruswold', 'Larkspur Tacos', 1180),
                       _sstop('dropoff', _SP_END, 'Lee M.', 1202)], (True, True), True))
         out['planner'] = (ends(), marks(_SP_END), get(sb, '/api/status').get('chooser'))
         # ⌖ over a screen that says nothing of whose — DoorDash's own delivery
@@ -10501,7 +10502,7 @@ eq('carryTwo off: the same', _screened('0'), _SCR_WANT)
 # card's own popup is the card's, as with one order, and with no cue the hard
 # rules choose no order on their own while the card could own the press: the
 # chooser asks ①, ②, This card or Neither.
-_S2_END = '77 Birch Ln, Roswell, GA 30075'
+_S2_END = '77 Birch Ln, Ruswold, GA 90675'
 _tp2, _tb2, _tj2, _th2 = _cserver('two-screened', CARRY_TWO='1', CHOOSER_MS='1500')
 try:
     def _t2marks(line):
@@ -10547,14 +10548,14 @@ finally:
 # Map view ran the order to the town's centre. Now the press is refused
 # (Assemble.dropoff, rule 5): the hold keeps its door, nothing is written, and
 # the stream says why and what was kept in place of what was read.
-_PK_DOOR = '283 Quillon St NW, Smyrna'
-_PK_TOWN = 'Smyrna, GA 30066'
-_PK_STORE = '1150 Larch Pkwy, Smyrna'
+_PK_DOOR = '283 Quillon St NW, Pyrnel'
+_PK_TOWN = 'Pyrnel, GA 90666'
+_PK_STORE = '1150 Larch Pkwy, Pyrnel'
 
 
 def _pkpress(line, screen, street=None):
-    return {'dropoff': {'found': True, 'line': line, 'street': street, 'city': 'Smyrna',
-                        'state': 'GA', 'zip': '30066', 'asked': True, 'labelled': None,
+    return {'dropoff': {'found': True, 'line': line, 'street': street, 'city': 'Pyrnel',
+                        'state': 'GA', 'zip': '90666', 'asked': True, 'labelled': None,
                         'ms': 10, 'app': 'uber', 'screen': screen, 'expectedBy': None,
                         'at': int(time.time() * 1000)}}
 
@@ -10601,8 +10602,8 @@ def _pickupnav(carry):
         time.sleep(0.4)
         out['store'] = (held(), marks(_PK_TOWN), told(heard, _PK_TOWN))
         # ...the same over another screen, reading the store's own door.
-        _say(_pkpress(_PK_STORE + ', GA 30080', 'uber.nav', '1150 Larch Pkwy'))
-        out['door'] = (held(), marks(_PK_STORE + ', GA 30080'))
+        _say(_pkpress(_PK_STORE + ', GA 90680', 'uber.nav', '1150 Larch Pkwy'))
+        out['door'] = (held(), marks(_PK_STORE + ', GA 90680'))
         # ...and with a card being screened: the store's navigation pressed
         # opened the chooser until 17 Oct, and its "This card" row filed the
         # store's town onto the CARD. Now no chooser opens; the press is
@@ -10617,8 +10618,8 @@ def _pickupnav(carry):
                           marks(_PK_TOWN), told(heard, _PK_TOWN)[0])
         # The premise: an ordinary press over the customer's navigation still
         # replaces the planner's door.
-        _say(_pkpress('61 Saddlebrook Ln, Smyrna, GA 30080', 'uber.nav', '61 Saddlebrook Ln'))
-        out['ordinary'] = (held(), marks('61 Saddlebrook Ln, Smyrna, GA 30080'))
+        _say(_pkpress('61 Haddlecombe Ln, Pyrnel, GA 90680', 'uber.nav', '61 Haddlecombe Ln'))
+        out['ordinary'] = (held(), marks('61 Haddlecombe Ln, Pyrnel, GA 90680'))
     finally:
         stop(pp)
     return out
@@ -10631,7 +10632,7 @@ _PKW = {
               ([('a pickup screen', _PK_DOOR, None)], [])),
     'door': ((_PK_DOOR, 'planner'), []),
     'chooser': (None, None, (_PK_DOOR, 'planner'), [], [('a pickup screen', _PK_DOOR, None)]),
-    'ordinary': (('61 Saddlebrook Ln, Smyrna, GA 30080', 'press'),
+    'ordinary': (('61 Haddlecombe Ln, Pyrnel, GA 90680', 'press'),
                  [('pk-1', True)]),
 }
 _pkr = _pickupnav('0')
@@ -10679,7 +10680,7 @@ def _samestore():
         # target (recordPairing takes it off the reading before the card).
         _say(_ssread(12.05, 8.4))
         _say(_card('ss-d', 12.05, minutes=25.0, miles=8.4, app='doordash', screen='dd.offer',
-                   pickup='Larkspur Tacos', pickupLine='113 Quillon St NE, Marietta, 30060 GA'))
+                   pickup='Larkspur Tacos', pickupLine='113 Quillon St NE, Harrowen, 90660 GA'))
         _say(_ssread(12.05, 8.4))
         st = (get(sb, '/api/status').get('last') or {})
         out['same'] = ([r.get('sameStore') == ida for r in _rows(sj, 'pair') if r.get('id') == 'ss-d'],
@@ -10693,7 +10694,7 @@ def _samestore():
         # ...the same figures at another door: no note, and the row the same
         # but for it.
         _say(_card('ss-x', 12.05, minutes=25.0, miles=8.4, app='doordash', screen='dd.offer',
-                   pickup='Larkspur Tacos', pickupLine='940 Wren Ave, Smyrna, 30080 GA'))
+                   pickup='Larkspur Tacos', pickupLine='940 Wren Ave, Pyrnel, 90680 GA'))
         _say(_ssread(12.05, 8.4))
         st = (get(sb, '/api/status').get('last') or {})
         rd = [r for r in _rows(sj, 'pair') if r.get('id') == 'ss-d'][0]
@@ -10704,7 +10705,7 @@ def _samestore():
                              (rd.get('stack') or {}).get('worst') == (rx.get('stack') or {}).get('worst'))
         # ...and with two in the car, the second's store: named ②.
         _took2(sb, _card('ss-b', 28.08, minutes=55.0, app='doordash', screen='dd.offer',
-                         pickup='Wren Street Noodles', pickupLine='7 Wren Ave, Smyrna, 30080 GA'))
+                         pickup='Wren Street Noodles', pickupLine='7 Wren Ave, Pyrnel, 90680 GA'))
         idb = (_orders(sb)[1] if len(_orders(sb)) > 1 else {}).get('holdId')
         _say(_card('ss-e', 14.0, minutes=25.0, miles=4.0, pickup='Wren Street Noodles (7 Wren Avenue SW)'))
         _say(_ssread(14.0, 4.0))
@@ -10744,7 +10745,7 @@ def _guesses():
     out = {}
     try:
         _took2(sb, _card('gl-a', 9.48, minutes=40.0, pickup='Larkspur Tacos',
-                         dropoff='12 Quillon St, Marietta, GA 30060'))
+                         dropoff='12 Quillon St, Harrowen, GA 90660'))
         _say(_ssread(12.35, 11.2))
         _say(_card('gl-d', 12.35, minutes=38.0, miles=11.2, app='doordash', screen='dd.offer',
                    pickup='Lark Owl Grill', stops=2, endRefused=True,
@@ -10778,7 +10779,7 @@ def _guesses():
         _say(_card('gl-u', 12.35, app='uber', mapLabel='418 Fable Ave NE'))
         out['uber'] = (get(sb, '/api/status').get('offer') or {}).get('dropoffGuess')
         _say(_card('gl-o', 12.35, app='doordash', screen='dd.offer',
-                   dropoff='7 Wren Ave, Smyrna, GA 30080', mapLabel='418 Fable Ave NE'))
+                   dropoff='7 Wren Ave, Pyrnel, GA 90680', mapLabel='418 Fable Ave NE'))
         out['own end'] = (get(sb, '/api/status').get('offer') or {}).get('dropoffGuess')
         # ...and a Took on a guessed card: the hold has no end from it.
         _took2(sb, _card('gl-t', 12.35, minutes=38.0, miles=11.2, app='doordash',
@@ -10824,7 +10825,7 @@ def _late_guess():
     out = {}
     try:
         one = dict(app='doordash', screen='dd.offer', pickup='Lark Owl Grill',
-                   pickupLine='164 Wren Hollow Pkwy, Brookvale, GA 30066', stops=2,
+                   pickupLine='164 Wren Hollow Pkwy, Brookvale, GA 90666', stops=2,
                    dropoffs=1, endRefused=True, minutes=22.0, miles=3.0)
         _say(_card('lg-1', 4.60, **one))
         out['first'] = (get(sb, '/api/status').get('offer') or {}).get('dropoffGuess')
@@ -10847,10 +10848,10 @@ _LG = {'line': '2900 Kestrel Plains Pkwy N', 'from': 'dd map label'}
 eq('dd map label told late on a one-store card: none on the first line, then the offer\'s '
    'dropoffGuess, its dropoff still none and its store\'s door kept',
    (_lg.get('first'), _lg.get('then')),
-   (None, (_LG, None, '164 Wren Hollow Pkwy, Brookvale, GA 30066')))
+   (None, (_LG, None, '164 Wren Hollow Pkwy, Brookvale, GA 90666')))
 eq('...and ✓ Took on it (the line re-read without the label) holds it as the order\'s '
    'dropoffGuess, never its dropoff, its store\'s door kept beside it',
-   _lg.get('took'), ([None], [_LG], ['164 Wren Hollow Pkwy, Brookvale, GA 30066']))
+   _lg.get('took'), ([None], [_LG], ['164 Wren Hollow Pkwy, Brookvale, GA 90666']))
 
 # --- whether each NucBox service is answering ----------------------------------
 #
@@ -11024,8 +11025,8 @@ def _ofreach(on):
 
 _OFF_TACO = 'Example Taqueria (250 Example Rd)'
 _OFF_CARD = dict(_SQ, id='off-card', pay=9.0, minutes=35.0, billedMinutes=35.0, miles=5.0,
-                 cost=1.5, pickup='Example Burger (1981 Cobb Pkwy)',
-                 dropoff='1975 Cobb Parkway, Kennesaw', app='uber')
+                 cost=1.5, pickup='Example Burger (1981 Vosk Pkwy)',
+                 dropoff='1975 Vosk Parkway, Tellmoor', app='uber')
 _op, _ob, _olog = _offserver('nbx-off', NUCBOX_SEARCH=_ofb, NUCBOX_ROUTER=_ofb,
                              NUCBOX_STREETS=_ofb, NUCBOX_PROBE_MS='300',
                              NUCBOX_TIMEOUT_MS='400', NUCBOX_OFF_MS='1500',
@@ -11036,7 +11037,7 @@ try:
        None)
     _ofreach(False)
     _odown = time.time()
-    _offtook(_ob, 'off-a', _COBB, _OFF_TACO)
+    _offtook(_ob, 'off-a', _VOSK, _OFF_TACO)
     # The card on the slot, read while the NucBox cannot be reached.
     _say({'offer': _OFF_CARD})
     _n75 = len(_ofasked('street=1975'))
@@ -11155,14 +11156,14 @@ _op, _ob, _olog = _offserver('nbx-off-budget', NUCBOX_SEARCH=_ofb, NUCBOX_ROUTER
 try:
     time.sleep(0.8)
     _ofreach(False)
-    _offtook(_ob, 'off-b', '1985 Cobb Parkway, Kennesaw, GA 30152', _OFF_TACO)
+    _offtook(_ob, 'off-b', '1985 Vosk Parkway, Tellmoor, GA 90752', _OFF_TACO)
     for _ in range(80):
         if get(_ob, '/api/status').get('nucboxOff'):
             break
         time.sleep(0.05)
     _say({'planner': {'stops': [
         {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'street': None, 'city': None,
-         'state': None, 'zip': None, 'line': '%d Quillon Way, Marietta' % (700 + i)}
+         'state': None, 'zip': None, 'line': '%d Quillon Way, Harrowen' % (700 + i)}
         for i in range(6)], 'unfiled': 'dropoffs', 'asked': False}})
     _owarm = time.time()
     _ofreach(True)
@@ -11188,13 +11189,13 @@ finally:
 # stops reaches both drops by their deadlines — on the reading's stack and on
 # the pair row (`onTime`, numbers only), the verdict untouched. No deadline:
 # the road miles the new pickup adds, never via the new job's end. A held end
-# with no pin: nothing. Invented doors round Marietta Square, the fake's own.
-_OTFIX = {'lat': 33.9526, 'lon': -84.5499, 'gpsOk': True, 'gpsMode': 3, 'gpsAge': 1,
+# with no pin: nothing. Invented doors round Harrowen Square, the fake's own.
+_OTFIX = {'lat': 33.9526, 'lon': -44.5499, 'gpsOk': True, 'gpsMode': 3, 'gpsAge': 1,
           'gpsErr': 5, 'miles': 6.0}
-_OTEND = '1106 Brindlewood Way, Marietta, GA 30060'
+_OTEND = '1106 Brindlewood Way, Harrowen, GA 90660'
 # ...and an end the NucBox holds the street of and not the door, so the
 # server's own search cannot pin it either.
-_OTNODOOR = '4821 Kestrel Dr, Marietta, GA 30060'
+_OTNODOOR = '4821 Kestrel Dr, Harrowen, GA 90660'
 
 
 def _othold(deliver_by, pinned=True, more=None):
@@ -11204,7 +11205,7 @@ def _othold(deliver_by, pinned=True, more=None):
          'app': 'uber',
          'card': dict(_OTFIX)}
     if pinned:
-        h['endPin'] = {'dropoff': _OTEND, 'lat': 33.9650, 'lon': -84.5400, 'doorLevel': True,
+        h['endPin'] = {'dropoff': _OTEND, 'lat': 33.9650, 'lon': -44.5400, 'doorLevel': True,
                        'pinnedAt': now, 'by': 'server'}
     h.update(more or {})
     return {'v': 2, 'orders': [h]}
@@ -11242,7 +11243,7 @@ def _ontime(name, deliver_by, pinned=True, minutes=30.0, more=None, planner=None
                               'keep': False, 'asked': False, 'ms': None, 'at': at}})
         _say(_card('ot-b', 12.05, minutes=minutes,
                    pickup='Example Grill (250 Example Road)',
-                   dropoff='1106 Tamarons Lane, Marietta, GA 30064', **_OTFIX))
+                   dropoff='1106 Pelarons Lane, Harrowen, GA 90664', **_OTFIX))
         _say(read)
         time.sleep(1.0)
         _say(read)
@@ -11310,8 +11311,8 @@ eq('[on time] an offer due before any order of the stops reaches it, the 5 min a
 
 
 def _otwaits(*secs):
-    return {'v': 1, 'stores': [{'key': 'examplegrill@67940,-169060', 'name': 'Example Grill',
-                                'lat': 33.97, 'lon': -84.53,
+    return {'v': 1, 'stores': [{'key': 'examplegrill@67940,-89060', 'name': 'Example Grill',
+                                'lat': 33.97, 'lon': -44.53,
                                 # Stamped this hour: the card's note counts
                                 # only waits at similar hours (storeWaitNote).
                                 'waits': [{'at': int(time.time() * 1000) - 60000 * (i + 1), 's': s}
@@ -11345,21 +11346,21 @@ eq('[on time] the planner\'s Expected by for the held order\'s stop is its deadl
 # Expected by it filed on the hold with the end (fields.expectedBy) stands.
 _otpf = _ontime('ontime-planner-first', (_NOWMIN + 40) % 1440, planner_first=[
     {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'place': None, 'expectedBy': _NOWMIN,
-     'street': '1106 Brindlewood Way', 'city': 'Marietta', 'state': 'GA', 'zip': '30060',
+     'street': '1106 Brindlewood Way', 'city': 'Harrowen', 'state': 'GA', 'zip': '90660',
      'line': _OTEND, 'partial': None, 'label': 'dropoff'}])
 eq('[on time] the planner read before the offer, forgotten at its card: the Expected by it '
    'filed on the hold is still the deadline, ① late',
    _otpf['stack']['onTime'], 'late1')
 # A pickup of the held order still ahead with no pin: no run to time, nothing.
 _otnp = _ontime('ontime-pickup-unpinned', (_NOWMIN + 40) % 1440, more={
-    'pickups': [{'q': '250 Example Road, Marietta', 'visited': False}]})
+    'pickups': [{'q': '250 Example Road, Harrowen', 'visited': False}]})
 eq('[on time] a held pickup still ahead with no pin: nothing at all',
    _otnp['stack'], {'onTime': None, 'lateMin': None, 'offWayMi': None})
 # ...and pinned, with no deadline: the miles the new pickup adds, the shorter
 # of it before or after the held pickup (1.7 mi; the longer is 2.7).
 _otpp = _ontime('ontime-pickup-pinned', None, more={
-    'pickups': [{'q': '250 Example Road, Marietta', 'visited': False}],
-    'pickupPins': [{'q': '250 Example Road, Marietta', 'lat': 33.9600, 'lon': -84.5450,
+    'pickups': [{'q': '250 Example Road, Harrowen', 'visited': False}],
+    'pickupPins': [{'q': '250 Example Road, Harrowen', 'lat': 33.9600, 'lon': -44.5450,
                     'by': 'server'}]})
 eq('[on time] a held pickup ahead and pinned, no deadline: the new pickup either side of it, '
    'the shorter', _otpp['stack'], {'onTime': None, 'lateMin': None, 'offWayMi': 1.7})
@@ -11454,12 +11455,12 @@ finally:
 
 # Two Uber orders: ①'s end filed with its customer's name (the hold's fields,
 # as Assemble.file keeps it), ②'s customer only on the Trip Planner on record.
-_SPAT = '4821 Kestrel Dr, Marietta, GA 30060'
-_SLEE = '77 Birch Ln, Roswell, GA 30075'
+_SPAT = '4821 Kestrel Dr, Harrowen, GA 90660'
+_SLEE = '77 Birch Ln, Ruswold, GA 90675'
 _SSTOPS = [{'kind': 'pickup', 'orders': 1, 'name': 'Wren Street Noodles',
             'line': None, 'expectedBy': None},
            {'kind': 'dropoff', 'orders': 1, 'name': 'Lee R.', 'line': _SLEE,
-            'street': '77 Birch Ln', 'city': 'Roswell', 'expectedBy': None}]
+            'street': '77 Birch Ln', 'city': 'Ruswold', 'expectedBy': None}]
 _snow = int(time.time() * 1000)
 _sta = {'id': 't-a', 'acceptedAt': _snow - 10 * 60000, 'pay': 9.48, 'minutes': 40.0,
         'miles': 5.0, 'cost': 1.5, 'app': 'uber', 'dropoff': _SPAT,
@@ -11518,7 +11519,7 @@ finally:
 # no such word (the owner drops early on purpose), and with nothing passed
 # the field is absent. The same invented orders as above.
 _PPSTOPS = _SSTOPS + [{'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'line': _SPAT,
-                       'street': '4821 Kestrel Dr', 'city': 'Marietta', 'expectedBy': None}]
+                       'street': '4821 Kestrel Dr', 'city': 'Harrowen', 'expectedBy': None}]
 for _pname, _pby in (('pass-press', 'press'), ('pass-screen', 'screen')):
     _ppp, _ppb, _ppj, _pph = _cserver(_pname, hold={'v': 2, 'orders': [dict(_sta), dict(_stbh)]},
                                       SCREEN_DROP='1', CARRY_TWO='1')
@@ -11576,14 +11577,14 @@ finally:
 # a dropped order's door read after its press was filed onto the order still
 # held (28 Oct #5). Every name, store and street here is invented.
 _KP = {'kind': 'pickup', 'name': 'Larkspur Tacos', 'street': '310 Mill St',
-       'line': '310 Mill St, Roswell, GA 30075', 'orders': 1, 'expectedBy': None,
-       'city': 'Roswell', 'state': 'GA', 'zip': '30075'}
+       'line': '310 Mill St, Ruswold, GA 90675', 'orders': 1, 'expectedBy': None,
+       'city': 'Ruswold', 'state': 'GA', 'zip': '90675'}
 _KD1 = {'kind': 'dropoff', 'name': 'Pat Q.', 'street': '4821 Kestrel Dr',
-        'line': '4821 Kestrel Dr, Marietta', 'orders': 1, 'expectedBy': None,
-        'city': 'Marietta', 'state': 'GA', 'zip': None}
+        'line': '4821 Kestrel Dr, Harrowen', 'orders': 1, 'expectedBy': None,
+        'city': 'Harrowen', 'state': 'GA', 'zip': None}
 _KD2 = {'kind': 'dropoff', 'name': 'Lee M.', 'street': '77 Birch Ln',
-        'line': '77 Birch Ln, Roswell', 'orders': 1, 'expectedBy': None,
-        'city': 'Roswell', 'state': 'GA', 'zip': None}
+        'line': '77 Birch Ln, Ruswold', 'orders': 1, 'expectedBy': None,
+        'city': 'Ruswold', 'state': 'GA', 'zip': None}
 
 
 def _kplan(*stops):
@@ -11647,7 +11648,7 @@ try:
     _took2(_kb, _card('f-a', 14.0, minutes=40.0, pickup='Larkspur Tacos'))
     _say(_kplan(_KP, _KD1, _KD2))
     _took2(_kb, _card('f-b', 9.0, minutes=30.0, pickup='Wren Street Noodles',
-                      dropoff='Quarry Bend Rd & Teal Ct, Kennesaw'))
+                      dropoff='Quarry Bend Rd & Teal Ct, Tellmoor'))
     eq('[trip kept] a Took of another trip (on none of the planner\'s stops) forgets it',
        (len(_orders(_kb)), _kstops(_kb), [o.get('plannerHeld') for o in _orders(_kb)]),
        (2, [], [False, False]))
@@ -11675,7 +11676,7 @@ try:
     _took2(_kb, _card('c-short', 8.0, minutes=0.05, pickup='Larkspur Tacos'))
     _took2(_kb, _card('c-long', 9.0, minutes=0.5, pickup='Wren Street Noodles'))
     _say(_kplan(_KP, dict(_KP, name='Wren Street Noodles', street='12 Wren St',
-                          line='12 Wren St, Roswell, GA 30075'), _KD1, _KD2))
+                          line='12 Wren St, Ruswold, GA 90675'), _KD1, _KD2))
     time.sleep(5.5)
     eq('[batch clock] two orders on one held planner: the shorter card does not run out '
        'while its trip-mate is carried', [o.get('pay') for o in _orders(_kb)], [8.0, 9.0])
@@ -11714,7 +11715,7 @@ _kp, _kb, _kj, _kh = _cserver('dropped-door', CARRY_TWO='1', CHOOSER_MS='3000')
 try:
     _took2(_kb, _card('d-a', 14.0, minutes=40.0, pickup='Larkspur Tacos'))
     _took2(_kb, _card('d-b', 9.0, minutes=30.0, pickup='Wren Street Noodles'))
-    _say(_nav('4821 Kestrel Dr, Marietta, GA 30064', '4821 Kestrel Dr', 'Marietta',
+    _say(_nav('4821 Kestrel Dr, Harrowen, GA 90664', '4821 Kestrel Dr', 'Harrowen',
               stop={'name': 'Pat Q.', 'expectedBy': None}))
     _kc = get(_kb, '/api/status').get('chooser') or {}
     post(_kb, '/api/choose', {'id': _kc.get('id'), 'pick': _orders(_kb)[0].get('holdId')})
@@ -11723,29 +11724,29 @@ try:
     _kst = get(_kb, '/api/status').get('holding') or {}
     ok_('[dropped door] the premise: ① has Pat Q.\'s door and name (%r)'
         % ((_kst.get('fields') or {}).get('customer'),),
-        _kst.get('dropoff') == '4821 Kestrel Dr, Marietta, GA 30064'
+        _kst.get('dropoff') == '4821 Kestrel Dr, Harrowen, GA 90664'
         and ((_kst.get('fields') or {}).get('customer') or {}).get('value') == 'Pat Q.')
     post(_kb, '/api/delivered', {'holdIds': [_orders(_kb)[0].get('holdId')]})
     _kw = _kwatch(_kj)
     ok_('[dropped door] the premise: ① is down, watched; ② alone in the car (%r)' % _kw,
         len(_kw) == 1 and (get(_kb, '/api/status').get('holding') or {}).get('pay') == 9.0)
-    _say(_nav('9 Elm Ct, Smyrna, GA 30080', '9 Elm Ct', 'Smyrna', asked=False,
+    _say(_nav('9 Elm Ct, Pyrnel, GA 90680', '9 Elm Ct', 'Pyrnel', asked=False,
               stop={'name': 'Pat Q.', 'expectedBy': None}))
     time.sleep(0.3)
     eq('[dropped door] a label naming the dropped order\'s customer is not filed onto the '
        'order still held', ((get(_kb, '/api/status').get('holding') or {}).get('dropoff'),
                             [r.get('id') for r in _rows(_kj, 'mark')
-                             if r.get('dropoff') == '9 Elm Ct, Smyrna, GA 30080']),
+                             if r.get('dropoff') == '9 Elm Ct, Pyrnel, GA 90680']),
        (None, []))
     eq('[dropped door] ...it goes to the dropped order\'s finishing watch',
-       [w.get('door') for w in _kwatch(_kj)], ['9 Elm Ct, Smyrna, GA 30080'])
+       [w.get('door') for w in _kwatch(_kj)], ['9 Elm Ct, Pyrnel, GA 90680'])
     # ...and a label naming nobody dropped is ②'s, by the "only" cue, as ever.
-    _say(_nav('61 Saddlebrook Ln, Acworth, GA 30101', '61 Saddlebrook Ln', 'Acworth',
+    _say(_nav('61 Haddlecombe Ln, Ivyhame, GA 90701', '61 Haddlecombe Ln', 'Ivyhame',
               asked=False, stop={'name': 'Lee M.', 'expectedBy': None}))
     time.sleep(0.3)
     eq('[dropped door] ...and one naming another customer is filed onto the held order as '
        'before', (get(_kb, '/api/status').get('holding') or {}).get('dropoff'),
-       '61 Saddlebrook Ln, Acworth, GA 30101')
+       '61 Haddlecombe Ln, Ivyhame, GA 90701')
 finally:
     stop(_kp)
 
@@ -11754,17 +11755,17 @@ finally:
 _kp, _kb, _kj, _kh = _cserver('dropped-again', CARRY_TWO='1')
 try:
     _took2(_kb, _card('g-a', 14.0, minutes=40.0, pickup='Larkspur Tacos'))
-    _say(_nav('4821 Kestrel Dr, Marietta, GA 30064', '4821 Kestrel Dr', 'Marietta',
+    _say(_nav('4821 Kestrel Dr, Harrowen, GA 90664', '4821 Kestrel Dr', 'Harrowen',
               asked=False, stop={'name': 'Pat Q.', 'expectedBy': None}))
     time.sleep(0.3)
     post(_kb, '/api/delivered', {})
     _took2(_kb, _card('g-b', 9.0, minutes=30.0, pickup='Wren Street Noodles'))
-    _say(_nav('9 Elm Ct, Smyrna, GA 30080', '9 Elm Ct', 'Smyrna', asked=False,
+    _say(_nav('9 Elm Ct, Pyrnel, GA 90680', '9 Elm Ct', 'Pyrnel', asked=False,
               stop={'name': 'Pat Q.', 'expectedBy': None}))
     time.sleep(0.3)
     eq('[dropped door] a door naming a dropped order\'s customer, read for an order taken '
        'after the drop, is filed onto it', (get(_kb, '/api/status').get('holding') or {})
-       .get('dropoff'), '9 Elm Ct, Smyrna, GA 30080')
+       .get('dropoff'), '9 Elm Ct, Pyrnel, GA 90680')
 finally:
     stop(_kp)
 
@@ -11774,8 +11775,8 @@ finally:
 # DoorDash order's pickup; its card's map label rides onto its hold for the
 # run. Invented names and streets.
 def _town(app, screen):
-    return {'dropoff': {'found': True, 'line': 'Fabletown, GA 30199', 'street': None,
-                        'city': 'Fabletown', 'state': 'GA', 'zip': '30199', 'asked': True,
+    return {'dropoff': {'found': True, 'line': 'Fabletown, GA 90799', 'street': None,
+                        'city': 'Fabletown', 'state': 'GA', 'zip': '90799', 'asked': True,
                         'labelled': None, 'ms': 10, 'app': app, 'screen': screen,
                         'expectedBy': None, 'at': int(time.time() * 1000)}}
 
@@ -11815,7 +11816,7 @@ eq('[31 Oct] two apps: a press off Uber\'s navigation is the Uber order\'s by th
    _x1, [('uber', '2210 Larkspur Dr NW, Fabletown', 'app'), ('doordash', None, None)])
 eq('[31 Oct] ...and the same town off DoorDash\'s "Deliver to" is the DoorDash order\'s',
    _x2, [('uber', '2210 Larkspur Dr NW, Fabletown', 'app'),
-         ('doordash', 'Fabletown, GA 30199', 'app')])
+         ('doordash', 'Fabletown, GA 90799', 'app')])
 eq('[31 Oct] DoorDash\'s pickup screen files the store\'s door as the DoorDash order\'s pickup, '
    'and nothing on the Uber order (a door with no street type filed before it replaced)',
    [((o.get('fields') or {}).get('pickupAddr') or {}).get('value') for o in _xorders],
@@ -11888,22 +11889,22 @@ def _vsayer(name):
     return script, says, os.path.join(d, 'offers.jsonl')
 
 
-_R1 = (33.9000, -84.5000)               # the held order's restaurant
-_R2 = (33.9300, -84.5000)               # another, 3.3 km north
-_R3 = (33.9011, -84.5000)               # a second store 122 m from _R1
-_Q1 = '310 Mill St, Roswell, GA 30075'
-_Q2 = '88 Example Way, Roswell, GA 30075'
-_Q3 = '312 Mill St, Roswell, GA 30075'
+_R1 = (33.9000, -44.5000)               # the held order's restaurant
+_R2 = (33.9300, -44.5000)               # another, 3.3 km north
+_R3 = (33.9011, -44.5000)               # a second store 122 m from _R1
+_Q1 = '310 Mill St, Ruswold, GA 90675'
+_Q2 = '88 Example Way, Ruswold, GA 90675'
+_Q3 = '312 Mill St, Ruswold, GA 90675'
 
 
 def _vstop(q, street, name='oe Example'):
     return {'kind': 'pickup', 'orders': 1, 'name': name, 'expectedBy': 1189,
-            'street': street, 'city': 'Roswell', 'state': 'GA', 'zip': '30075', 'line': q}
+            'street': street, 'city': 'Ruswold', 'state': 'GA', 'zip': '90675', 'line': q}
 
 
 _VDROP = {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'expectedBy': 1230,
-          'street': '4821 Kestrel Dr', 'city': 'Marietta', 'state': None, 'zip': None,
-          'line': '4821 Kestrel Dr, Marietta'}
+          'street': '4821 Kestrel Dr', 'city': 'Harrowen', 'state': None, 'zip': None,
+          'line': '4821 Kestrel Dr, Harrowen'}
 
 
 def _vplanner(*stops):
@@ -12064,13 +12065,13 @@ try:
                 'offer': {'id': oid, 'pay': pay, 'minutes': 40.0, 'billedMinutes': 40.0,
                           'miles': miles, 'cost': 1.75, 'pickup': store, 'dropoff': end,
                           'multiOrder': False}})
-        _vcard('v-a', 12.0, 'Example Diner', 5.0, '4821 Kestrel Dr, Marietta')
-        _vcard('v-b', 9.0, 'Example Grill', 3.0, '77 Birch Ln, Roswell')
+        _vcard('v-a', 12.0, 'Example Diner', 5.0, '4821 Kestrel Dr, Harrowen')
+        _vcard('v-b', 9.0, 'Example Grill', 3.0, '77 Birch Ln, Ruswold')
         _two = get(_vb, '/api/status').get('orders') or []
         ok_('[pickup visit] (the premise: two orders in the car)', len(_two) == 2)
         _ha, _hb = (_two + [{}, {}])[:2]
-        _Q4 = '9 Other Pl, Roswell, GA 30075'
-        _R4 = (33.9600, -84.5000)            # 6.7 km north of _R1
+        _Q4 = '9 Other Pl, Ruswold, GA 90675'
+        _R4 = (33.9600, -44.5000)            # 6.7 km north of _R1
         _vsay2(_vread(_vstop(_Q1, '310 Mill St', 'oe Example Diner'),
                       _vstop(_Q2, '88 Example Way', 'oe Example Grill'),
                       _vstop(_Q4, '9 Other Pl', 'oe Other Place'), _VDROP))
@@ -12118,8 +12119,8 @@ finally:
 # _vwait's, real seconds made from each fix's age, so a 3-minute wait reads
 # 180 s plus the second or so the lines take to say. Invented stores.
 _vdir = tempfile.mkdtemp()
-_SW = (33.90012, -84.50017)             # a store's pin, off the 0.0005° grid
-_SWQ = '310 Mill St, Roswell, GA 30075'
+_SW = (33.90012, -44.50017)             # a store's pin, off the 0.0005° grid
+_SWQ = '310 Mill St, Ruswold, GA 90675'
 
 
 def _swtook(base, oid, pickup):
@@ -12127,7 +12128,7 @@ def _swtook(base, oid, pickup):
         'id': oid, 'accepted': True,
         'offer': {'id': oid, 'pay': 12.0, 'minutes': 40.0, 'billedMinutes': 40.0,
                   'miles': 5.0, 'cost': 1.75, 'pickup': pickup,
-                  'dropoff': '4821 Kestrel Dr, Marietta', 'multiOrder': False}})
+                  'dropoff': '4821 Kestrel Dr, Harrowen', 'multiOrder': False}})
     return get(base, '/api/status').get('holding') or {}
 
 
@@ -12150,7 +12151,7 @@ def _swread(pickup):
     return {'ready': True, 'state': 'go', 'perHour': 30.0, 'grossPerHour': 33.6, 'pay': 7.25,
             'minutes': 25.0, 'billedMinutes': 25.0, 'cardMinutes': 25.0, 'miles': 4.0,
             'cost': 1.4, 'target': 25, 'band': 15, 'costPerMile': 0.35, 'pickup': pickup,
-            'places': [pickup, '77 Birch Ln, Roswell']}
+            'places': [pickup, '77 Birch Ln, Ruswold']}
 
 
 try:
@@ -12167,14 +12168,14 @@ try:
             and [180 <= w.get('s', 0) <= 190 for w in _wst.get('waits') or []] == [True])
         eq('[store waits] ...kept at its pin rounded to the grid, and the store\'s name less '
            'Uber\'s bracketed street', (_wst.get('lat'), _wst.get('lon'), _wst.get('key')),
-           (33.9, -84.5, 'larkspurtacos@67800,-169000'))
+           (33.9, -44.5, 'larkspurtacos@67800,-89000'))
         # One visit is not enough to say anything.
         _wsay([_swread('Larkspur Tacos (310 Mill St)')])
         no_('[store waits] one visit on record: the card says nothing',
             'storeWait' in (get(_wb, '/api/status').get('last') or {}))
         _swvisit(_wb, _wsay, 'w-2', 'Larkspur Tacos', 120)
         # A card whose pickup is a door, not a name: no store to keep it by.
-        _swvisit(_wb, _wsay, 'w-3', '1981 Cobb Pkwy NW, Kennesaw', 120)
+        _swvisit(_wb, _wsay, 'w-3', '1981 Vosk Pkwy NW, Tellmoor', 120)
         _wf = _swfile(_wj) or {}
         eq('[store waits] a second visit joins the first under one store; a pickup that is a '
            'door is kept under no name', [(s.get('name'), len(s.get('waits') or []))
@@ -12236,7 +12237,7 @@ try:
     _senv = {'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _ss,
              'STOP_WAIT_MIN_MS': '1200', 'STOP_NEAR_MS': '700'}
     _sp, _sb = start(_senv, _sj)
-    _SDOOR = (33.95, -84.55)
+    _SDOOR = (33.95, -44.55)
     try:
         def _sstop(at, n):
             return [_vbeat(at, -0.0003)] * n            # n fresh fixes, a quarter second apart
@@ -12286,7 +12287,7 @@ try:
                  for k in ('n',)) + ((get(_sb, '/api/status').get('last') or {}).get('state'),),
            (3, 'go'))
         no_('[stop waits] no coordinate on the record\'s pickup',
-            any(k in json.dumps(_spk) for k in ('33.9', '84.5')))
+            any(k in json.dumps(_spk) for k in ('33.9', '44.5')))
     finally:
         stop(_sp)
 finally:
@@ -12394,19 +12395,19 @@ _PFAKE = (
     '        "street": line.split(",")[0], "city": line.split(", ")[1], "state": "GA",\n'
     '        "zip": line[-5:], "app": "doordash", "screen": "dd.placePopup",\n'
     '        "at": now()}}), flush=True)\n'
-    'STORE = "1200 Fable W Lantern Pkwy NW, Kennesaw, GA 30144"\n'
+    'STORE = "1200 Fable W Lantern Pkwy NW, Tellmoor, GA 90744"\n'
     'card("dd-1", "S &, Lark Owl Pizza ; 1200 Fable Parkway Nort")\n'
     'wait("f1")\n'
-    'popup(None, "88 Quill Ln NE, Marietta, GA 30062")\n'
-    'popup("pickup", "500 Wren St NW, Atlanta, GA 30318", name="Wren Street Noodles")\n'
+    'popup(None, "88 Quill Ln NE, Harrowen, GA 90662")\n'
+    'popup("pickup", "500 Wren St NW, Solvane, GA 90818", name="Wren Street Noodles")\n'
     'wait("f2")\n'
     'popup("pickup", STORE, name="Lark Owl Pizza")\n'
     'wait("f3")\n'
     'card("dd-1", "S &, Lark Owl Pizza ; 1200 Fable Parkway Nort")\n'
     'wait("f4")\n'
-    'popup("dropoff", "412 Wrenfield Ct NE, Marietta, GA 30062")\n'
+    'popup("dropoff", "412 Wrenfield Ct NE, Harrowen, GA 90662")\n'
     'wait("f5")\n'
-    'popup("dropoff", "77 Quill Ln NE, Marietta, GA 30062")\n'
+    'popup("dropoff", "77 Quill Ln NE, Harrowen, GA 90662")\n'
     'popup("pickup", STORE, name="Lark Owl Pizza")\n'
     'wait("f6")\n'
     'card("dd-2", "Fable Bagel Co", pay=6.5)\n'
@@ -12415,7 +12416,7 @@ _PFAKE = (
     # gap, its stamp can precede the server's receipt of the card line, which
     # is "read before the card" and refused, rightly.
     'time.sleep(0.5)\n'
-    'popup("dropoff", "9 Heron Ct, Smyrna, GA 30080")\n'
+    'popup("dropoff", "9 Heron Ct, Pyrnel, GA 90680")\n'
     'time.sleep(600)\n')
 _pdir = tempfile.mkdtemp()
 try:
@@ -12452,16 +12453,16 @@ try:
         _s2 = (_step('f2').get('offer') or {})
         eq('[popup] a store popup read while a card is screened gives the card its pickup '
            'address', [(_s2.get('pickupAddr') or {}).get(k) for k in ('value', 'from', 'name')],
-           ['1200 Fable W Lantern Pkwy NW, Kennesaw, GA 30144', 'popup', 'Lark Owl Pizza'])
+           ['1200 Fable W Lantern Pkwy NW, Tellmoor, GA 90744', 'popup', 'Lark Owl Pizza'])
         _s3 = (_step('f3').get('offer') or {})
         eq('[popup] ...and the next reading of the card keeps it',
            (_s3.get('pickupAddr') or {}).get('value'),
-           '1200 Fable W Lantern Pkwy NW, Kennesaw, GA 30144')
+           '1200 Fable W Lantern Pkwy NW, Tellmoor, GA 90744')
         _s4 = (_step('f4').get('offer') or {})
         eq('[popup] a customer popup gives the dropoff',
            (_s4.get('dropoff'), _s4.get('dropoffScanned'), _s4.get('dropoffFrom'), _pmarks()),
-           ('412 Wrenfield Ct NE, Marietta, GA 30062', True, 'popup',
-            [('dd-1', '412 Wrenfield Ct NE, Marietta, GA 30062', 'popup')]))
+           ('412 Wrenfield Ct NE, Harrowen, GA 90662', True, 'popup',
+            [('dd-1', '412 Wrenfield Ct NE, Harrowen, GA 90662', 'popup')]))
         _code, _reply = post(_pb, '/api/offers/mark', {'id': 'dd-1', 'accepted': True})
         time.sleep(0.3)
         _hj = json.load(open(os.path.join(_pdir, 'holding.json')))
@@ -12470,22 +12471,22 @@ try:
            [(_f.get('pickupAddr') or {}).get('value'), (_f.get('pickupAddr') or {}).get('from'),
             (_f.get('dropoff') or {}).get('value'), (_f.get('dropoff') or {}).get('from'),
             ((_hj.get('orders') or [{}])[0]).get('dropoff')],
-           ['1200 Fable W Lantern Pkwy NW, Kennesaw, GA 30144', 'popup',
-            '412 Wrenfield Ct NE, Marietta, GA 30062', 'popup',
-            '412 Wrenfield Ct NE, Marietta, GA 30062'])
+           ['1200 Fable W Lantern Pkwy NW, Tellmoor, GA 90744', 'popup',
+            '412 Wrenfield Ct NE, Harrowen, GA 90662', 'popup',
+            '412 Wrenfield Ct NE, Harrowen, GA 90662'])
         _s5 = _step('f5')
         _hj5 = json.load(open(os.path.join(_pdir, 'holding.json')))
         eq('[popup] never onto the held order',
            ((_s5.get('offer') or {}).get('dropoff'), (_s5.get('holding') or {}).get('dropoff'),
             ((_hj5.get('orders') or [{}])[0]).get('dropoff'), len(_pmarks())),
-           ('412 Wrenfield Ct NE, Marietta, GA 30062', '412 Wrenfield Ct NE, Marietta, GA 30062',
-            '412 Wrenfield Ct NE, Marietta, GA 30062', 1))
+           ('412 Wrenfield Ct NE, Harrowen, GA 90662', '412 Wrenfield Ct NE, Harrowen, GA 90662',
+            '412 Wrenfield Ct NE, Harrowen, GA 90662', 1))
         _s6 = _step('f6')
         eq('[popup] ...and the next card being screened takes its own, the order in the car '
            'keeping its end',
            ((_s6.get('offer') or {}).get('id'), (_s6.get('offer') or {}).get('dropoff'),
             (_s6.get('holding') or {}).get('dropoff')),
-           ('dd-2', '9 Heron Ct, Smyrna, GA 30080', '412 Wrenfield Ct NE, Marietta, GA 30062'))
+           ('dd-2', '9 Heron Ct, Pyrnel, GA 90680', '412 Wrenfield Ct NE, Harrowen, GA 90662'))
         time.sleep(1.0)
         ok_('[popup] ...and every panel is sent the card with what it now holds at once, not '
             'at its next reading', any((m.get('popup') or {}).get('field') == 'pickupAddr'
@@ -12626,13 +12627,13 @@ def _settle(seconds=0.6):
 # time, is the same shape.
 _PLAN2 = [
     {'kind': 'pickup', 'orders': 2, 'name': 'Wren Street Noodles', 'expectedBy': 1100,
-     'line': '1 Mill St, Roswell', 'street': '1 Mill St', 'city': 'Roswell',
+     'line': '1 Mill St, Ruswold', 'street': '1 Mill St', 'city': 'Ruswold',
      'state': None, 'zip': None},
     {'kind': 'dropoff', 'orders': 1, 'name': 'Mara T.', 'expectedBy': 1130,
-     'line': '20 Larch Way, Kennesaw', 'street': '20 Larch Way', 'city': 'Kennesaw',
+     'line': '20 Larch Way, Tellmoor', 'street': '20 Larch Way', 'city': 'Tellmoor',
      'state': None, 'zip': None},
     {'kind': 'dropoff', 'orders': 1, 'name': 'Jules K.', 'expectedBy': 1150,
-     'line': '30 Teal Ct, Smyrna', 'street': '30 Teal Ct', 'city': 'Smyrna',
+     'line': '30 Teal Ct, Pyrnel', 'street': '30 Teal Ct', 'city': 'Pyrnel',
      'state': None, 'zip': None}]
 
 
@@ -12700,8 +12701,8 @@ try:
     _settle(0.1)
     _q3.emit({'sighting': {'at': int(time.time() * 1000), 'asked': False, 'whole': True,
                            'app': 'uber', 'screen': 'uber.nav',
-                           'stops': [{'kind': 'dropoff', 'line': '5 Heron Ct, Smyrna',
-                                      'street': '5 Heron Ct', 'city': 'Smyrna'}]}})
+                           'stops': [{'kind': 'dropoff', 'line': '5 Heron Ct, Pyrnel',
+                                      'street': '5 Heron Ct', 'city': 'Pyrnel'}]}})
     _settle()
     eq('an address no order can own is not waiting',
        (_q3.status().get('unowned'), _endmarks(_q3)), (0, []))
@@ -12719,12 +12720,12 @@ finally:
 # place, so a power cut mid-write left it cut short — read at boot as nothing
 # held, with nothing said. And a planner read wrote it whether or not the read
 # changed anything.
-_PRESSED = {'found': True, 'line': '61 Wrenfield Ln, Kennesaw, GA 30144',
-            'street': '61 Wrenfield Ln', 'city': 'Kennesaw', 'state': 'GA', 'zip': '30144',
+_PRESSED = {'found': True, 'line': '61 Wrenfield Ln, Tellmoor, GA 90744',
+            'street': '61 Wrenfield Ln', 'city': 'Tellmoor', 'state': 'GA', 'zip': '90744',
             'asked': True}
 _q4 = _Q(carry=False)
 try:
-    _q4.card('A', 12.0, 60, 'uber', dropoff='Birch Ln & Alder Ct, Kennesaw')
+    _q4.card('A', 12.0, 60, 'uber', dropoff='Birch Ln & Alder Ct, Tellmoor')
     _q4.took('A')
     _settle(0.1)
     _q4.emit({'dropoff': dict(_PRESSED, at=int(time.time() * 1000))})
@@ -12775,7 +12776,7 @@ finally:
 
 def _plan1(q, name):
     stops = [{'kind': 'pickup', 'orders': 1, 'name': 'Larkspur Tacos', 'expectedBy': 1100,
-              'line': '5 Mill St, Roswell', 'street': '5 Mill St', 'city': 'Roswell',
+              'line': '5 Mill St, Ruswold', 'street': '5 Mill St', 'city': 'Ruswold',
               'state': None, 'zip': None},
              {'kind': 'dropoff', 'orders': 1, 'name': name, 'expectedBy': 1130,
               'line': None, 'street': None, 'city': None, 'state': None, 'zip': None}]
@@ -12837,7 +12838,7 @@ for _carry in (False, True):
 
     _q9 = _Q(carry=_carry)
     try:
-        _q9.card('A', 12.0, 60, 'uber', dropoff='Birch Ln & Alder Ct, Kennesaw')
+        _q9.card('A', 12.0, 60, 'uber', dropoff='Birch Ln & Alder Ct, Tellmoor')
         _q9.took('A')
         _settle(0.1)
         _q9.emit({'dropoff': dict(_PRESSED, at=int(time.time() * 1000))})
@@ -12869,7 +12870,7 @@ for _carry in (False, True):
 # card since it arrived, puts that card's order in the car from its reading as
 # the slot had it (server.js offersTickHolds). Anything else records only and
 # says why. Cards, doors and stores invented; the fix is the fake NucBox's
-# Marietta Square, as '[auto arm]' uses.
+# Harrowen Square, as '[auto arm]' uses.
 _ofake = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
 _ofake_base = 'http://127.0.0.1:%d' % json.loads(_ofake.stdout.readline())['port']
@@ -12878,8 +12879,8 @@ try:
     _ev1 = listen(_o1.base, 6)
     _settle(0.3)
     _o1.card('R', 12.0, 40, 'doordash', **dict(
-        _SQ, miles=5.0, dropoff=_COBB, pickup='Larkspur Tacos',
-        pickupLine='12 Mill St, Roswell, GA'))
+        _SQ, miles=5.0, dropoff=_VOSK, pickup='Larkspur Tacos',
+        pickupLine='12 Mill St, Ruswold, GA'))
     _rat = int(time.time() * 1000)
     time.sleep(1.2)
     _o1.card('S', 8.0, 20, 'uber')
@@ -12895,7 +12896,7 @@ try:
        (_f1.get('pay'), _f1.get('minutes'), _f1.get('miles'), _f1.get('pickup'),
         _f1.get('dropoff'), _f1.get('pickupLine'), _f1.get('app'),
         (_f1.get('card') or {}).get('lat'), (_f1.get('card') or {}).get('multiOrder')),
-       (12.0, 40, 5.0, 'Larkspur Tacos', _COBB, '12 Mill St, Roswell, GA', 'doordash',
+       (12.0, 40, 5.0, 'Larkspur Tacos', _VOSK, '12 Mill St, Ruswold, GA', 'doordash',
         _SQ['lat'], False))
     eq('[offers tick] ...and the GPS drop armed from it, as a Took arms it',
        (_h1.get('endPinned'), _h1.get('endBy')), (True, 'server'))
@@ -13031,7 +13032,7 @@ _o6 = _Q(carry=False)
 try:
     _ev6 = listen(_o6.base, 8)
     _settle(0.3)
-    _o6.card('R', 12.0, 40, 'uber', dropoff='12 Mill St, Roswell, GA')
+    _o6.card('R', 12.0, 40, 'uber', dropoff='12 Mill St, Ruswold, GA')
     _o6.took('R', via='offers')
     _s6, _u6 = post(_o6.base, '/api/offers/mark', {'id': 'R', 'accepted': False, 'via': 'offers'})
     _settle(0.3)
@@ -13073,8 +13074,8 @@ _o7 = _Q(carry=False, env={'NUCBOX_SEARCH': 'http://127.0.0.1:%d' % _hang.getsoc
                            'NUCBOX_TIMEOUT_MS': '20000'},
          holding=json.dumps({'v': 2, 'orders': [dict(
              id='W', acceptedAt=_hnow - 60000, pay=9.0, minutes=40, billedMinutes=40,
-             miles=5.0, cost=1.5, dropoff='12 Mill St, Roswell, GA', card=dict(_SQ),
-             endWhy='no house number', endWhyFor='99 Old St, Roswell, GA')]}))
+             miles=5.0, cost=1.5, dropoff='12 Mill St, Ruswold, GA', card=dict(_SQ),
+             endWhy='no house number', endWhyFor='99 Old St, Ruswold, GA')]}))
 try:
     _settle(0.5)
     post(_o7.base, '/api/delivered', {})
@@ -13507,8 +13508,8 @@ import urllib.parse                                            # noqa: E402
 _nf = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
 _nfb ='http://127.0.0.1:%d' % json.loads(_nf.stdout.readline())['port']
-_nroutes = ['-84.5499,33.9526;-84.3880,33.7490', '-84.5499,33.9526;-84.5499,33.9830',
-            '-84.5499,33.9526;-84.4500,33.8800']
+_nroutes = ['-44.5499,33.9526;-44.3880,33.7490', '-44.5499,33.9526;-44.5499,33.9830',
+            '-44.5499,33.9526;-44.4500,33.8800']
 
 
 def _nasks(pts):
@@ -13548,12 +13549,12 @@ finally:
 _un = int(time.time() * 1000)
 _UA = {'id': 'ud-a', 'acceptedAt': _un - 20 * 60000, 'pay': 12.5, 'minutes': 40.0,
        'miles': 5.0, 'cost': 1.5, 'app': 'uber', 'pickup': 'Larkspur Tacos',
-       'dropoff': '4821 Kestrel Dr, Marietta', 'card': {'multiOrder': False},
-       'endPin': {'dropoff': '4821 Kestrel Dr, Marietta', 'lat': 12.3456, 'lon': 45.6789,
+       'dropoff': '4821 Kestrel Dr, Harrowen', 'card': {'multiOrder': False},
+       'endPin': {'dropoff': '4821 Kestrel Dr, Harrowen', 'lat': 12.3456, 'lon': 45.6789,
                   'doorLevel': True, 'pinnedAt': _un - 60000},
        'pickupPins': [{'q': 'Larkspur Tacos', 'lat': 12.3399, 'lon': 45.6701}],
        'planner': {'stops': [{'kind': 'pickup', 'name': 'Larkspur Tacos'},
-                             {'kind': 'dropoff', 'line': '4821 Kestrel Dr, Marietta'}],
+                             {'kind': 'dropoff', 'line': '4821 Kestrel Dr, Harrowen'}],
                    'at': _un - 5 * 60000},
        'batch': True, 'drops': [{'line': '4821 Kestrel Dr'}, {'line': '17 Wren Way'}]}
 _UB = {'id': 'ud-b', 'acceptedAt': _un - 5 * 60000, 'pay': 6.25, 'minutes': 9.0,
@@ -13564,10 +13565,10 @@ _UB = {'id': 'ud-b', 'acceptedAt': _un - 5 * 60000, 'pay': 6.25, 'minutes': 9.0,
 def _ujournal(path):
     # The cards and their Tooks, so the shift report has the orders to time.
     write(path, [offer(0, _UA['acceptedAt'], id='ud-a', pay=12.5, minutes=40.0, miles=5.0,
-                       pickup='Larkspur Tacos', dropoff='4821 Kestrel Dr, Marietta',
+                       pickup='Larkspur Tacos', dropoff='4821 Kestrel Dr, Harrowen',
                        lat=12.3456, lon=45.6789,
                        text='$12.50\n40 min (5.0 mi) total\nLarkspur Tacos\n'
-                            '4821 Kestrel Dr, Marietta\nAccept'),
+                            '4821 Kestrel Dr, Harrowen\nAccept'),
                  {'v': 1, 'kind': 'mark', 'id': 'ud-a', 'at': _UA['acceptedAt'] + 1000,
                   'accepted': True, 'via': 'panel'}])
 
@@ -13693,7 +13694,7 @@ try:
     eq('[shift] ...and its Pinning line, in the report\'s words',
        [o.get('pin') for o in _sa][:1], ['end pinned by page; pickups 1 pinned'])
     eq('[shift] no address, no place and no coordinate leaves the server',
-       [w for w in ('Kestrel', 'Larkspur', 'Wren', 'Marietta', '12.34', '45.67') if w in _sh],
+       [w for w in ('Kestrel', 'Larkspur', 'Wren', 'Harrowen', '12.34', '45.67') if w in _sh],
        [])
     eq('[shift] a second ask inside the cache is the same answer, not a second run',
        json.loads(raw(_ub, '/api/shift')[1]).get('at'), _sj.get('at'))
@@ -14127,7 +14128,7 @@ try:
        ([], [('order', 'drop')]))
     # A new order taken while the old one is being finished is held alone: the
     # watch is not in the car, and its door puts the new one down for nothing.
-    _h2 = _ftook(_fb, 'fin-next', dropoff='17 Wren Way, Marietta', miles=0.4)
+    _h2 = _ftook(_fb, 'fin-next', dropoff='17 Wren Way, Harrowen', miles=0.4)
     _st = get(_fb, '/api/status')
     eq('[finish] a watch is not an order in the car: a new Took is held alone',
        ((_st.get('holding') or {}).get('holdId'), len(_st.get('orders') or [None])),
@@ -14199,7 +14200,7 @@ try:
     # it. A press made where the car has stood the dwell (here GPS_DWELL_MS,
     # 1 s), the order already driven FINISH_DRIVEN (0.6) of its card's miles
     # since the Took, is the end: no watch. Card 1.0 mi: 0.6 mi to drive.
-    _h3 = _ftook(_fb, 'fin-stood', dropoff='Wren Way, Marietta', miles=1.0)
+    _h3 = _ftook(_fb, 'fin-stood', dropoff='Wren Way, Harrowen', miles=1.0)
     _fbeats([_ff(0.01), _ff(0.015)])        # ~0.69 mi driven since the Took
     _fbeats(_fstay(0.02))                   # ...then standing 1.5 s, and Drop
     post(_fb, '/api/delivered', {})
@@ -14224,7 +14225,7 @@ try:
     # owner's main use) it is watched, and a stop finishes it only once the
     # miles are driven.
     _fbeats([_ff(0.03)])                    # the car where the order is taken...
-    _h4 = _ftook(_fb, 'fin-rest', dropoff='Wren Way, Marietta', miles=1.0)
+    _h4 = _ftook(_fb, 'fin-rest', dropoff='Wren Way, Harrowen', miles=1.0)
     _fbeats(_fstay(0.03))                   # ...standing there
     post(_fb, '/api/delivered', {})
     eq('[finish] a Drop pressed standing, not yet driven its miles, is watched with no end',
@@ -14263,9 +14264,9 @@ _fdir2 = tempfile.mkdtemp()
 _fj2 = os.path.join(_fdir2, 'offers.jsonl')
 open(_fj2, 'w').close()
 _FAREA = {'id': 'fin-area', 'acceptedAt': _fn - 60000, 'pay': 9.0, 'minutes': 40.0,
-          'miles': 4.0, 'cost': 1.0, 'app': 'uber', 'dropoff': 'Larch Ct, Marietta',
+          'miles': 4.0, 'cost': 1.0, 'app': 'uber', 'dropoff': 'Larch Ct, Harrowen',
           'card': {'multiOrder': False}, 'endWhy': 'no door number',
-          'endWhyFor': 'Larch Ct, Marietta',
+          'endWhyFor': 'Larch Ct, Harrowen',
           'endArea': {'lat': _PIN[0] + 0.03, 'lon': _PIN[1], 'approx': True, 'n': 3,
                       'miles': 0.1}}
 with open(os.path.join(_fdir2, 'holding.json'), 'w') as _fh:
@@ -14377,8 +14378,8 @@ _fj3 = os.path.join(_fdir3, 'offers.jsonl')
 open(_fj3, 'w').close()
 _fp, _fb = start(dict(_FENV, CARRY_TWO='1'), _fj3)
 try:
-    _a = _ftook(_fb, 'fin-two-a', dropoff='Wren Way, Marietta')
-    _ftook(_fb, 'fin-two-b', dropoff='Larch Ct, Marietta')
+    _a = _ftook(_fb, 'fin-two-a', dropoff='Wren Way, Harrowen')
+    _ftook(_fb, 'fin-two-b', dropoff='Larch Ct, Harrowen')
     _two = [o.get('holdId') for o in (get(_fb, '/api/status').get('orders') or [])]
     _fbeats([_ff(0.03)] * 2)                # on the move
     _c, _d = post(_fb, '/api/delivered', {'holdIds': _two})
@@ -14391,7 +14392,7 @@ try:
     # One of the two with its door pinned: that one is watched, at its door.
     _a = _ftook(_fb, 'fin-two-c')
     _pin(_fb, _a)
-    _ftook(_fb, 'fin-two-d', dropoff='Larch Ct, Marietta')
+    _ftook(_fb, 'fin-two-d', dropoff='Larch Ct, Harrowen')
     _two = [o.get('holdId') for o in (get(_fb, '/api/status').get('orders') or [])]
     _fbeats([_ff(0.02)] * 2)
     post(_fb, '/api/delivered', {'holdIds': _two})
@@ -14401,7 +14402,7 @@ try:
     # An add-on's card miles are what it ADDS: its trip's go with them. Put
     # down alone while its trip is held, it needs 0.6 x (5.0 + 1.5) mi.
     _r = _ftook(_fb, 'fin-trip', app='uber')
-    _ftook(_fb, 'fin-add', dropoff='Larch Ct, Marietta', miles=1.5, addon=True)
+    _ftook(_fb, 'fin-add', dropoff='Larch Ct, Harrowen', miles=1.5, addon=True)
     _ad = [o.get('holdId') for o in (get(_fb, '/api/status').get('orders') or [])
            if o.get('holdId') != _r.get('holdId')]
     _fbeats([_ff(0.04)] * 2)
@@ -14412,7 +14413,7 @@ try:
     # ...and with its trip already gone there is no figure: no 'stop' watch.
     post(_fb, '/api/delivered', {'holdIds': [_r.get('holdId')]})
     _r = _ftook(_fb, 'fin-trip2', app='uber')
-    _ftook(_fb, 'fin-add2', dropoff='Larch Ct, Marietta', miles=1.5, addon=True)
+    _ftook(_fb, 'fin-add2', dropoff='Larch Ct, Harrowen', miles=1.5, addon=True)
     _ad = [o.get('holdId') for o in (get(_fb, '/api/status').get('orders') or [])
            if o.get('holdId') != _r.get('holdId')]
     _fbeats([_ff(0.05)] * 2)
@@ -14478,7 +14479,7 @@ shutil.rmtree(_fdir2, ignore_errors=True)
 # pin found at once, nothing again for the same reason. Through the real
 # server's console (what ~/HTTP_Server/logs/uberscan.log holds), against
 # tests/fake-nucbox.js: "4821 Kestrel Dr" is a street it knows with no
-# numbers, "1985 Cobb Parkway" a door it answers. Invented addresses.
+# numbers, "1985 Vosk Parkway" a door it answers. Invented addresses.
 _plfake = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
 _plfake_base = 'http://127.0.0.1:%d' % json.loads(_plfake.stdout.readline())['port']
@@ -14531,7 +14532,7 @@ try:
            _plsaid(_hid), ['pin: none end #%s "street found, not that door" (4821 Kestrel Dr)'
                            ' - 1 answered, 0 at the door, the nearest 1.66 mi from the centre, '
                            'radius 5.5 mi (card 5 mi + 0.5 slack); nearest: highway '
-                           '"Kestrel Drive, Marietta, Cobb "' % _hid])
+                           '"Kestrel Drive, Harrowen, Vosk "' % _hid])
         # The status is asked over and over, as the panel asks it: the same
         # reason is not said twice.
         for _ in range(5):
@@ -14540,20 +14541,20 @@ try:
         eq('[pin said] ...and not again for the same reason, however often it is asked about',
            len(_plsaid(_hid)), 1)
         post(_plb, '/api/held-end', {'holdId': _hid, 'dropoff': _KES, 'lat': 33.9600,
-                                     'lon': -84.5400, 'doorLevel': True,
-                                     'name': '4821, Kestrel Drive, Marietta, Cobb County'})
+                                     'lon': -44.5400, 'doorLevel': True,
+                                     'name': '4821, Kestrel Drive, Harrowen, Vosk County'})
         _found = [l for l in _plsaid('pin: found end #' + _hid)]
         eq('[pin said] ...and once more when Map view pins it after all, with the questions the '
            'NucBox was asked for it', _found, ['pin: found end #%s by page after 1 ask' % _hid])
 
-        _atook(_plb, 'pl-cobb', _COBB)
+        _atook(_plb, 'pl-vosk', _VOSK)
         _h = _settled(_plb)
         time.sleep(0.4)
         eq('[pin said] an end pinned at its first ask says nothing at all',
            (_h.get('endPinned'), [l for l in _pllog if _h.get('holdId') in l and 'pin:' in l]),
            (True, []))
 
-        _atook(_plb, 'pl-nonum', 'Kestrel Dr, Marietta')
+        _atook(_plb, 'pl-nonum', 'Kestrel Dr, Harrowen')
         _h = _settled(_plb)
         eq('[pin said] a dropoff with no house number says so',
            _plsaid(_h.get('holdId')),
@@ -14567,8 +14568,8 @@ try:
         # A DoorDash card with two stores: the first door answered (no line),
         # the second a street with no numbers — "store 2", in the card's order.
         _plo = dict(_SQ, id='pl-two', pay=14.1, minutes=33.0, billedMinutes=33.0, miles=8.7,
-                    cost=1.5, pickup='Example Diner', pickupLine=_COBB, app='doordash',
-                    stores=[{'name': 'Example Diner', 'door': _COBB},
+                    cost=1.5, pickup='Example Diner', pickupLine=_VOSK, app='doordash',
+                    stores=[{'name': 'Example Diner', 'door': _VOSK},
                             {'name': 'Example Taqueria', 'door': _KES}],
                     dropoffs=1, dropoffOrders=2)
         post(_plb, '/api/offers/mark', {'id': 'pl-two', 'accepted': True, 'offer': _plo})
@@ -14578,11 +14579,11 @@ try:
            [l for l in _plsaid('store 2 #' + _hid2)],
            ['pin: none store 2 #%s "street found, not that door" (4821 Kestrel Dr)'
             ' - 1 answered, 0 at the door, the nearest 1.66 mi from the centre, radius 9.2 mi '
-            '(card 8.7 mi + 0.5 slack); nearest: highway "Kestrel Drive, Marietta, Cobb "'
+            '(card 8.7 mi + 0.5 slack); nearest: highway "Kestrel Drive, Harrowen, Vosk "'
             % _hid2])
         eq('[pin said] ...and the store pinned at its first ask says nothing',
            [l for l in _pllog if 'store 1 #' + _hid2 in l], [])
-        post(_plb, '/api/held-pickup', {'holdId': _hid2, 'lat': 33.9610, 'lon': -84.5410,
+        post(_plb, '/api/held-pickup', {'holdId': _hid2, 'lat': 33.9610, 'lon': -44.5410,
                                         'q': _KES})
         eq('[pin said] ...and once when the page pins it',
            [l for l in _plsaid('pin: found store 2 #' + _hid2)],
@@ -14596,7 +14597,7 @@ try:
                                       dropoff=_KES, app='uber', screen='uber.offer')},
                        {'offer': dict(_SQ, id='pl-offer2', pay=9.0, minutes=20.0,
                                       billedMinutes=20.0, miles=5.0, cost=0.9,
-                                      dropoff='Kestrel Dr, Marietta', app='uber',
+                                      dropoff='Kestrel Dr, Harrowen', app='uber',
                                       screen='uber.offer')},
                        # ...and an Uber offer whose bracketed door the NucBox
                        # holds 3.35 mi north of the fix, past its 2.8 mi
@@ -14605,7 +14606,7 @@ try:
                        {'offer': dict(_SQ, id='pl-reach', pay=7.0, minutes=15.0,
                                       billedMinutes=15.0, miles=2.8, toPickupMiles=0.9,
                                       legs=2, cost=0.5, app='uber', screen='uber.offer',
-                                      pickup='Example Diner (1985 Cobb Parkway)')}], _fh)
+                                      pickup='Example Diner (1985 Vosk Parkway)')}], _fh)
         os.rename(os.path.join(_pldir, 'say-0.json.tmp'), os.path.join(_pldir, 'say-0.json'))
         # (The DoorDash two-store order taken above is still in the car when
         # these cards are read: one order, said beside the radius.)
@@ -14615,7 +14616,7 @@ try:
            _plsaid('#pl-offer '), ['pin: none offer end #pl-offer "street found, not that door" '
                                    '(4821 Kestrel Dr) - 1 answered, 0 at the door, the nearest '
                                    '1.66 mi from the centre, radius 5.5 mi (card 5 mi + 0.5 slack'
-                                   '%s); nearest: highway "Kestrel Drive, Marietta, Cobb "'
+                                   '%s); nearest: highway "Kestrel Drive, Harrowen, Vosk "'
                                    % _plcar])
         time.sleep(0.5)
         eq('[pin said] ...and an offer with no house number to ask says nothing',
@@ -14630,7 +14631,7 @@ try:
            ['pin: none offer pickup #pl-reach "door found 3.4 mi out, past the reach" (Example Diner '
             '(1985…) - 3 answered, 3 at the door, the nearest 3.35 mi from the centre, '
             'radius 3.3 mi (card 2.8 mi + 0.5 slack; card says 0.9 mi to the pickup%s); '
-            'nearest: place "1985, Cobb Parkway, Kennesaw, "' % _plcar])
+            'nearest: place "1985, Vosk Parkway, Tellmoor, "' % _plcar])
     finally:
         stop(_plp)
 finally:
@@ -14647,7 +14648,7 @@ ok_('[pin said] the log line never stands in a search\'s way: both sayers swallo
 # the `also` circle round that end (setAfter); an offer read before its Took
 # did not, so its pickup was searched from the car alone. server.js offerCard
 # now gives the offer the circles its Took would: here the held order ends at
-# "1985 Cobb Parkway" (pinned, 3.35 mi north of the Square), and an Uber offer
+# "1985 Vosk Parkway" (pinned, 3.35 mi north of the Square), and an Uber offer
 # read at the Square whose store is at that same door and whose 2.8 mi start
 # there — its own disc 3.3 mi, the door outside it (the [reach] line above
 # refused it so, with no end in the car). Invented, the fake's own places.
@@ -14692,14 +14693,14 @@ try:
     threading.Thread(target=lambda: [_stlog.append(l.rstrip('\n')) for l in _stp.stdout],
                      daemon=True).start()
     try:
-        _atook(_stb, 'st-held', _COBB)
+        _atook(_stb, 'st-held', _VOSK)
         _sth = _settled(_stb)
         eq('[stacked] the order in the car ends at its door, pinned', _sth.get('endPinned'), True)
         with open(os.path.join(_stdir, 'say-0.json.tmp'), 'w') as _fh:
             json.dump([{'offer': dict(_SQ, id='st-offer', pay=7.0, minutes=15.0,
                                       billedMinutes=15.0, miles=2.8, toPickupMiles=0.9,
                                       legs=2, cost=0.5, app='uber', screen='uber.offer',
-                                      pickup='Example Diner (1985 Cobb Parkway)')}], _fh)
+                                      pickup='Example Diner (1985 Vosk Parkway)')}], _fh)
         os.rename(os.path.join(_stdir, 'say-0.json.tmp'), os.path.join(_stdir, 'say-0.json'))
         _sto = {}
         for _ in range(80):
@@ -14716,12 +14717,12 @@ try:
         # miles and the slack, where the car's own disc stops at 34.01.
         _stq = []
         for _ in range(80):
-            _stq = [q for q in _stasked('street=1985%20Cobb%20Parkway') if (_stbox_n(q) or 0) > 34.04]
+            _stq = [q for q in _stasked('street=1985%20Vosk%20Parkway') if (_stbox_n(q) or 0) > 34.04]
             if _stq:
                 break
             time.sleep(0.05)
         ok_('[stacked] ...its pickup asked in the box round the held end\'s circle too (%r)'
-            % [_stbox_n(q) for q in _stasked('street=1985%20Cobb%20Parkway')], bool(_stq))
+            % [_stbox_n(q) for q in _stasked('street=1985%20Vosk%20Parkway')], bool(_stq))
         time.sleep(0.6)
         eq('[stacked] ...and not refused: the door is inside the circle round the held end, where '
            'the card\'s miles start',
@@ -14741,7 +14742,7 @@ ok_('[stacked] the offer\'s own search and the on-time hint search the card with
 #
 # server.js reachOf / discSet / reachCard / reachSaid, taken out of its source
 # into a context of their own (the file starts a server when run), over
-# invented answers round Marietta Square as the fake's own. Measurement only:
+# invented answers round Harrowen Square as the fake's own. Measurement only:
 # the last checks hold that nothing that pins or decides reads `reach`.
 _REACHJS = r'''
 var fs = require('fs'), vm = require('vm'), path = require('path');
@@ -14764,7 +14765,7 @@ vm.createContext(ctx);
 ['reachRound', 'endWhyOf', 'reachOf', 'discSet', 'reachCard', 'reachSaid'].forEach(function (n) {
   vm.runInContext(grab(n), ctx);
 });
-var SQ = { lat: 33.9526, lon: -84.5499, gpsOk: true, gpsErr: 10, gpsMode: 3, gpsAge: 0.5,
+var SQ = { lat: 33.9526, lon: -44.5499, gpsOk: true, gpsErr: 10, gpsMode: 3, gpsAge: 0.5,
            hasTotal: true, whole: true };
 function card(x) { return Object.assign({}, SQ, x || {}); }
 function at(dLat, dLon, name, kind) { return { lat: SQ.lat + dLat, lon: SQ.lon + dLon, name: name, kind: kind }; }
@@ -14794,8 +14795,8 @@ out.nodisc = ctx.reachOf(r1, far, null, door);
 out.sets = [ctx.discSet(d3), ctx.discSet(d60),
             ctx.discSet(MV.discFor({ addon: true, miles: 0.4, hasTotal: true, whole: true }, d3)),
             ctx.discSet(MV.discFor(card({ miles: 2.8, gpsOk: false, gpsWhy: 'rough', gpsErr: 80 }))),
-            ctx.discSet(MV.discFor(card({ miles: 2.8, after: [{ lat: 33.99, lon: -84.55, widen: 0 }] })))];
-out.long = ctx.reachOf(r1, [at(0.0484, 0, 'A very long display name, Faketown, Cobb County', 'shop')],
+            ctx.discSet(MV.discFor(card({ miles: 2.8, after: [{ lat: 33.99, lon: -44.55, widen: 0 }] })))];
+out.long = ctx.reachOf(r1, [at(0.0484, 0, 'A very long display name, Faketown, Vosk County', 'shop')],
                        d3, door).name;
 out.said = ctx.reachSaid(out.outside);
 out.none = [ctx.reachSaid(null), ctx.reachSaid(undefined)];
@@ -15572,11 +15573,11 @@ finally:
 _rrdir = tempfile.mkdtemp()
 _rr = os.path.join(_rrdir, 'reread.jsonl')
 _RR_CHIP = ('$9.09\nGuaranteed (incl. tip)\n$11.68 Priority included\n© 20 min (1.5 mi) total\n'
-            'Maple Grill (12 Fable Ct)\nOak Ln, Marietta')
+            'Maple Grill (12 Fable Ct)\nOak Ln, Harrowen')
 _RR_BOOST = ('Guaranteed (incl. tip)\n$1.68 Boost+ included\n© 20 min (1.5 mi) total\n'
-             'Maple Grill (12 Fable Ct)\nOak Ln, Marietta')
+             'Maple Grill (12 Fable Ct)\nOak Ln, Harrowen')
 _RR_HEAD = ('$9.09\nGuaranteed (incl. tip)\n$1.68 Boost+ included\n© 20 min (1.5 mi) total\n'
-            'Maple Grill (12 Fable Ct)\nOak Ln, Marietta')
+            'Maple Grill (12 Fable Ct)\nOak Ln, Harrowen')
 _rr_base = dict(minutes=20.0, miles=1.5, billedMinutes=20.0, cost=0.45, costPerMile=0.3,
                 target=25, band=15, legs=1)
 write(_rr, [
@@ -15838,7 +15839,7 @@ _SAY_SCREEN = ("var P = require(%r); var st = P.screenType;\n"
                "return st.apply(this, arguments); };\n" % os.path.join(ROOT, 'offer-parser.js'))
 _radir = tempfile.mkdtemp()
 _raj = os.path.join(_radir, 'offers.jsonl')
-_ratext = '$9.50\nGuaranteed (incl. tip)\n20 min (4.0 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta'
+_ratext = '$9.50\nGuaranteed (incl. tip)\n20 min (4.0 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Harrowen'
 write(_raj, [offer(i, NOW - 3600000 + i * 60000, text=_ratext) for i in range(5)])
 proc, base, _ralog = _logged({'SCANNER': '0'}, _raj, preload=_SAY_SCREEN)
 try:
@@ -15893,7 +15894,7 @@ _SAY_TOWN = ("var MV = require(%r); var tf = MV.townFor;\n"
 _tfdir = tempfile.mkdtemp()
 _tfj = os.path.join(_tfdir, 'offers.jsonl')
 write(_tfj, [offer(i, NOW - 3600000 + i * 60000, pickup='Maple Grill',
-                   dropoff=('12 Fable Ct, Marietta' if i % 2 else '7 Wren Way, Kennesaw')) for i in range(8)])
+                   dropoff=('12 Fable Ct, Harrowen' if i % 2 else '7 Wren Way, Tellmoor')) for i in range(8)])
 proc, base, _tflog = _logged({'SCANNER': '0'}, _tfj, preload=_SAY_TOWN)
 try:
     _tf1 = get(base, '/api/journal?days=1').get('targets')
@@ -16229,12 +16230,12 @@ _pfdir = tempfile.mkdtemp()
 _pfj = os.path.join(_pfdir, 'offers.jsonl')
 open(_pfj, 'w').close()
 with open(os.path.join(_pfdir, 'places.json'), 'w') as _fh:
-    json.dump({'Invented Place %d, Springfield' % _i: {'lat': 33 + _i / 1e4, 'lon': -84.0}
+    json.dump({'Invented Place %d, Springfield' % _i: {'lat': 33 + _i / 1e4, 'lon': -44.0}
                for _i in range(3000)}, _fh)
 proc, base, _pflog = _logged({'SCANNER': '0', 'HOLD_DIR': _pfdir}, _pfj, preload=_HOLD_RENAME)
 try:
     open(os.path.join(_pfdir, 'hold'), 'w').close()
-    _pft1, _pfr1 = _in_thread(post, base, '/api/places', {'New Place, Shelbyville': {'lat': 34.0, 'lon': -84.0}})
+    _pft1, _pfr1 = _in_thread(post, base, '/api/places', {'New Place, Shelbyville': {'lat': 34.0, 'lon': -44.0}})
     ok_('[forget] a save of one new place is held at its rename', _hold_saw(_pfdir, 'held'))
     _pft2, _pfr2 = _in_thread(delete, base, '/api/places')
     _pft2.join(2)

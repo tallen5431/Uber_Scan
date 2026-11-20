@@ -126,7 +126,7 @@ def shop_screen(pal=LIGHT):
     d.text((46, top + 240), 'Guaranteed (incl. tip)', font=font(32, False), fill=pal['sub'])
     d.text((66, top + 320), '6 items (6 units)', font=font(40), fill=pal['fg'])
     d.text((66, top + 390), '34 min (3.6 mi) total', font=font(40), fill=pal['fg'])
-    d.text((66, top + 466), 'Dollar General (925 Shiloh Rd Nw)', font=font(32, False), fill=pal['sub'])
+    d.text((66, top + 466), 'Dollar General (925 Merlah Rd Nw)', font=font(32, False), fill=pal['sub'])
     d.rounded_rectangle([46, top + 600, W - 46, top + 710], radius=26, fill=(20, 120, 60))
     d.text((440, top + 630), 'Accept', font=font(42), fill=(255, 255, 255))
     return _bgr(im)
@@ -178,7 +178,7 @@ def doordash_screen(pal=LIGHT, pay='$41.11', miles='9.8', by='7:15 PM',
 # planner the rig photographed, with the name and the house invented. `where` is
 # (street, town line), or None for a block the driver has not opened.
 PLANNER_STOPS = [('Dropoff • 1 order', 'Pat Q.', 'Expected by 4:18 PM',
-                  ('4821 Kestrel Dr', 'Marietta, GA'))]
+                  ('4821 Kestrel Dr', 'Harrowen, GA'))]
 
 
 def planner_screen(pal=LIGHT, stops=PLANNER_STOPS):
@@ -300,9 +300,9 @@ def _screen(pal, nav):
 # at the top (the turn, then the stop's lines in white), the map, the speed
 # limit and the bar under it — the layout of the owner's snaps of 12 Nov, the
 # places invented. pipeline.read_nav_banner reads the banner.
-NAV_DOOR = ('Fable Mill Rd', '2716 Larkspur Ln', 'Marietta, GA')
+NAV_DOOR = ('Fable Mill Rd', '2716 Larkspur Ln', 'Harrowen, GA')
 NAV_STORE = ('Turn right', 'Fable Sushi (Fable Pkwy)', '4400 Fable Pkwy,',
-             'Woodstock, GA 30188')
+             'Marrowick, GA 90788')
 
 
 def nav_banner_screen(banner=NAV_DOOR, bar='Deliver to Pat Q.'):
@@ -326,8 +326,8 @@ def nav_banner_screen(banner=NAV_DOOR, bar='Deliver to Pat Q.'):
 EXCLUSIVE_ROWS = [(120, '$4.21', 86, True, False),
                   (235, 'Guaranteed (incl. tip)', 32, False, True),
                   (305, '23 min (5.2 mi) total', 40, True, False),
-                  (380, "McDonald's (2500 Cobb Pkwy)", 32, False, True),
-                  (430, 'Oak Rd, Marietta', 32, False, True)]
+                  (380, "McDonald's (2500 Vosk Pkwy)", 32, False, True),
+                  (430, 'Oak Rd, Harrowen', 32, False, True)]
 
 
 def exclusive_screen(pal=NIGHT_CARD, nav=False, pay='$4.21'):
@@ -347,10 +347,10 @@ def early_rows(pay='$14.48', by='4:15 PM', miles='8.6'):
             (190, pay, 86, True, False),
             (305, 'Includes expected tip', 32, False, True),
             (375, 'Est. delivery %s • %s mi' % (by, miles), 40, True, False),
-            (450, "Dave's Hot Chicken (1985 Cobb", 32, False, True),
+            (450, "Dave's Hot Chicken (1985 Vosk", 32, False, True),
             (495, 'Parkway NW, STE 100)', 32, False, True),
-            (560, 'Foothill Trl & Northwoods Dr,', 32, False, True),
-            (605, 'Marietta', 32, False, True),
+            (560, 'Foothill Trl & Farrowdene Dr,', 32, False, True),
+            (605, 'Harrowen', 32, False, True),
             (680, 'Matching may take longer', 32, False, True)]
 
 
@@ -385,13 +385,13 @@ def two_order_screen(pal=NIGHT_CARD, nav=False):
         (40, 'Early look • 2 orders', 34, False, True),
         (190, '$18.52', 86, True, False),
         (305, 'Includes expected tip', 32, False, True),
-        (375, 'Chipotle (3625 Dallas Hwy)', 32, False, True),
-        (425, 'Panda Express (3605 Dallas Hwy)', 32, False, True),
+        (375, 'Chipotle (3625 Dorvan Hwy)', 32, False, True),
+        (425, 'Panda Express (3605 Dorvan Hwy)', 32, False, True),
         (520, 'Est. delivery 4:40 PM • 11.2 mi', 40, True, False),
-        (595, 'Burnt Hickory Rd &', 32, False, True),
-        (640, 'Old Mountain Rd, Marietta', 32, False, True),
-        (710, 'Sandtown Rd & Sandy Plains,', 32, False, True),
-        (755, 'Marietta', 32, False, True),
+        (595, 'Black Hickory Rd &', 32, False, True),
+        (640, 'Old Mountain Rd, Harrowen', 32, False, True),
+        (710, 'Silttown Rd & Loamy Plains,', 32, False, True),
+        (755, 'Harrowen', 32, False, True),
         (830, 'Matching may take longer', 32, False, True)], d)
     _bar(pal, bottom, d, 'Match', 'match')
     return _bgr(im)
@@ -412,7 +412,7 @@ def stacked_screen(pal=NIGHT_CARD, nav=False):
         (120, '$6.50', 86, True, False),
         (235, 'Guaranteed (incl. tip)', 32, False, True),
         (305, '12 min (3.1 mi) total', 40, True, False),
-        (380, "Wendy's (55 Roswell St)", 32, False, True)], d)
+        (380, "Wendy's (55 Ruswold St)", 32, False, True)], d)
     d.line([(CARD_MARGIN + 30, EARLY_TOP - 20), (W - CARD_MARGIN - 30, EARLY_TOP - 20)],
            fill=pal['rule'], width=3)
     _chip(pal, CARD_MARGIN + 42, EARLY_TOP + 100, 'Delivery', d)

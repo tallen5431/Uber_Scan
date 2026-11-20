@@ -14,8 +14,8 @@
      - the no-lookahead rule. A table scored against the same rows it was built
        from answers every question it has already been given, and would report
        near-total coverage on any journal at all.
-     - the direction of a leg. "Have I driven Marietta to Kennesaw before" must
-       not be answered by a Kennesaw-to-Marietta run, nor by one that happened
+     - the direction of a leg. "Have I driven Harrowen to Tellmoor before" must
+       not be answered by a Tellmoor-to-Harrowen run, nor by one that happened
        AFTER the moment being asked about.
 
    The place shapes are asserted against the shared corpus rather than against
@@ -39,18 +39,18 @@ function ok(name, cond) { eq(name, !!cond, true); }
 /* --- what shape the real cards name ------------------------------------- */
 
 eq('an intersection of two streets is a junction',
-   M.shapeOf('Lakeview Ter & Windmill Dr, Dallas'), 'junction');
+   M.shapeOf('Lakeview Ter & Windmill Dr, Dorvan'), 'junction');
 eq('a street with a town is a street+town',
-   M.shapeOf('Canton Rd, Marietta'), 'street+town');
+   M.shapeOf('Belvan Rd, Harrowen'), 'street+town');
 eq('a merchant with a branch in brackets is a merchant',
-   M.shapeOf('Zaxbys (Old 41 Hwy)'), 'merchant');
+   M.shapeOf('Zaxbys (Old 88 Hwy)'), 'merchant');
 eq('a bare merchant name is a merchant',
    M.shapeOf('Buffalo Wild Wings'), 'merchant');
 // The one shape that would need a geocoder rather than a lookup. It appears
 // only on the screen AFTER the accept, which is the whole reason the dropoff
 // scan exists — so finding one among the offer cards would change the answer.
 eq('a door number is called a house number',
-   M.shapeOf('1234 Daffodil Ln, Powder Springs'), 'house number');
+   M.shapeOf('1234 Daffodil Ln, Gorrel Springs'), 'house number');
 eq('nothing is nothing', M.shapeOf(''), 'nothing');
 eq('a missing place is nothing', M.shapeOf(null), 'nothing');
 
@@ -77,17 +77,17 @@ ok('and most of them are a junction or a street with a town ('
 
 /* --- how finely a place can be pinned ----------------------------------- */
 
-eq('a town alone keys as its town', M.keyOf('Canton Rd, Marietta', 'town'), 'marietta');
+eq('a town alone keys as its town', M.keyOf('Belvan Rd, Harrowen', 'town'), 'harrowen');
 eq('a quadrant sharpens the key',
-   M.keyOf('Cobb Pkwy NW, Kennesaw', 'town+quadrant'), 'kennesaw NW');
+   M.keyOf('Vosk Pkwy NW, Tellmoor', 'town+quadrant'), 'tellmoor NW');
 eq('...but not at town grain',
-   M.keyOf('Cobb Pkwy NW, Kennesaw', 'town'), 'kennesaw');
+   M.keyOf('Vosk Pkwy NW, Tellmoor', 'town'), 'tellmoor');
 eq('a place with no town has no town key',
    M.keyOf('Buffalo Wild Wings', 'town'), null);
 eq('a scanned address reports its ZIP as the finest grain',
-   M.grainOf('1234 Daffodil Ln, Powder Springs, GA 30127'), 'zip');
+   M.grainOf('1234 Daffodil Ln, Gorrel Springs, GA 90727'), 'zip');
 eq('a street and town alone is coarser',
-   M.grainOf('Canton Rd, Marietta'), 'town only');
+   M.grainOf('Belvan Rd, Harrowen'), 'town only');
 eq('and a merchant is nowhere at all', M.grainOf('Buffalo Wild Wings'), 'nowhere');
 
 /* --- the legs a journal holds -------------------------------------------- */
@@ -96,7 +96,7 @@ function offer(over) {
   return Object.assign({
     id: 'o' + Math.random().toString(36).slice(2, 8),
     at: 1000, pay: 12, minutes: 20, cost: 1, whole: true,
-    pickup: 'Cobb Pkwy, Kennesaw', dropoff: 'Canton Rd, Marietta', miles: 8,
+    pickup: 'Vosk Pkwy, Tellmoor', dropoff: 'Belvan Rd, Harrowen', miles: 8,
   }, over);
 }
 
@@ -108,7 +108,7 @@ var sampleLegs = M.legs([
 eq('every placed card with a distance is a leg', sampleLegs.length, 3);
 eq('...in the order they happened, whatever order they arrived in',
    sampleLegs.map(function (l) { return l.at; }), [1000, 2000, 3000]);
-eq('...keyed from one end to the other', sampleLegs[0].pair, 'kennesaw → marietta');
+eq('...keyed from one end to the other', sampleLegs[0].pair, 'tellmoor → harrowen');
 
 eq('a card with no dropoff is not a leg',
    M.legs([offer({ dropoff: null })], 'town').length, 0);
@@ -118,7 +118,7 @@ eq('a card with no distance worth the name is not a leg',
    M.legs([offer({ miles: 0 })], 'town').length, 0);
 // Both ends in one town measures nothing about the road between two towns.
 eq('a card that starts and ends in one town is not a leg',
-   M.legs([offer({ pickup: 'A St, Kennesaw', dropoff: 'B Rd, Kennesaw' })], 'town').length, 0);
+   M.legs([offer({ pickup: 'A St, Tellmoor', dropoff: 'B Rd, Tellmoor' })], 'town').length, 0);
 eq('a merchant pickup cannot be placed, so it is not a leg',
    M.legs([offer({ pickup: 'Buffalo Wild Wings' })], 'town').length, 0);
 
@@ -187,19 +187,19 @@ eq('a pair driven twice is not enough to judge it',
 // minutes into it. That is a stack, and it is the only situation any of this
 // would ever speak in.
 var HELD = offer({ id: 'held', at: 1000000, minutes: 30, accepted: true,
-                   pickup: 'Shop St, Acworth', dropoff: 'Canton Rd, Marietta' });
+                   pickup: 'Shop St, Ivyhame', dropoff: 'Belvan Rd, Harrowen' });
 var ARRIVING = offer({ id: 'next', at: 1000000 + 600000, accepted: undefined,
-                       pickup: 'Cobb Pkwy, Kennesaw', dropoff: 'Main St, Dallas' });
+                       pickup: 'Vosk Pkwy, Tellmoor', dropoff: 'Main St, Dorvan' });
 
 var alone = M.stackMoments([HELD, ARRIVING], 'town', []);
 eq('an offer arriving inside a ticked order is a stack moment', alone.moments, 1);
 eq('...with both of the ends that matter placed', alone.bothEnds, 1);
 eq('...and nothing driven before, so nothing could be said', alone.covered, 0);
 
-// The leg that would answer it — Marietta, where the held order ends, to
-// Kennesaw, where the new one starts — driven earlier.
+// The leg that would answer it — Harrowen, where the held order ends, to
+// Tellmoor, where the new one starts — driven earlier.
 var EARLIER = offer({ id: 'earlier', at: 500000,
-                      pickup: 'Canton Rd, Marietta', dropoff: 'Cobb Pkwy, Kennesaw' });
+                      pickup: 'Belvan Rd, Harrowen', dropoff: 'Vosk Pkwy, Tellmoor' });
 var helped = M.stackMoments([EARLIER, HELD, ARRIVING], 'town',
                             M.legs([EARLIER, HELD, ARRIVING], 'town'));
 eq('a leg driven earlier answers the moment', helped.covered, 1);
@@ -207,16 +207,16 @@ eq('a leg driven earlier answers the moment', helped.covered, 1);
 // ...and the same leg driven AFTERWARDS does not. This is the second half of
 // the no-lookahead rule and it is the one that would be easiest to lose.
 var LATER = offer({ id: 'later', at: 9000000,
-                    pickup: 'Canton Rd, Marietta', dropoff: 'Cobb Pkwy, Kennesaw' });
+                    pickup: 'Belvan Rd, Harrowen', dropoff: 'Vosk Pkwy, Tellmoor' });
 var notYet = M.stackMoments([HELD, ARRIVING, LATER], 'town',
                             M.legs([HELD, ARRIVING, LATER], 'town'));
 eq('a leg driven later does not answer a moment that came first',
    notYet.covered, 0);
 
-// The direction matters: driving Kennesaw to Marietta is not evidence about
-// Marietta to Kennesaw when one of them is one-way round a lake.
+// The direction matters: driving Tellmoor to Harrowen is not evidence about
+// Harrowen to Tellmoor when one of them is one-way round a lake.
 var BACKWARDS = offer({ id: 'back', at: 500000,
-                        pickup: 'Cobb Pkwy, Kennesaw', dropoff: 'Canton Rd, Marietta' });
+                        pickup: 'Vosk Pkwy, Tellmoor', dropoff: 'Belvan Rd, Harrowen' });
 var wrongWay = M.stackMoments([BACKWARDS, HELD, ARRIVING], 'town',
                               M.legs([BACKWARDS, HELD, ARRIVING], 'town'));
 eq('a leg driven the other way round does not answer it', wrongWay.covered, 0);
@@ -231,7 +231,7 @@ eq('an order that was never ticked was never in the car',
    M.stackMoments([UNTICKED, ARRIVING], 'town', []).moments, 0);
 // Both ends in the same place needs no table at all.
 var SAME = offer({ id: 'same', at: 1000000 + 600000, accepted: undefined,
-                   pickup: 'Other Rd, Marietta', dropoff: 'X St, Dallas' });
+                   pickup: 'Other Rd, Harrowen', dropoff: 'X St, Dorvan' });
 eq('a pickup in the town the order already ends in is covered outright',
    M.stackMoments([HELD, SAME], 'town', []).covered, 1);
 

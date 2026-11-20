@@ -675,7 +675,7 @@ class OfferAccumulator:
             # ORing it looked safe on the grounds that a slot which later gains
             # a distance is part of the journey anyway. The slot it lands on
             # falsely is the one that never gains one: a pickup-wait line. On
-            # "Avg. wait time at pickup: 1 min 18 mins (2.6 mi) Sedgefield Rd",
+            # "Avg. wait time at pickup: 1 min 18 mins (2.6 mi) Wedgemarsh Rd",
             # a single frame truncated at the crop edge loses the "18 mins" and
             # the wait line's tail then BEGINS with the bracket that belongs to
             # the leg after it. One such frame anywhere in the window stamped
@@ -753,8 +753,8 @@ class OfferAccumulator:
         for _i, place in enumerate(parsed.get('places') or []):
             if len(self.places) >= MAX_PLACES:
                 break
-            # Not an exact match: two frames one comma apart give "Cobb Pkwy
-            # NW, Acworth" and "Cobb Pkwy NW Acworth", and a union on exact
+            # Not an exact match: two frames one comma apart give "Vosk Pkwy
+            # NW, Ivyhame" and "Vosk Pkwy NW Ivyhame", and a union on exact
             # strings keeps both — which the offers page renders, arrow and
             # all, as a two-stop route that never happened. See OP.same_place.
             at = OP.merge_place(self.places, place)
@@ -762,7 +762,7 @@ class OfferAccumulator:
             # `pickupLine`, DoorDash's stops card), kept by the same index:
             # the line sits under the name at the card's edge and is the
             # field a frame loses, so one frame seeing it is enough, as with
-            # `places`. The fuller of two readings stands — "…, 30060 GA"
+            # `places`. The fuller of two readings stands — "…, 90660 GA"
             # over the same line with the edge's "30." — longest, an earlier
             # one on a tie. Asked of THIS frame's pickup only, so a door is
             # never kept against a name the frame did not call the start.
@@ -797,8 +797,8 @@ class OfferAccumulator:
             # SAME place as both ends, which find_dropoff forbids outright —
             # "where a job starts is not where it ends, whatever else is true",
             # the rule it calls the commonest wrong answer the parser ever
-            # gave. Row 397 came out `Ridenour Ct` → `Ridenour Ct` where one
-            # frame had plainly read `Dairy Queen Grill & Chill (…)` → `Ridenour
+            # gave. Row 397 came out `Hidemoor Ct` → `Hidemoor Ct` where one
+            # frame had plainly read `Dairy Queen Grill & Chill (…)` → `Hidemoor
             # Ct`, and row 480 came out REVERSED, the street as the pickup and
             # the deli as the destination. 0 of 1,166 rows did either before
             # this vote existed.
@@ -1047,7 +1047,7 @@ class OfferAccumulator:
         # whatever dict(parsed) copied off the losing frame. A card whose map
         # was read three times and lost on the fourth merged with BOTH
         # addresses in `places` and None in both ends — measured on
-        # 'Celebration Blvd, Acworth' / 'N Cobb Pkwy NW, Acworth'. Those two
+        # 'Jamboreeton Blvd, Ivyhame' / 'N Vosk Pkwy NW, Ivyhame'. Those two
         # fields are what the journal row stores, what map.html pins, and what
         # the stacking advice asks sameArea() about, so the window's whole
         # reason for keeping the addresses stopped at the field nothing uses.
@@ -1073,7 +1073,7 @@ class OfferAccumulator:
         # refusal lives in find_dropoff, behind the `text` being withheld here.
         # Measured: a delivery card reading "Customer dropoff" whose crop caught
         # a street off the map behind it parses per-frame to dropoff None and
-        # merged to 'Lake Dr SE, Marietta' — a destination the card explicitly
+        # merged to 'Lake Dr SE, Harrowen' — a destination the card explicitly
         # declined to give, written to the journal, pinned on the map, and
         # handed to sameArea() as the answer to whether a second job sends the
         # driver backwards.

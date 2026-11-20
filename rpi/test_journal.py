@@ -119,8 +119,8 @@ eq('...and it is bounded, because a bad crop reads half the map as well',
 LONG_CARD = (
     "| UR jiedmont Park a ; y ees ae ave ied nA SS S ANKHEAD : ' ; - CCE "
     "CiGem Exclusive x i + $11.42 Guaranteed (incl. tip) 14 min (2.0 mi) "
-    "total Taco Bell (930 Spring Street) I Ivan Allen Jr Blvd NW & Spring "
-    "St NW, Atlanta Avg. wait time at pickup: 3 min Accept Decline")
+    "total Taco Bell (930 Spring Street) I Evan Oller Jr Blvd NW & Spring "
+    "St NW, Solvane Avg. wait time at pickup: 3 min Accept Decline")
 long_log = fresh('long.jsonl')
 feed(long_log, [LONG_CARD] * 3)
 long_kept = (long_log.journal.rows()[0] if long_log.journal.rows() else {}).get('text') or ''
@@ -140,7 +140,7 @@ eq('...and the cap keeps one whole rather than cutting its addresses off',
 LINED = ('$8.40 Guaranteed (incl. tip)\n'
          '2.4 mi \u00b7 20 min\n'
          'Pickup McDonald\'s\n'
-         'Cobb Pkwy NW, Acworth')
+         'Vosk Pkwy NW, Ivyhame')
 lines_log = fresh('lines.jsonl')
 feed(lines_log, [LINED] * 3)
 lined = (lines_log.journal.rows() or [{}])[-1]
@@ -448,8 +448,8 @@ after.journal.append({'v': 1, 'kind': 'planner', 'id': 'planner-1700000007000',
                       'seq': 1, 'at': JR.now_ms(), 'asked': True,
                       'stops': [{'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.',
                                  'expectedBy': 978, 'street': '4821 Kestrel Dr',
-                                 'city': 'Marietta', 'state': 'GA', 'zip': None,
-                                 'line': '4821 Kestrel Dr, Marietta'}]})
+                                 'city': 'Harrowen', 'state': 'GA', 'zip': None,
+                                 'line': '4821 Kestrel Dr, Harrowen'}]})
 eq('a Trip Planner row last in the file is not the last offer',
    (after.journal.last() or {}).get('pay'), 12.45)
 # ...and a pickup visit (server.js markVisited), the newest kind of all.
@@ -571,10 +571,10 @@ eq('...and every row written is still readable somewhere',
 # real shift's 121 rows go through it. A reading that had lost the map to glare
 # therefore superseded a row that had the address with one that did not — and
 # the superseding row is the newest, which is the one every reader takes.
-WITH = ('UberX $12.45 5 min (1.2 mi) away Chastain Rd NW, Kennesaw '
-        '23 min (8.4 mi) trip Canton Rd, Marietta')
+WITH = ('UberX $12.45 5 min (1.2 mi) away Morvaine Rd NW, Tellmoor '
+        '23 min (8.4 mi) trip Belvan Rd, Harrowen')
 WITHOUT = '$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip'
-WHERE = ['Chastain Rd NW, Kennesaw', 'Canton Rd, Marietta']
+WHERE = ['Morvaine Rd NW, Tellmoor', 'Belvan Rd, Harrowen']
 
 log = fresh('places.jsonl')
 acc = OfferAccumulator()
@@ -829,10 +829,10 @@ shutil.rmtree(_endwork, ignore_errors=True)
 # against. Derived from the row's own `places` so a trimmed list stays honest.
 _ends = JR.row_for(
     P.parse("Exclusive x $11.88 Guaranteed (incl. tip) 35 min (17.9 mi) total "
-            "| Mellow Mushroom (Acworth) \\ Lakeview Ter & Windmill Dr, Dallas"),
+            "| Mellow Mushroom (Ivyhame) \\ Lakeview Ter & Windmill Dr, Dorvan"),
     {'ready': True, 'state': 'no'}, at=1000)
-eq('a row names the shop it starts at', _ends['pickup'], 'Mellow Mushroom (Acworth)')
-eq('...and the door it ends at', _ends['dropoff'], 'Lakeview Ter & Windmill Dr, Dallas')
+eq('a row names the shop it starts at', _ends['pickup'], 'Mellow Mushroom (Ivyhame)')
+eq('...and the door it ends at', _ends['dropoff'], 'Lakeview Ter & Windmill Dr, Dorvan')
 
 _shoponly = JR.row_for(
     P.parse("$15.60 Guaranteed (incl. tips) 7.9 mi + 37 min @ Retail pickup GoPuff (Drive)"),
@@ -848,7 +848,7 @@ eq('an add-on\'s row says it is one, and an ordinary card\'s row is silent',
 
 _trimmed = JR.row_for(
     P.parse("Exclusive x $11.88 Guaranteed (incl. tip) 35 min (17.9 mi) total "
-            "| Mellow Mushroom (Acworth) \\ Lakeview Ter & Windmill Dr, Dallas"),
+            "| Mellow Mushroom (Ivyhame) \\ Lakeview Ter & Windmill Dr, Dorvan"),
     {'ready': True, 'state': 'no'}, at=1000, places=[])
 eq('...and a row whose places were trimmed away records neither',
    (_trimmed['pickup'], _trimmed['dropoff']), (None, None))
@@ -856,17 +856,17 @@ eq('...and a row whose places were trimmed away records neither',
 # ...and the card's own LAYOUT decides the two ends when it stated one, which
 # is the fix for a list that is in the order the FRAMES arrived rather than the
 # order of the journey. See OP.place_ends.
-_LAID_OUT = ("$14.03\n9 min (3.4 mi)\nCobb Pkwy NW, Acworth\n"
-             "21 mins (9.2 mi)\nCanton Rd, Marietta\n")
+_LAID_OUT = ("$14.03\n9 min (3.4 mi)\nVosk Pkwy NW, Ivyhame\n"
+             "21 mins (9.2 mi)\nBelvan Rd, Harrowen\n")
 _laid = P.parse(_LAID_OUT)
-_laid['places'] = ['Canton Rd, Marietta', 'Cobb Pkwy NW, Acworth']
+_laid['places'] = ['Belvan Rd, Harrowen', 'Vosk Pkwy NW, Ivyhame']
 _laid['placeEnds'] = [1, 0]
 _row_laid = JR.row_for(_laid, {'ready': True, 'state': 'no'}, at=1000,
-                       places=['Canton Rd, Marietta', 'Cobb Pkwy NW, Acworth'])
+                       places=['Belvan Rd, Harrowen', 'Vosk Pkwy NW, Ivyhame'])
 eq('the stored row does not take the first entry for the pickup',
-   _row_laid['pickup'], 'Cobb Pkwy NW, Acworth')
+   _row_laid['pickup'], 'Vosk Pkwy NW, Ivyhame')
 eq('...nor the last for the destination',
-   _row_laid['dropoff'], 'Canton Rd, Marietta')
+   _row_laid['dropoff'], 'Belvan Rd, Harrowen')
 
 # The guard on that, which is the one clause here a real shift can reach and a
 # corpus cannot. `places` is allowed to be the CALLER'S list rather than the
@@ -876,12 +876,12 @@ eq('...nor the last for the destination',
 # somebody else's name, so it is used only when the two lists are the same list.
 _row_stale = JR.row_for(
     _laid, {'ready': True, 'state': 'no'}, at=1000,
-    places=['Someone Elses St, Acworth', 'Canton Rd, Marietta',
-            'Cobb Pkwy NW, Acworth'])
+    places=['Someone Elses St, Ivyhame', 'Belvan Rd, Harrowen',
+            'Vosk Pkwy NW, Ivyhame'])
 eq('a longer list than the reading describes does not borrow its ends',
-   _row_stale['pickup'], 'Someone Elses St, Acworth')
+   _row_stale['pickup'], 'Someone Elses St, Ivyhame')
 eq('...and the older rules choose the destination for it too',
-   _row_stale['dropoff'], 'Cobb Pkwy NW, Acworth')
+   _row_stale['dropoff'], 'Vosk Pkwy NW, Ivyhame')
 
 # --- how much of the journey was getting to the work ------------------------
 #
@@ -894,8 +894,8 @@ eq('...and the older rules choose the destination for it too',
 # Nothing can put this back for a row already written, which is why it is
 # checked at the row rather than only at the parser: the parser reading it and
 # the journal dropping it is exactly the state this was in.
-_split = a_row('UberX $12.45 5 min (1.2 mi) away Old 41 Hwy NW, Kennesaw '
-               '23 min (8.4 mi) trip Celebration Blvd, Acworth')
+_split = a_row('UberX $12.45 5 min (1.2 mi) away Old 88 Hwy NW, Tellmoor '
+               '23 min (8.4 mi) trip Jamboreeton Blvd, Ivyhame')
 eq('the row keeps the whole journey the card stated',
    (_split['minutes'], _split['miles']), (28.0, 9.6))
 eq('...and how much of it was the drive to the pickup',
@@ -910,7 +910,7 @@ eq('...so what is left is the job itself',
 # the approach vanish into the job, which is a confident wrong distance between
 # two places rather than an absent one.
 _whole_total = a_row('Shop & Deliver $7.09 6 items 34 min (3.6 mi) total '
-                     'Five Guys (3450 Cobb Pkwy. NW)')
+                     'Five Guys (3450 Vosk Pkwy. NW)')
 eq('a card that never split its journey records no split',
    (_whole_total['toPickupMinutes'], _whole_total['toPickupMiles']), (None, None))
 ok_('...while still recording the journey itself',
@@ -1204,11 +1204,11 @@ _CARD = ('Delivery\n$8.83\n23 min (4.6 mi) total\nPickup\n'
 _parsed = P.parse(_CARD)
 _rate = P.rate(_parsed, MONEY)
 
-_fix = {'lat': 34.011700123, 'lon': -84.610499876, 'ageSeconds': 1.24,
+_fix = {'lat': 34.011700123, 'lon': -44.610499876, 'ageSeconds': 1.24,
         'source': 'gpsd'}
 _row = JR.row_for(_parsed, _rate, at=1_700_000_000_000, offer_id='g1', seq=1,
                   where=_fix)
-eq('a fix reaches the row', (_row['lat'], _row['lon']), (34.0117, -84.6105))
+eq('a fix reaches the row', (_row['lat'], _row['lon']), (34.0117, -44.6105))
 eq('...rounded to about a metre, not stored to fourteen places',
    _row['lat'], round(34.011700123, 5))
 eq('...and how old the fix was is kept with it', _row['gpsAge'], 1.2)
@@ -1217,7 +1217,7 @@ eq('...and how old the fix was is kept with it', _row['gpsAge'], 1.2)
 # has to say so rather than claim a place.
 for _name, _absent in (('no GPS configured at all', None),
                        ('a phone that answered nothing', {}),
-                       ('a fix with no latitude', {'lon': -84.6}),
+                       ('a fix with no latitude', {'lon': -44.6}),
                        # Half a coordinate is not half a position. A `lat` on
                        # its own is the shape a reader tests for before drawing
                        # a pin, so it has to be absent rather than lonely.
@@ -1227,7 +1227,7 @@ for _name, _absent in (('no GPS configured at all', None),
                        ('a fix whose latitude is a boolean',
                         {'lat': True, 'lon': True}),
                        ('a fix whose latitude is a string',
-                        {'lat': '34.0', 'lon': '-84.6'}),
+                        {'lat': '34.0', 'lon': '-44.6'}),
                        # An age with no position to attach it to. The age is
                        # only meaningful as "how old is THIS pin"; on its own it
                        # is a number in a column that reads as a GPS having
@@ -1244,10 +1244,10 @@ for _name, _absent in (('no GPS configured at all', None),
     eq('...and without any of the fix\'s other fields',
        [_r[k] for k in JR.FIX_FIELDS], [None] * len(JR.FIX_FIELDS))
 
-# What the fix says about itself, and the gate's answer, beside it. Marietta
+# What the fix says about itself, and the gate's answer, beside it. Harrowen
 # Square: a public place. 27.8 m is the owner's receiver indoors; 129.2 m is a
 # four-satellite mode-3 fix real gpsd produced.
-_good = {'lat': 33.9526, 'lon': -84.5499, 'ageSeconds': 1.24, 'mode': 3,
+_good = {'lat': 33.9526, 'lon': -44.5499, 'ageSeconds': 1.24, 'mode': 3,
          'err': 27.8, 'ok': True, 'why': None, 'source': 'gpsd'}
 _r = JR.row_for(_parsed, _rate, at=1_700_000_000_000, offer_id='g4', seq=1,
                 where=_good)
@@ -1263,7 +1263,7 @@ eq('a refused fix is still written, with why it was refused',
 # The gate is gps.usable() and nothing here repeats it: a dict that never went
 # through gps.Phone carries no answer, and nobody may draw or compare from it.
 _r = JR.row_for(_parsed, _rate, at=1_700_000_000_000, offer_id='g6', seq=1,
-                where={'lat': 33.9526, 'lon': -84.5499, 'mode': 3, 'err': 5.0,
+                where={'lat': 33.9526, 'lon': -44.5499, 'mode': 3, 'err': 5.0,
                        'ageSeconds': 1.0})
 eq('a fix nobody judged is written as not usable, not judged here',
    (_r['gpsOk'], _r['gpsWhy']), (False, None))
@@ -1305,7 +1305,7 @@ _landed = _gps_log.consider(_p1, P.rate(_p1, MONEY), now=1_700_000_000.0,
 ok_('the log writes a row with the fix on it', _landed is not None)
 if _landed:
     eq('...carrying the position', (_landed['lat'], _landed['lon']),
-       (34.0117, -84.6105))
+       (34.0117, -44.6105))
 
 # ...and the same log, a later card, with the phone gone quiet. The position
 # must not persist: OfferLog holds an identity across readings of one card, and
@@ -1341,10 +1341,10 @@ ok_('the same reading again is superseded by a settled row',
     _settled_row is not None and _settled_row.get('settled') is True)
 if _settled_row:
     eq('...and that row carries the position as well',
-       (_settled_row['lat'], _settled_row['lon']), (34.0117, -84.6105))
+       (_settled_row['lat'], _settled_row['lon']), (34.0117, -44.6105))
 _up_rows = _up_log.journal.rows()
 eq('...as the last row of the id, which is the one a reader keeps',
-   (_up_rows[-1]['lat'], _up_rows[-1]['lon']), (34.0117, -84.6105))
+   (_up_rows[-1]['lat'], _up_rows[-1]['lon']), (34.0117, -44.6105))
 shutil.rmtree(_up_dir, ignore_errors=True)
 
 shutil.rmtree(_gps_dir, ignore_errors=True)
@@ -1381,7 +1381,7 @@ for _why, _blank in (('empty', ''), ('whitespace', '  \n\t '),
     eq('a screen that read as %s is not recorded' % _why,
        _sc_log.note_screen(_blank, now=1_700_000_005.0), None)
 
-_nav = ('3.2 mi\nI-75 S toward 14th St\n65 LIMIT\n'
+_nav = ('3.2 mi\nI-98 S toward 14th St\n65 LIMIT\n'
         '8 min 4.8 mi\nDeliver to Daria I.')
 _sc_row = _sc_log.note_screen(_nav, now=1_700_000_008.0)
 ok_('the screen after it is recorded', _sc_row is not None)
@@ -1533,8 +1533,8 @@ if _sc_mrow:
        _sc_mrow.get('after'), _sc_m['id'])
 
 # What the frame named is RECORDED, not acted on. An Uber navigation screen
-# names its destination the way a card names a shop — `BCG Atlanta / 1075
-# Peachtree St NE Ste 3800, Atlanta, GA` off the screenshot this was built from
+# names its destination the way a card names a shop — `BCG Solvane / 1075
+# Plumleigh St NE Ste 3800, Solvane, GA` off the screenshot this was built from
 # — so refusing a frame for naming a place would throw away exactly the screens
 # worth collecting, and trusting one would be the recogniser this must not
 # invent. The row carries it and whoever builds the detector partitions on it.
@@ -1544,13 +1544,13 @@ ok_('a card lands ahead of a screen that names somewhere',
                        P.rate(P.parse(_CARD), MONEY), now=1_700_006_000.0,
                        locked=True, settled=False) is not None)
 _sc_nrow = _sc_named.note_screen(
-    'BCG Atlanta\n1075 Peachtree St NE Ste 3800, Atlanta, GA\nDeliver to Ann',
-    places=['BCG Atlanta', '1075 Peachtree St NE Ste 3800, Atlanta, GA'],
+    'BCG Solvane\n1075 Plumleigh St NE Ste 3800, Solvane, GA\nDeliver to Ann',
+    places=['BCG Solvane', '1075 Plumleigh St NE Ste 3800, Solvane, GA'],
     now=1_700_006_006.0)
 ok_('a screen that names somewhere is still recorded', _sc_nrow is not None)
 if _sc_nrow:
     eq('...with what it named written onto the row', _sc_nrow.get('places'),
-       ['BCG Atlanta', '1075 Peachtree St NE Ste 3800, Atlanta, GA'])
+       ['BCG Solvane', '1075 Plumleigh St NE Ste 3800, Solvane, GA'])
 
 # ONE ROW PER CARD, and a card does not write one row — it writes one per
 # reading that improves on the last, plus a settled upgrade. Both append paths
@@ -1561,7 +1561,7 @@ if _sc_nrow:
 _sc_many = JR.OfferLog(JR.Journal(os.path.join(_sc_dir, 'many.jsonl')))
 _sc_macc = OfferAccumulator()
 _LEGS = ('Delivery\n$12.40\n8 min (2.1 mi)\nZaxbys\n'
-         '19 min (6.0 mi)\nCanton Rd, Marietta')
+         '19 min (6.0 mi)\nBelvan Rd, Harrowen')
 _m1 = _sc_macc.add(P.parse(_CARD), now=1_700_007_000.0)
 ok_('the card lands once',
     _sc_many.consider(_m1, P.rate(_m1, MONEY), now=1_700_007_000.0,
@@ -1660,14 +1660,14 @@ shutil.rmtree(_sc_dir, ignore_errors=True)
 # times on the owner's week. The parser now refuses the bonus as a payout, so
 # the loop writes no offer for it, and this is the row it writes instead —
 # collected, synced, read by nothing. Verbatim frames of rows 565 and 806.
-_PROMO = ('GA: Marietta North\nSwitch to this zone\nwith peak pay!\n'
+_PROMO = ('GA: Harrowen North\nSwitch to this zone\nwith peak pay!\n'
           '+$1.00/order until 8:20 PM\nAvg. offer wait\n1min\nDon\'t switch')
 # The same prompt, read again: a different text with the same bonus on it.
-_PROMO_AGAIN = ('i Be Mariel Da\n@ as\nSo: Oo\nGA: Marietta North\n'
+_PROMO_AGAIN = ('i Be Mariel Da\n@ as\nSo: Oo\nGA: Harrowen North\n'
                 'Switch to this zone\nwith peak pay!\n'
                 '+$1.00/order until 8:20 PM\n'
                 'Avg. offer wait\nITmin\nDon\'t switch')
-_PROMO_TWO = ('GA: Midtown Atlanta\nSwitch to this zone\nwith peak pay!\n'
+_PROMO_TWO = ('GA: Midtown Solvane\nSwitch to this zone\nwith peak pay!\n'
               '+$2.00/order until 3:10 AM\nAvg. offer wait\n1Imin\n'
               'Don\'t switch')
 ok_('the zone prompt reads as a prompt and as no offer',
@@ -1761,14 +1761,14 @@ if _pr_long:
        len(_pr_long['text']), JR.TEXT_KEPT)
 
 # Two prompts are the same prompt when the bonus AND when it runs out match.
-# Rows 74 and 100 on the week, verbatim: both Hiram, both +$1.00/order, 10.8
+# Rows 74 and 100 on the week, verbatim: both Telby, both +$1.00/order, 10.8
 # minutes apart, the first until 5:29 PM and the second until 7:29 PM. Keyed
 # on the bonus alone, the second inside the window would have been no row at
 # all, with nothing saying the app had asked again.
-_PROMO_74 = ('on\n: Lo E\ni ca\n9A: Hiram\ngi Switch to this zone\n'
+_PROMO_74 = ('on\n: Lo E\ni ca\n9A: Telby\ngi Switch to this zone\n'
              'with peak pay!\n+$1.00/order until 5:29 PM\nAvg. offer wait\n'
              '3 min\ni Don\'t switch\n~\nwn O ek')
-_PROMO_100 = ('-\na. = ©\n~f 3 >.\nGA: Hiram\nSwitch to this zone\n'
+_PROMO_100 = ('-\na. = ©\n~f 3 >.\nGA: Telby\nSwitch to this zone\n'
               'with peak pay!\n+$1.00/order until 7:29 PM\nAvg. offer wait\n'
               '3 min\n‘ Don\'t switch\nm oO Ge xk')
 _pk_log = JR.OfferLog(JR.Journal(os.path.join(_pr_dir, 'ends.jsonl')))
@@ -1878,7 +1878,7 @@ shutil.rmtree(_fs_dir, ignore_errors=True)
 # whose payout is the figure over the card's label replaces the one on record
 # under the same id; it was a second offer. Invented cards.
 _CB = ('${pay}\nGuaranteed (incl. tip)\n$1.68 Boost+ included\n© 20 min ({mi} mi) total\n'
-       '{shop}\nOak Ln, Marietta')
+       '{shop}\nOak Ln, Harrowen')
 _cb = lambda pay, mi='1.5', shop='Maple Grill (12 Fable Ct)': _CB.format(pay=pay, mi=mi, shop=shop)
 # A folder of its own: the suite's `work` is gone by here.
 work = tempfile.mkdtemp()
@@ -1928,7 +1928,7 @@ eq('[corrects] the same journey after the window is another offer',
    len(set(r['id'] for r in rows)), 2)
 # ...nor a payout no label vouches for: a re-offer a cent different is two
 # offers (test_repeats), and the panel's CHECK THE PAY is the doubt.
-_BARE = '${pay}\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta'
+_BARE = '${pay}\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Harrowen'
 rows = [r for r in feed(fresh('corrects-bare.jsonl'),
                         [_BARE.format(pay='1.09'), _BARE.format(pay='9.09')]) if r]
 eq('[corrects] an unlabelled payout corrects nothing', len(set(r['id'] for r in rows)), 2)

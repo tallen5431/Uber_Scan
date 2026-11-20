@@ -320,9 +320,9 @@ for c in cases.get('until', []):
 # It still sums the two, and that is recorded rather than fixed: 0 of the real
 # week's 5,491 frames keep two `total` legs after one_card.
 _TWO_CARDS = ('$11.06 Includes expected tip 15 min (5.4 mi) total '
-              'Little Caesars (3372 Canton Rd) Barrington Overlook, Marietta '
-              '25 min (8.1 mi) total American Deli (Marietta, GA) '
-              'Big Shanty Rd, Marietta')
+              'Little Caesars (3372 Belvan Rd) Carrowdene Overlook, Harrowen '
+              '25 min (8.1 mi) total American Deli (Harrowen, GA) '
+              'Big Gristy Rd, Harrowen')
 _two = P.parse(_TWO_CARDS)
 eq('a total leg is never marked the approach, whatever the layout says',
    [l['isApproach'] for l in _two['legDetail']], [False, False])
@@ -520,7 +520,7 @@ eq('one_card returns the legs and nothing else, the shape oneCard returns',
 #
 # find_places asks where a line began, to refuse a town the second name the
 # reader put on the NEXT line — the Accept button under a Jimmy John's card,
-# read as `Pverel 8) 4 P`, stored as `Shadowood Pkwy SE, Atlanta Pverel`. It
+# read as `Pverel 8) 4 P`, stored as `Gloamwood Pkwy SE, Solvane Pverel`. It
 # asks in offsets into normalize(text), which has already thrown every line
 # break away, so the offsets are only worth anything if they land exactly where
 # normalize() put each line. Held to that over every corpus text that has lines,
@@ -546,7 +546,7 @@ eq('line_starts cuts the flattened text into the reader\'s own lines (%d texts)'
    % len(_lined),
    [t for t in _lined if _cut_at_starts(t) != _lines_alone(t)], [])
 eq('...a blank line and a CRLF each one break, and no start before the first line',
-   P.line_starts('Jimmy\n\n  Atlanta \r\nPverel'), [6, 14])
+   P.line_starts('Jimmy\n\n  Solvane \r\nPverel'), [6, 14])
 
 
 # --- which leg a deadline line's places came off ------------------------------
@@ -569,52 +569,52 @@ eq("find_places records the Est. delivery card's two places against no leg",
 # --- which stop an address was printed under ---------------------------------
 #
 # address_stop reads backwards from find_address's answer to the nearest stop
-# label. Off a shift where a Trip Planner pickup's town line ("Kennesaw, GA
-# 30144" — every address below is made up) was filed as the held order's
+# label. Off a shift where a Trip Planner pickup's town line ("Tellmoor, GA
+# 90744" — every address below is made up) was filed as the held order's
 # destination; see digest() in scan_pi.py for what is refused on each answer.
 _PK = ('Pickup e 1 order\nFable Grill\nExpected by 5:46 PM\nAddress\n'
-       '4100 Fable Mill Pkwy NW,\nKennesaw, GA 30144\nView details')
+       '4100 Fable Mill Pkwy NW,\nTellmoor, GA 90744\nView details')
 eq('address_stop: an address under a Pickup label is a pickup',
    P.address_stop(_PK), 'pickup')
 eq('address_stop: a town line cut off above its header is under no label',
-   P.address_stop('Kennesaw, GA 30144\nView details\nPickup e 1 order\nFable Grill'),
+   P.address_stop('Tellmoor, GA 90744\nView details\nPickup e 1 order\nFable Grill'),
    None)
 eq('address_stop: the nearest label wins — a dropoff after a pickup',
-   P.address_stop('Pickup\nFable Grill\n12 Fable St, Acworth, GA 30101\n'
-                  'Dropoff\n34 Made Up Rd, Acworth, GA 30102'), 'dropoff')
+   P.address_stop('Pickup\nFable Grill\n12 Fable St, Ivyhame, GA 90701\n'
+                  'Dropoff\n34 Made Up Rd, Ivyhame, GA 90702'), 'dropoff')
 eq('address_stop: ...and a pickup after a dropoff header',
    P.address_stop('Dropoff - 1 order\nPat Q.\nPickup e 1 order\nAddress\n'
-                  '12 Fable St,\nAcworth, GA 30101'), 'pickup')
+                  '12 Fable St,\nIvyhame, GA 90701'), 'pickup')
 eq('address_stop: a navigation screen\'s Dropoff is a dropoff',
-   P.address_stop('Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 12 min Start'),
+   P.address_stop('Dropoff 1234 Daffodil Ln, Gorrel Springs, GA 90727 12 min Start'),
    'dropoff')
 eq('address_stop: "Picked up" is no pickup label, "Deliver to" is a dropoff one',
-   P.address_stop('Picked up\nDeliver to Pat Q.\n12 Fable St, Acworth, GA 30101'),
+   P.address_stop('Picked up\nDeliver to Pat Q.\n12 Fable St, Ivyhame, GA 90701'),
    'dropoff')
 eq('address_stop: no address, no answer', P.address_stop('Dropoff - 1 order'), None)
 # address_under_dropoff: the label-proven test an unpressed address passes to be
 # filed over a held order's end (digest() in scan_pi.py, server.js).
 eq('address_under_dropoff: a navigation screen\'s Dropoff address is under it',
-   P.address_under_dropoff('Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 '
+   P.address_under_dropoff('Dropoff 1234 Daffodil Ln, Gorrel Springs, GA 90727 '
                            '12 min Start'), True)
 eq('address_under_dropoff: ...and a name between the label and the address is '
    'still its block',
-   P.address_under_dropoff('Picked up\nDeliver to Pat Q.\n12 Fable St, Acworth, GA 30101'),
+   P.address_under_dropoff('Picked up\nDeliver to Pat Q.\n12 Fable St, Ivyhame, GA 90701'),
    True)
 eq('address_under_dropoff: not under a Pickup label', P.address_under_dropoff(_PK), False)
 eq('address_under_dropoff: not under no label',
-   P.address_under_dropoff('12 Fable St, Acworth, GA 30101\n12 min Start'), False)
+   P.address_under_dropoff('12 Fable St, Ivyhame, GA 90701\n12 min Start'), False)
 eq('address_under_dropoff: not a second address under the label\'s own one',
-   P.address_under_dropoff('Dropoff\n34 Made Up Rd, Acworth, GA 30102\nView details\n'
-                           '56 Other Made Up Rd, Acworth, GA 30101'), False)
+   P.address_under_dropoff('Dropoff\n34 Made Up Rd, Ivyhame, GA 90702\nView details\n'
+                           '56 Other Made Up Rd, Ivyhame, GA 90701'), False)
 eq('planner_furniture: a planner block whose header did not read still has it',
-   P.planner_furniture('Kennesaw, GA 30144\nView details\nFable Grill\n'
+   P.planner_furniture('Tellmoor, GA 90744\nView details\nFable Grill\n'
                        'Expected by 5:54 PM'), True)
 eq('planner_furniture: a navigation screen has none',
-   P.planner_furniture('Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 '
+   P.planner_furniture('Dropoff 1234 Daffodil Ln, Gorrel Springs, GA 90727 '
                        '12 min Start'), False)
 eq('find_address is unchanged by the walk address_stop shares with it',
-   (P.find_address(_PK) or {}).get('line'), '4100 Fable Mill Pkwy NW, Kennesaw, GA 30144')
+   (P.find_address(_PK) or {}).get('line'), '4100 Fable Mill Pkwy NW, Tellmoor, GA 90744')
 
 # --- a long run of one character -----------------------------------------------
 # A striped texture reads as a line of "l"s, and four patterns tried a run from
@@ -747,22 +747,22 @@ eq('dd_pickup_door: no door off a time, an item\'s count, or an item with a type
                      '1 Street Taco'),
     (P.dd_pickup_door('Pickup for Lee R.\nQuillon Steakhouse - (0042\n2 Chicken Sandwich\n'
                       '410 Quillon Parkway\nNorthwest, Fabletown') or {}).get('line'),
-    (P.dd_pickup_door('Pickup for Lee R.\nQuillon Steakhouse\n1450 Hwy 92\nFabletown, GA')
+    (P.dd_pickup_door('Pickup for Lee R.\nQuillon Steakhouse\n1450 Hwy 63\nFabletown, GA')
      or {}).get('street'),
     (P.dd_pickup_door('Pickup for Lee R.\nQuillon Steakhouse\n410 Quillon Pkwy NW Ste 100\n'
                       'Fabletown, GA') or {}).get('city')],
-   [None, None, None, '410 Quillon Parkway Northwest, Fabletown', '1450 Hwy 92', 'Fabletown'])
+   [None, None, None, '410 Quillon Parkway Northwest, Fabletown', '1450 Hwy 63', 'Fabletown'])
 # ...and the same store screen after an accept in the popup's dress (the
 # owner's snap of 31 Oct, 19:14): "Pickup from / <Store> / Order includes /
 # <items> / <door> / <town> / Directions". It typed dd.placePopup and filed
 # nothing; now its door is the DoorDash order's pickup, as "Pickup for"'s is,
 # and the offer's own popup is still the popup. Invented.
 _TAKEN = ('-@ a Co\n\u00a9)Fqe Toa ha,\nYW Pickup from\nLark Owl Pizza *\nOrder includes\n'
-          'f Drink\n@ 1200 Fable W Lantern Pkwy NW\nBrookvale, GA 30199, USA\nDirections\n'
+          'f Drink\n@ 1200 Fable W Lantern Pkwy NW\nBrookvale, GA 90799, USA\nDirections\n'
           'crad PT rel (lat')
-_DOOR = {'line': '1200 Fable W Lantern Pkwy NW, Brookvale, GA 30199',
+_DOOR = {'line': '1200 Fable W Lantern Pkwy NW, Brookvale, GA 90799',
          'street': '1200 Fable W Lantern Pkwy NW', 'city': 'Brookvale', 'state': 'GA',
-         'zip': '30199', 'name': 'Lark Owl Pizza'}
+         'zip': '90799', 'name': 'Lark Owl Pizza'}
 eq('dd_pickup_door: "Pickup from" with "Order includes" under it is the taken order\'s store: '
    'its door and its name, the items left out; and it is no place popup',
    (P.screen_type(_TAKEN)['screen'], P.dd_pickup_door(_TAKEN), P.place_popup(_TAKEN)),
@@ -770,14 +770,14 @@ eq('dd_pickup_door: "Pickup from" with "Order includes" under it is the taken or
 eq('dd_pickup_door: ...four items, the door past the popup\'s reach, an item with a number '
    'in front of it no door',
    P.dd_pickup_door('Pickup from\nLark Owl Pizza\nOrder includes\nDrink\n2 Garden Salad\n'
-                    'Fries\nCookie\n@ 1200 Fable W Lantern Pkwy NW\nBrookvale, GA 30199, USA\n'
+                    'Fries\nCookie\n@ 1200 Fable W Lantern Pkwy NW\nBrookvale, GA 90799, USA\n'
                     'Directions'), _DOOR)
 eq('dd_pickup_door: ...and the offer\'s popup (no "Order includes") stays dd.placePopup, '
    'no pickup screen',
    [(P.screen_type(t)['screen'], P.dd_pickup_door(t)) for t in (
-       'Pickup from\nFable Pasta\n2080 Lantern Ave NW #100\nAtlanta, GA 30318, USA\nDirections',
+       'Pickup from\nFable Pasta\n2080 Lantern Ave NW #100\nSolvane, GA 90818, USA\nDirections',
        '. cyv F \u2018\nYJ Pickup from\nThe Fable Orient %\nG? 3050 Quill Hill Rd SE\n'
-       'Atlanta, GA 30339, USA\nDirections\n") 4items v')],
+       'Solvane, GA 90839, USA\nDirections\n") 4items v')],
    [('dd.placePopup', None), ('dd.placePopup', None)])
 eq('dd_pickup_door: ...nor a "Pickup from" whose "Order includes" is past DD_FROM_REACH',
    P.dd_pickup_from('Pickup from\nLark Owl Pizza\n' + 'x line\n' * 8 + 'Order includes\n'),

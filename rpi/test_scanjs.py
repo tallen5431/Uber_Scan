@@ -690,8 +690,8 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
   // What the phone stores in the journal's `text` column, against what the rig
   // stores in the same column of the same file.
   out.rowText = await page.evaluate(() => {
-    var card = '$8.83\n23 min (4.6 mi) total\nPickup\nPapa Johns (Kennesaw)\n'
-             + 'Cobb Pkwy NW, Acworth';
+    var card = '$8.83\n23 min (4.6 mi) total\nPickup\nPapa Johns (Tellmoor)\n'
+             + 'Vosk Pkwy NW, Ivyhame';
     var settings = { target: 25, band: 15, costPerMile: 0.30 };
     var parsed = OfferParser.parse(card);
     var rate = OfferParser.rate(parsed, settings);
@@ -823,8 +823,8 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
   out.rowEnds = await page.evaluate(() => {
     var settings = { target: 25, band: 15, costPerMile: 0.30 };
     var parsed = OfferParser.parse(
-      '$8.83\n23 min (4.6 mi) total\nPickup\nPapa Johns (Kennesaw)\n'
-      + 'Cobb Pkwy NW, Acworth');
+      '$8.83\n23 min (4.6 mi) total\nPickup\nPapa Johns (Tellmoor)\n'
+      + 'Vosk Pkwy NW, Ivyhame');
     var rate = OfferParser.rate(parsed, settings);
     var row = JournalClient.row(parsed, rate, settings,
                                 { browser: true, prefix: 'e' });

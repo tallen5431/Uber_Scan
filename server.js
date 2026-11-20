@@ -5597,7 +5597,7 @@ function saveStoreWaits() {
 // waits and the card's "usually" name the same stores; its docstring has the
 // fault and the cost. The corner was ' & ', which DoorDash's "Wren Hollow Cir
 // NW &, Faketown" slipped past, and an UberX ride's pickup (the rider's street,
-// "Celebration Blvd, Faketown") passed whole. Now an '&' anywhere, or a part
+// "Jamboreeton Blvd, Faketown") passed whole. Now an '&' anywhere, or a part
 // before the comma ending on a street's type (a quadrant after it allowed),
 // is no store: Assemble.STREET_SUFFIX, the list offer_parser's STREET_SUFFIX
 // is, never a third. The cost: "Market Square, Faketown" and "Ash&Oak Grill"
@@ -13255,7 +13255,7 @@ var NBX_TIMEOUT_MS = Number(process.env.NUCBOX_TIMEOUT_MS) > 0
 var NBX_CACHE_MAX = 500;
 var nbxCache = new Map();
 /* The most an answer may be. Ten search results in jsonv2's shape, each with
- * the real install's "McDonald's, 2700, Windy Hill Road Southeast, ..." name,
+ * the real install's "McDonald's, 2700, Gusty Hill Road Southeast, ..." name,
  * are 4,891 bytes (measured on tests/fake-nucbox.js); a three-point route
  * with overview=false and 84-character waypoint hints is 786. With the road's
  * shape asked for too (overview=simplified, nbxRoute) a route carries one
@@ -13543,7 +13543,7 @@ function nbxHealthOut() {
 }
 /* How many candidates a search asks for. Ten: enough for every branch of a
  * chain inside a disc the size of a card's distance, mostly — the real
- * install answered ten McDonald's in a 0.2-degree box round Marietta, which
+ * install answered ten McDonald's in a 0.2-degree box round Harrowen, which
  * is exactly this many, so a list that comes back this long is said to be
  * cut (`cutAt`) and the page will not claim "only one fits" from it. */
 var NBX_LIMIT = 10;
@@ -15669,7 +15669,7 @@ function route(req, res) {
             // A coordinate, or null for "asked, nothing there" — which is worth
             // keeping, because it is what stops the next run asking again. What
             // is NOT kept is undefined, "could not ask": storing that would
-            // turn one dead spot on I-75 into a permanent answer.
+            // turn one dead spot on I-98 into a permanent answer.
             var ok = v === null
               || (v && typeof v === 'object'
                   && typeof v.lat === 'number' && isFinite(v.lat)
