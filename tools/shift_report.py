@@ -213,7 +213,8 @@ counted apart. Words only, as the row has them: the row carries no address
 and no coordinate for this, and the report prints none.
 
 THE GPS LOG is `gpspipe -w -uu` output in one directory, `.jsonl` or the
-`.jsonl.gz` tools/gpslog_tidy.py leaves; of those, the logs whose names say
+`.jsonl.gz` tools/gpslog_tidy.py leaves (a `.jsonl` beside its own `.gz` is
+read once, as the `.gz`); of those, the logs whose names say
 they can hold the day's fixes (_logs_for), and the header says how many others
 it left unread. `-uu` stamps every line with the
 Pi's clock, the same clock the server stamps the journal with, which is what
@@ -338,6 +339,21 @@ def day_window(day):
     start = time.mktime((y, mo, d, h, 0, 0, 0, 0, -1))
     end = time.mktime((y, mo, d + 1, h, 0, 0, 0, 0, -1))
     return start * 1000.0, end * 1000.0
+
+
+def driver_day(ms):
+    """The driver's day of a moment, 'YYYY-MM-DD': the local date, the day
+    before when the local hour is before DAY_STARTS_AT. advice.js dayKeyOf's
+    rule, 4 hours off the CLOCK. This file took 4 hours of REAL time off
+    (localtime(t - 4h)), which is the same except across a clock change:
+    03:30 EST on 1 Nov 2026, an hour after the fall back, was 00:30 EDT four
+    real hours earlier and came out 1 Nov, where the offers page and the
+    report say 31 Oct; 04:30 EDT on 8 Mar 2026 came out 7 Mar."""
+    lt = time.localtime(ms / 1000.0)
+    if lt.tm_hour >= day_starts_at():
+        return time.strftime('%Y-%m-%d', lt)
+    return time.strftime('%Y-%m-%d', time.localtime(
+        time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday - 1, 12, 0, 0, 0, 0, -1))))
 
 
 # --- the journal ----------------------------------------------------------
@@ -875,19 +891,44 @@ def unglued(pickup, texts):
     return pickup
 
 
+# A name whose part before the comma ENDS on a street's type, a quadrant
+# after it allowed ("Celebration Blvd, Faketown", "Wren Hollow Cir NW"): a
+# street, not a store. offer_parser's STREET_SUFFIX, the USPS list the
+# readers already draw a street's end by, and the list assemble.js keeps the
+# same copy of for server.js (storeNameSaid asks Assemble.STREET_SUFFIX; the
+# suite holds the two equal). A word before the type is required, so a store
+# called "Loop" alone keeps its name.
+_STREET_HEAD = re.compile(r'\S\s+(?:%s)\.?(?:\s+(?:nw|ne|sw|se|n|s|e|w))?$' % OP.STREET_SUFFIX,
+                          re.IGNORECASE)
+
+
 def store_name(t):
     """The store a card's pickup names, or None. Uber's bracketed street
     off its end (assemble.js storeOf), the Trip Planner's icon letters off its
-    front (map-view.js plannerName), and no name at all for a door or a
-    corner — a leading house number, an '&' — which would be an address:
-    server.js storeNameSaid's rule, so the two say the same stores."""
+    front (map-view.js plannerName), and no name at all for a door, a corner
+    or a street — a leading house number, an '&' anywhere, a part before the
+    comma that ends on a street's type — which would be an address:
+    server.js storeNameSaid's rule, so the two say the same stores.
+
+    THE FAULT (the tools review, Nov 2026): the corner test was ' & ', which
+    DoorDash's "Wren Hollow Cir NW &, Faketown" (the corner cut at its comma)
+    slipped past, and an UberX ride's pickup, the rider's street ("Celebration
+    Blvd, Faketown"), passed whole: Restaurant waits printed both as stores.
+    THE COST: a store named for its street ("Market Square, Faketown", "Noodle
+    Way") and one with an '&' anywhere in its name ("Ash&Oak Grill"; one with
+    ' & ' was refused before) get no name, and their waits go uncounted. A
+    wait unnamed is a line missing; a rider's street printed as a restaurant
+    is a line that is wrong. "Gateway Center, Faketown" keeps its name: Center
+    is not on this list (assemble.js doorOf's longer one has it, and would
+    cost every "... Center" store its name)."""
     if not isinstance(t, str):
         return None
     s = re.sub(r'\s*\([^()]*\)?\s*$', '', re.sub(r'\s+', ' ', t).strip()).strip()
     m = re.match(r'^[a-z]{1,2} (?=[A-Z])', s)
     if m:
         s = s[m.end():]
-    if not re.sub(r'[^a-z0-9]', '', s.lower()) or re.match(r'^\d', s) or ' & ' in s:
+    if not re.sub(r'[^a-z0-9]', '', s.lower()) or re.match(r'^\d', s) or '&' in s \
+            or _STREET_HEAD.search(s.split(',')[0].strip()):
         return None
     return s[:NAME_MAX]
 
@@ -1258,8 +1299,7 @@ def _alongside(out):
             if minutes:
                 o['last'] = o['took'] + hold_span(minutes)
             else:
-                d = time.localtime(o['took'] / 1000.0 - day_starts_at() * 3600)
-                o['last'] = day_window(time.strftime('%Y-%m-%d', d))[1]
+                o['last'] = day_window(driver_day(o['took']))[1]
     for o in out:
         if o['took'] is None:
             o['alongside'] = '?'
@@ -1392,6 +1432,75 @@ def _restamp(path):
     return add, len(steps)
 
 
+def log_names(directory):
+    """(names, twins): the GPS logs in `directory` load_fixes reads, sorted,
+    and how many `.jsonl` were left for the `.jsonl.gz` beside them."""
+    names = sorted(n for n in os.listdir(directory)
+                   if n.endswith('.jsonl') or n.endswith('.jsonl.gz'))
+    # A `.jsonl` with its own `.jsonl.gz` beside it is one log held twice, and
+    # read once, as the `.gz`. The NucBox's copy (tools/places_nightly.sh)
+    # never deletes, as it must not: the rig's gpslog_tidy gzips a log after it
+    # was copied, the next night brings the `.gz`, and the `.jsonl` stays. Both
+    # were read, so every fix of that log counted twice: two fixes a second in
+    # the stop and moving minutes, and the places report's spells stood on
+    # doubled fixes. The `.gz` is the one kept: gpslog_tidy writes it only
+    # once it has read it back byte for byte, so it is the whole log, while
+    # the `.jsonl` may be a copy taken mid-shift.
+    packed = set(n for n in names if n.endswith('.jsonl.gz'))
+    twins = sum(1 for n in names if n + '.gz' in packed)
+    return [n for n in names if n + '.gz' not in packed], twins
+
+
+def load_log(directory, name):
+    """(fixes, counts) of ONE log: its fixes in the order read, and what
+    load_fixes adds into its info. Every log stands alone (its own Phone, its
+    own clock steps), so a log's fixes are the same whichever others are read
+    beside it, and the places report keeps them by log (tools/report/io.js's
+    helper) to answer two windows off one read."""
+    counts = {'positions': 0, 'passed': 0, 'refused': collections.Counter(),
+              'unstamped': 0, 'beforeClock': 0, 'clockSteps': 0, 'restamped': 0}
+    fixes = []
+    now = [0.0]
+    # One Phone per file: one gpspipe run is one stream, and the hold
+    # bookkeeping (`heldFor`) is about consecutive fixes of one stream.
+    phone = G.Phone('gpspipe-log', clock=lambda: now[0])
+    # The log read once for its clock's steps (CLOCK_STEP_S), and again
+    # for its fixes, each stamp moved by what the first read found.
+    add, steps = _restamp(os.path.join(directory, name))
+    counts['clockSteps'] += steps
+    k = -1
+    with _open(os.path.join(directory, name)) as fh:
+        for line in fh:
+            m = _STAMP.match(line.strip())
+            if not m:
+                if line.lstrip().startswith('{'):
+                    counts['unstamped'] += 1
+                continue
+            k += 1
+            got = G.parse_line(m.group(2))
+            if got is None:
+                continue
+            t = float(m.group(1))
+            if k < len(add) and add[k]:
+                t += add[k]
+                counts['restamped'] += 1
+            if t < CLOCK_FLOOR:
+                counts['beforeClock'] += 1
+                continue
+            counts['positions'] += 1
+            now[0] = t
+            phone.take(got)
+            fix = phone.latest()
+            if fix['ok']:
+                counts['passed'] += 1
+                # The TPV's own speed rides along for the shift's moving
+                # and stopped minutes (totals); None when it gave none.
+                fixes.append((t, fix['lat'], fix['lon'], _num(fix.get('speed'))))
+            else:
+                counts['refused'][fix['why']] += 1
+    return fixes, counts
+
+
 def load_fixes(directory, window=None):
     """(fixes, info). `fixes` is [(t, lat, lon, speed)] for every fix gps.usable()
     passed (speed in m/s, or None), sorted by t (seconds, the Pi's clock), or None when there is no
@@ -1399,14 +1508,15 @@ def load_fixes(directory, window=None):
 
     `window`, [lo, hi) in ms: read only the logs that can hold a fix in it, by
     their names (_logs_for); `info['otherDays']` counts the ones left unread.
-    Every log, as before, without it."""
+    Every log, as before, without it. A `.jsonl` beside its own `.jsonl.gz`
+    is not read (`info['twins']` counts them): the same log, held twice
+    (log_names)."""
     info = {'files': 0, 'positions': 0, 'passed': 0, 'refused': collections.Counter(),
             'unstamped': 0, 'beforeClock': 0, 'otherDays': 0,
-            'clockSteps': 0, 'restamped': 0}
+            'clockSteps': 0, 'restamped': 0, 'twins': 0}
     if not directory or not os.path.isdir(directory):
         return None, info
-    names = sorted(n for n in os.listdir(directory)
-                   if n.endswith('.jsonl') or n.endswith('.jsonl.gz'))
+    names, info['twins'] = log_names(directory)
     if window is not None:
         keep = _logs_for(names, window)
         info['otherDays'] = len(names) - len(keep)
@@ -1414,44 +1524,10 @@ def load_fixes(directory, window=None):
     fixes = []
     for name in names:
         info['files'] += 1
-        now = [0.0]
-        # One Phone per file: one gpspipe run is one stream, and the hold
-        # bookkeeping (`heldFor`) is about consecutive fixes of one stream.
-        phone = G.Phone('gpspipe-log', clock=lambda: now[0])
-        # The log read once for its clock's steps (CLOCK_STEP_S), and again
-        # for its fixes, each stamp moved by what the first read found.
-        add, steps = _restamp(os.path.join(directory, name))
-        info['clockSteps'] += steps
-        k = -1
-        with _open(os.path.join(directory, name)) as fh:
-            for line in fh:
-                m = _STAMP.match(line.strip())
-                if not m:
-                    if line.lstrip().startswith('{'):
-                        info['unstamped'] += 1
-                    continue
-                k += 1
-                got = G.parse_line(m.group(2))
-                if got is None:
-                    continue
-                t = float(m.group(1))
-                if k < len(add) and add[k]:
-                    t += add[k]
-                    info['restamped'] += 1
-                if t < CLOCK_FLOOR:
-                    info['beforeClock'] += 1
-                    continue
-                info['positions'] += 1
-                now[0] = t
-                phone.take(got)
-                fix = phone.latest()
-                if fix['ok']:
-                    info['passed'] += 1
-                    # The TPV's own speed rides along for the shift's moving
-                    # and stopped minutes (totals); None when it gave none.
-                    fixes.append((t, fix['lat'], fix['lon'], _num(fix.get('speed'))))
-                else:
-                    info['refused'][fix['why']] += 1
+        got, counts = load_log(directory, name)
+        fixes.extend(got)
+        for key, n in counts.items():
+            info[key] += n
     # By time, then place, as before the speed was added: a speed is never
     # what orders two fixes, and None does not compare with a number.
     fixes.sort(key=lambda f: f[:3])
@@ -2071,7 +2147,9 @@ def text(rep):
                          if info.get('clockSteps') else '')
                       + (('; %d log%s of other days not read'
                           % (info['otherDays'], '' if info['otherDays'] == 1 else 's'))
-                         if info.get('otherDays') else '')))
+                         if info.get('otherDays') else '')
+                      + (('; %d .jsonl read as the .gz beside it' % info['twins'])
+                         if info.get('twins') else '')))
     if info['unreadable']:
         out.append('Journal: %d unreadable line%s skipped'
                    % (info['unreadable'], '' if info['unreadable'] == 1 else 's'))
@@ -2355,8 +2433,7 @@ def _stamp(ms):
 def record_cells(o):
     """One order as RECORD_COLUMNS' values, strings."""
     when = o['took'] if o['took'] is not None else o.get('offered')
-    day = '' if when is None else time.strftime(
-        '%Y-%m-%d', time.localtime(when / 1000.0 - day_starts_at() * 3600))
+    day = '' if when is None else driver_day(when)
     pl = o.get('places') or {}
     return (day, o['app'] or '', _stamp(o.get('offered')), _stamp(o['took']),
             _stamp(o['end'] if o['end'] is not None else o.get('expiredAt')), o['how'] or '',
@@ -2369,6 +2446,22 @@ def record_cells(o):
                                     else []))) + paid_cells(o) + (o.get('timedBy') or '',) + uber_cells(o)
 
 
+# A cell a spreadsheet would run as a formula, led with an apostrophe:
+# trends.js safeCell's rule, which journal.html's "Download CSV" keeps over
+# these same columns. The store, its door, the dropoff and the notes are what
+# a reader made of a phone, and this file wrote them raw, so a pickup read as
+# =HYPERLINK(...), a misread icon row "-" or Uber's "+ 1 order" ran in Excel
+# while the page's copy of the same order did not. A plain number keeps its
+# sign: paid_minus_card's -3.50 is a figure. csv.writer already quotes a \r.
+_FORMULA_LEAD = re.compile(r'[=+\-@\t\r]')
+_PLAIN_NUMBER = re.compile(r'[-+]?(\d+\.?\d*|\.\d+)\Z')
+
+
+def safe_cell(v):
+    s = '' if v is None else str(v)
+    return "'" + s if _FORMULA_LEAD.match(s) and not _PLAIN_NUMBER.match(s) else s
+
+
 def to_records_csv(reps):
     """The records CSV over one report or several (a range of days), as text."""
     buf = io.StringIO()
@@ -2376,7 +2469,7 @@ def to_records_csv(reps):
     w.writerow(RECORD_COLUMNS)
     for rep in reps:
         for o in rep['orders']:
-            w.writerow(record_cells(o))
+            w.writerow([safe_cell(c) for c in record_cells(o)])
     return buf.getvalue()
 
 

@@ -137,6 +137,26 @@ ok_('the newest log is left alone, however long ago it was written to',
     and not os.path.exists(os.path.join(d, 'tuesday.jsonl.gz')))
 ok_('...while the one before it is gzipped', os.path.exists(os.path.join(d, 'monday.jsonl.gz')))
 
+# ...and so is the log with the latest GPS-time name, whatever its mtime: after
+# a reboot the Pi's clock runs from fake-hwclock's saved minute until NTP steps
+# it, so the log gpspipe has just opened can be stamped older than the one
+# before it. Named as tools/gpslog_name.py names them; invented times.
+d = os.path.join(work, 'stepped')
+os.makedirs(d)
+put(d, '2026-10-25_1802.jsonl', age=3 * DAY)
+put(d, '2026-10-26_1415.jsonl', age=2 * 60 * 60)
+put(d, '2026-10-26_1938.jsonl', age=3 * 60 * 60)
+put(d, 'parked-by-hand.jsonl', age=4 * DAY)
+code, out = run('--apply', d)
+ok_('the log with the latest GPS-time name is left alone though another is newer by mtime',
+    os.path.exists(os.path.join(d, '2026-10-26_1938.jsonl'))
+    and not os.path.exists(os.path.join(d, '2026-10-26_1938.jsonl.gz'))
+    and 'skip    2026-10-26_1938.jsonl  (the latest by its GPS-time name' in out)
+ok_('...the newest by mtime still kept, and the older named log and one named by hand gzipped',
+    os.path.exists(os.path.join(d, '2026-10-26_1415.jsonl'))
+    and os.path.exists(os.path.join(d, '2026-10-25_1802.jsonl.gz'))
+    and os.path.exists(os.path.join(d, 'parked-by-hand.jsonl.gz')))
+
 d = fresh('days')
 run('--apply', '--days', '30', d)
 ok_('--days moves the line', not os.path.exists(os.path.join(d, 'middling.jsonl.gz')))

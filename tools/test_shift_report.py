@@ -734,6 +734,38 @@ eq('[waits] the store is the card\'s pickup less its bracketed street; a door, a
                                '1981 Cobb Pkwy NW, Kennesaw', 'Elm St & Oak Ave, Faketown',
                                None, '', 'oe Larkspur Tacos')],
    ['Imaginary Bistro', 'Larkspur Tacos', None, None, None, None, 'Larkspur Tacos'])
+# The corner test was ' & ': DoorDash's corner cut at its comma ("... NW &,
+# Town") went past it, and an UberX ride's pickup, the rider's street, passed
+# whole. Both were printed as stores. Invented streets and stores; the last
+# three are the cost and what the cost is not.
+_STORE_PROBES = ('Wren Hollow Cir NW &, Faketown', 'Celebration Blvd, Faketown',
+                 'Kestrel Pkwy W', 'Old Mill Rd. NE, Faketown', 'Ash&Oak Grill',
+                 'Market Square, Faketown', 'Larkspur Tacos', 'Gateway Center, Faketown',
+                 'Loop', 'Imaginary Bistro (1 Nowhere Ln)', 'oe Wren Noodle Bar')
+eq('[waits] a corner cut at its comma, a rider\'s street (a type, a quadrant after it) and any '
+   '"&" are no store; "Market Square" is the cost, "Gateway Center" keeps its name',
+   [SR.store_name(t) for t in _STORE_PROBES],
+   [None, None, None, None, None, None, 'Larkspur Tacos', 'Gateway Center, Faketown', 'Loop',
+    'Imaginary Bistro', 'Wren Noodle Bar'])
+# ...and server.js storeNameSaid says the same stores: its own text, run in
+# node beside the assemble.js and map-view.js it calls, over the same names,
+# and the street list it asks is offer_parser's word for word.
+with open(os.path.join(ROOT, 'server.js'), encoding='utf-8') as fh:
+    _srvjs = fh.read()
+_snsrc = re.search(r'\nvar STORE_STREET_HEAD = [\s\S]*?\nfunction storeNameSaid\(t\) \{[\s\S]*?\n\}\n',
+                   _srvjs)
+_snrun = subprocess.run(
+    ['node', '-e', 'var Assemble = require(process.argv[1]), MV = require(process.argv[2]);\n'
+     + (_snsrc.group(0) if _snsrc else '') + '\nprocess.stdout.write(JSON.stringify({names: '
+     'JSON.parse(process.argv[3]).map(storeNameSaid), list: Assemble.STREET_SUFFIX.source}));',
+     os.path.join(ROOT, 'assemble.js'), os.path.join(ROOT, 'map-view.js'),
+     json.dumps(_STORE_PROBES)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+_snout = json.loads(_snrun.stdout or b'{}') if _snrun.returncode == 0 else {}
+eq('[waits] ...and server.js storeNameSaid names the same stores (%s)' % _snrun.stderr[-200:],
+   _snout.get('names'), [SR.store_name(t) for t in _STORE_PROBES])
+import offer_parser as _OP                                    # noqa: E402
+eq('[waits] ...by the one street list: assemble.js STREET_SUFFIX is offer_parser\'s',
+   _snout.get('list'), '^(?:%s)$' % _OP.STREET_SUFFIX)
 # The owner's 29 Oct shift: a pickup returned as the card's store line and the
 # whole line under it, the trip's address, run together ("<Store> <n> <Street>
 # Pkwy W, <Town>"), printed and grouped by that. unglued takes the address
@@ -1155,6 +1187,23 @@ ok_('[clock step] ...and the text\'s GPS line says it',
 eq('[clock step] ...as the JSON does',
    [SR.as_json(_srep)['gps'][k] for k in ('clockSteps', 'restamped')], [1, 30])
 
+# A log held twice: the NucBox's copy never deletes, so a `.jsonl` it took
+# before the rig's gpslog_tidy gzipped it stays beside the `.gz` the next night
+# brings. Both were read and every fix of that log counted twice (the places
+# report reads through this same load_fixes).
+_twin = os.path.join(work, 'twins')
+shutil.copytree(GPSDIR, _twin)
+with gzip.open(os.path.join(GPSDIR, '2026-03-03_1758.jsonl.gz'), 'rb') as _src, \
+        open(os.path.join(_twin, '2026-03-03_1758.jsonl'), 'wb') as _dst:
+    _dst.write(_src.read())
+_fx1, _fi1 = SR.load_fixes(GPSDIR)
+_fx2, _fi2 = SR.load_fixes(_twin)
+eq('[gps] a .jsonl beside its own .jsonl.gz is read once, as the .gz: the same fixes, the same '
+   'logs, and the twin counted', (_fx2 == _fx1, _fi2['files'], _fi2['passed'], _fi2['twins']),
+   (True, _fi1['files'], _fi1['passed'], 1))
+ok_('[gps] ...and the text\'s GPS line says it',
+    '; 1 .jsonl read as the .gz beside it' in SR.text(dict(rep, info=dict(rep['info'], twins=1))))
+
 # ...and a log named by tools/gpslog_name.py (the GPS's own minute) is read
 # back as beginning at that minute; one it marked `-unsynced` as saying no
 # date, so every day's report reads it.
@@ -1334,6 +1383,35 @@ with open(os.path.join(ROOT, 'journal.html'), encoding='utf-8') as fh:
 _jcols = re.search(r'var RECORD_COLUMNS = \[([^\]]*)\];', _jh)
 eq('[record csv] the offers page\'s CSV has these columns, word for word',
    tuple(re.findall(r"'([a-z_]+)'", _jcols.group(1))) if _jcols else None, SR.RECORD_COLUMNS)
+# ...and dates an order by the driver's day as advice.js dayKeyOf does, 4
+# hours off the clock: the file took 4 hours of real time off, a day out at
+# each clock change. Instants in UTC: 03:30 EST on 1 Nov 2026 (an hour after
+# the fall back), 04:30 EDT on 8 Mar 2026 (an hour and a half after the spring
+# forward), and an ordinary 03:59 and 04:00 either side of the boundary.
+_dst = [1793521800000, 1772958600000, 1773215940000, 1773216000000]
+_dstrow = lambda ms: next(csv.DictReader(io.StringIO(SR.to_records_csv(
+    [{'orders': [dict(_rr['orders'][0], took=ms)]}]))))['date']
+_dstjs = subprocess.run(['node', '-e', 'var A = require(process.argv[1]); process.stdout.write('
+                         'JSON.stringify(JSON.parse(process.argv[2]).map(A.dayKeyOf)))',
+                         os.path.join(ROOT, 'advice.js'), json.dumps(_dst)],
+                        stdout=subprocess.PIPE, timeout=60).stdout
+eq('[record csv] the date is the driver\'s day off the clock: 03:30 EST on 1 Nov is 31 Oct, '
+   '04:30 EDT on 8 Mar is 8 Mar, as advice.js dayKeyOf says',
+   ([_dstrow(ms) for ms in _dst], json.loads(_dstjs or b'null')),
+   (['2026-10-31', '2026-03-08', '2026-03-10', '2026-03-11'],) * 2)
+# ...and defuses what a spreadsheet would run as the page does (journal.html
+# csvCell, trends.js safeCell): this file wrote a pickup of =HYPERLINK(...)
+# raw. One order's places and notes made to open the way a misread card can.
+_rinj = dict(_rr['orders'][0], places={'pickupName': '@Home Kitchen', 'pickup': '=HYPERLINK("x")',
+                                       'dropoff': '-'},
+             notes=['+ 1 order'])
+_rinj_row = next(csv.DictReader(io.StringIO(SR.to_records_csv([{'orders': [_rinj]}]))))
+eq('[record csv] a cell a spreadsheet would run is led with an apostrophe, as on the offers page',
+   tuple(_rinj_row[k] for k in ('pickup_name', 'pickup', 'dropoff', 'notes')),
+   ("'@Home Kitchen", "'=HYPERLINK(\"x\")", "'-", "'+ 1 order"))
+eq('[record csv] ...and a figure keeps its sign',
+   [SR.safe_cell(v) for v in ('-3.50', '+2', '12.00', -1.5, None, 'Utopian Bowl')],
+   ['-3.50', '+2', '12.00', '-1.5', '', 'Utopian Bowl'])
 
 # --- what the app paid (8 Nov 2026) ------------------------------------------------
 #

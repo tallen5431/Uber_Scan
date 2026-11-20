@@ -174,12 +174,24 @@ run_suite() {
 pass=0
 fail=0
 failed_names=""
+# Every suite started, and the ones that left no result. The verdict below is
+# over what was SCHEDULED, not over what got printed: a runner killed with -9
+# (the OOM killer, a stray kill) writes no .done, and the printer used to stop
+# at it for good, so every suite after it went unsaid and the count covered
+# only what came before. Measured on stub suites: one runner killed, "all 1
+# suites passed", exit 0.
+scheduled=0
+missing_names=""
 
 # A finished suite's line: its seconds and its last word, or FAILED and the
-# lines that say why.
+# lines that say why; or, with no .done, that it left no result.
 report() {
     local name="$1" out="$RUNDIR/$1.out" status took last
-    read -r status took < "$RUNDIR/$name.done"
+    if ! read -r status took < "$RUNDIR/$name.done" 2>/dev/null; then
+        missing_names="$missing_names $name"
+        printf '%5s  NO RESULT (its runner ended without writing one)\n' '-'
+        return
+    fi
     last=$(grep -E 'passed|FAILED|skipping' "$out" | tail -1)
     if [ "$status" -eq 0 ]; then
         pass=$((pass + 1))
@@ -209,6 +221,7 @@ if [ "$JOBS" -eq 1 ]; then
         case "$name" in *.js) here=node ;; *) here=python ;; esac
         if [ "$here" != "$section" ]; then echo "$here"; section="$here"; fi
         skipped "$name" && continue
+        scheduled=$((scheduled + 1))
         printf '  %-26s ' "$name"
         run_suite "$name" "${cmds[$i]}" & wait $!
         report "$name"
@@ -219,6 +232,7 @@ else
     for i in "${!names[@]}"; do
         name="${names[$i]}"
         skipped "$name" && continue
+        scheduled=$((scheduled + 1))
         if ! named "$name" "$ALONE"; then pool+=("$i"); continue; fi
         printf '  %-26s ' "$name"
         run_suite "$name" "${cmds[$i]}" & wait $!
@@ -239,9 +253,13 @@ else
     # Printed in the order above, not the order they finish in, so two runs'
     # output can be read side by side: a suite's line waits for every suite
     # before it, and comes out whole the moment they are all done.
+    # `flush all`, once every runner has ended, waits for nothing: a suite
+    # with no .done by then never will have one, and is said as such and
+    # passed over, so it cannot hold up the suites after it.
     next=0
     flush() {
-        while [ $next -lt ${#pool[@]} ] && [ -e "$RUNDIR/${names[${pool[$next]}]}.done" ]; do
+        while [ $next -lt ${#pool[@]} ] \
+              && { [ "${1:-}" = all ] || [ -e "$RUNDIR/${names[${pool[$next]}]}.done" ]; }; do
             printf '  %-26s ' "${names[${pool[$next]}]}"
             report "${names[${pool[$next]}]}"
             next=$((next + 1))
@@ -253,11 +271,16 @@ else
     done
     while [ "$(jobs -rp | wc -l)" -gt 0 ]; do wait -n; flush; done
     wait
-    flush
+    flush all
 fi
 
 echo
 echo "took $((SECONDS - began_all))s, $JOBS at once"
+if [ $((pass + fail)) -lt $scheduled ]; then
+    echo "$((scheduled - pass - fail)) of $scheduled suites gave no result:${missing_names:- (unnamed)}"
+    [ $fail -gt 0 ] && echo "$fail FAILED:$failed_names"
+    exit 1
+fi
 if [ $fail -eq 0 ]; then
     echo "all $pass suites passed"
     exit 0

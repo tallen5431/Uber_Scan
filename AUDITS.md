@@ -4346,6 +4346,30 @@ Every answer byte for byte the same as at 9247f36 on the invented journal (/api/
 
 route() is 1,179 lines. Moved code is the old text dedented, with only the path's name changed. Replayed against 924be14, at a frozen clock on an invented journal of 1,500 offers over 30 days, each build in turn in one directory: 160 requests (every route family, the marks and every POST door, 404s, 405s, a NUL, bad escapes, encoded paths, HEAD, gzip, a conditional GET, the event stream) and 34 scanner lines (chatter, non-objects, a torn line, one the handler throws on), in full and in lite. Every status, header (Date aside) and body byte the same, the journal each server ended with the same, and both servers' logs the same once stack frames are set aside; /server.js differs, being the file changed. Checks: rpi/test_lint.py 448 → 451 (send() handed the JSON type in sendJson alone; the path worked out once; route()'s POST doors and the journal's sync doors ahead of the gate and its pages after the decode). Not done: route()'s other POST doors (delivered, drop-undo, choose, held-end, held-pickup, settings, crop) are still inline, and lite/lite.js still works the path out for itself.
 
+### The tools
+
+**Excel ran card text in the places report's 43 CSVs (the tools review, Nov 2026).** `tools/report/csv.js` `csvCell` wrote a pickup such as "=HYPERLINK(...)" raw. It now takes trends.js `safeCell` (an apostrophe before `= + - @`, tab or CR, a plain number spared), quotes `\r`, and `tools/report/io.js` `writeCsv` puts the BOM on every file. Checks: tests/placesreport.test.js 520 → 522.
+
+**`shift_report --csv` wrote the places and notes raw where journal.html's records CSV defused them (the tools review).** `tools/shift_report.py` `to_records_csv` now passes every cell through `safe_cell`, safeCell's rule. Checks: tools/test_shift_report.py 286 → 288.
+
+**Restaurant waits printed a rider's street and a corner as stores (the tools review).** `store_name` and server.js `storeNameSaid` refused only `' & '`: DoorDash's "Wren Hollow Cir NW &, Faketown" and an UberX pickup, "Celebration Blvd, Faketown", passed. Both refuse any `&` and a part before the comma ending on offer_parser's `STREET_SUFFIX` (a quadrant allowed; assemble.js exports its same copy). Cost: "Market Square" and "Ash&Oak Grill" go unnamed; "Gateway Center" keeps its name, Center not on the list. Checks: tools/test_shift_report.py 288 → 291, server.js's copy run in node.
+
+**Two UTC dates headed the places report (the tools review).** `tools/report/render.js` printed its range by `toISOString`, a day past the tabs after 8pm. Both ends are advice.js `dayKeyOf` now. Checks: tests/placesreport.test.js 522 → 523.
+
+**report_check's median gap was the lower middle value (the tools review).** Two gaps of 5 and 10 min said 5. `tools/report_check.js` uses advice.js `median`. Checks: tests/reportcheck.test.js 22 (the pairs check wants 7.5).
+
+**The records CSV dated an order a day out at each clock change (the tools review).** `tools/shift_report.py` took 4 h of real time off, not of clock time as advice.js `dayKeyOf` does: 03:30 EST on 1 Nov 2026 came out 1 Nov, 04:30 EDT on 8 Mar 7 Mar. `driver_day` now. Checks: tools/test_shift_report.py 291 → 292, against `dayKeyOf`.
+
+**gpslog_tidy judged the log gpspipe holds open by mtime alone (the tools review).** After a reboot the clock runs from fake-hwclock's saved minute, so the open log could look older than the last one and be gzipped. `tools/gpslog_tidy.py` also skips the greatest GPS-time name (`GPS_NAMED`, tools/gpslog_name.py's shape). Checks: tools/test_gpslog_tidy.py 52 → 54.
+
+**A checkout path with a space broke both installers in this lane (the tools review).** `tools/install-sync.sh`'s ExecStart= and ReadWritePaths=, and `lite/install.sh`'s `KIOSK_CMD` (labwc autostart, desktop Exec=, cage's ExecStart=), split at the space. All quoted now; rpi/install-service.sh is another lane's. Checks: tools/test_installers.py, new, 10, with systemd-analyze verify.
+
+**A GPS log the NucBox held as both `.jsonl` and `.jsonl.gz` was read twice (the tools review).** places_nightly.sh never deletes, so a log copied before the rig gzipped it stays beside the `.gz`. `tools/shift_report.py` `load_fixes`, the places report's reader too, now skips such a `.jsonl` and counts it (`twins`). Checks: tools/test_shift_report.py 292 → 294.
+
+**The test gate could pass with suites unreported (the tools review).** `tools/test.sh` printed in order and stopped at the first suite with no `.done`; the verdict counted only what it printed, so a runner killed with -9 gave "all 1 suites passed" and exit 0 over five stub suites. It now counts the suites scheduled, says one with no result and moves on (`flush all` once every runner has ended), and exits 1 naming any missing. Checks: tools/test_gate.py, new, 5, on stub suites.
+
+**The places report read every GPS log twice, once per question (the tools review).** `tools/report/io.js` `gpsFixes` and `gpsAt` each ran load_fixes. main now keeps one helper open (`gpsLog`), which keeps each log's fixes (`load_log`, split out of `tools/shift_report.py` `load_fixes`) and answers both windows; nothing is cached on disk. On invented logs of 992,105 usable fixes: the two questions 41.2 → 20.7 s, the build 64.3 and 67.7 → 44.6 and 45.8 s; all 43 CSVs byte for byte, index.html but for its stamp. Checks: tests/placesreport.test.js 523 → 524.
+
 ---
 
 ## Settled — do not re-propose

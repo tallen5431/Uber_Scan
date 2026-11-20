@@ -607,6 +607,22 @@ function nbx() {
            + P.coverageCsv(rep5);
   ok('no dropoff text or drop position in the CSVs', csvs.indexOf('Ombre') < 0 && csvs.indexOf(String(dropFix.lat).slice(0, 7)) < 0);
   ok('the drop cell is named by its 2-mile cell, not a door', /cell near/.test(P.dropCsv(rep5, 'dropGrid')));
+  // Card text in a cell is defused as the offers page's CSVs defuse it
+  // (trends.js safeCell): a pickup opening = @ - + went out raw and ran as a
+  // formula in Excel. A figure keeps its sign, and a \r is quoted.
+  var CSVM = require('../tools/report/csv.js');
+  eq('[csv] a pickup a spreadsheet would run is led with an apostrophe; a figure keeps its sign',
+     ['=HYPERLINK("x")', '@Home Kitchen', '-', '+ 1 order', '\tTab Inn', -3.5, '-3.50', 'Utopian Bowl', 'Ash\rRow']
+       .map(CSVM.csvCell),
+     ['"\'=HYPERLINK(""x"")"', "'@Home Kitchen", "'-", "'+ 1 order", "'\tTab Inn", '-3.5', '-3.50', 'Utopian Bowl',
+      '"Ash\rRow"']);
+  ok('[csv] ...and the BOM put on each file is the offers page\'s', CSVM.BOM === '﻿');
+  // The page's range is in driver days, as every tab counts: 9:30pm on the
+  // 5th and 2am on the 7th (EST, before the change) were 2026-03-06 to
+  // 2026-03-07 in UTC, a day past the shifts they were.
+  var spanPage = P.html(Object.assign({}, rep5, { span: [at(5, 21, 30), at(7, 2, 0)] }));
+  ok('[span] the page\'s date range is the 4am driver day at both ends, not the UTC date',
+     spanPage.indexOf('2026-03-05 to 2026-03-06') >= 0 && spanPage.indexOf('2026-03-07') < 0);
   ok('the page\'s script parses', (function () {
     var js = page.split('<script>\n')[1].split('\n</script>')[0];
     try { new Function(js); return true; } catch (e) { console.log(e); return false; }
@@ -932,6 +948,25 @@ function nbx() {
   var gf = P.gpsFixes(logDir, at(3, 18, 0), at(3, 21, 0), 10);
   ok('the GPS log thinned to one fix per 10 s through the gate (' + gf.fixes.length + ')', gf.fixes.length >= 28 && gf.fixes.length <= 31);
   eq('...and the five minutes parked in it are one spell', P.spellsOf(gf.fixes, []).length, 1);
+  // ...and the report's two questions of the log off ONE read (io.js gpsLog):
+  // one helper for both, the log moved away between them and the second
+  // still answered from what the first read, as gpsFixes and gpsAt answer
+  // alone. Each was its own read of every log: 24 s and 23.7 s of 80.
+  var CP = require('child_process'), spawned = 0, spawn0 = CP.spawn, both = null;
+  var logFile = path.join(logDir, '2026-03-03_1900.jsonl');
+  CP.spawn = function () { spawned += 1; return spawn0.apply(CP, arguments); };
+  try {
+    var gl = P.gpsLog(logDir);
+    both = [await gl.fixes(at(3, 18, 0), at(3, 21, 0), 10)];
+    fs.renameSync(logFile, logFile + '.away');
+    both.push(await gl.at([at(3, 19, 2), at(3, 19, 30), at(3, 19, 10)]));
+    gl.close();
+  } finally {
+    CP.spawn = spawn0;
+    if (fs.existsSync(logFile + '.away')) fs.renameSync(logFile + '.away', logFile);
+  }
+  eq('[gps] both questions of the log from one helper and one read, answered as gpsFixes and gpsAt answer',
+     [spawned, both], [1, [gf, g]]);
 
   // The town of a spell's cell: the NucBox's reverse answer for the cell's
   // centre, asked once and kept.
@@ -1836,6 +1871,10 @@ function nbx() {
       return ['top_share_tests.csv', 'coverage_levels.csv', 'good_towns.csv', 'waiting_towns.csv', 'dead_miles_towns.csv',
               'size_restaurants.csv', 'strategy_curve.csv'].every(function (f3) { return fs.existsSync(path.join(tmp, 'out', f3)); });
     }()));
+    var noBom = fs.readdirSync(path.join(tmp, 'out')).filter(function (f3) {
+      return /\.csv$/.test(f3) && fs.readFileSync(path.join(tmp, 'out', f3), 'utf8').charAt(0) !== '﻿';
+    });
+    eq('[csv] ...every CSV written starts with the BOM, so Excel reads "6–9pm" as written', noBom, []);
     ok('...and drawn as the Strategy tab\'s card vs paid', /<h3 id="s-paid">Card vs paid<\/h3>/.test(page2)
        && /over 1 matched order/.test(page2));
     ok('...the Gold card\'s goal and Uber\'s figures are read from the source (/api/gold) for the acceptance lines',

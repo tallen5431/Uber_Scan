@@ -254,64 +254,130 @@ async function loadWaits(url) {
   return got.body.waits;
 }
 
-/* The car's position at each moment asked, off the GPS log, read by
- * tools/shift_report.py's load_fixes (rpi/gps.py's gate on every fix) and the
- * nearest usable fix within its NEAR_S. Python, because that is where the
- * gate is; one rule in one place. Returns [[lat, lon] | null] in order. */
+/* The GPS log, read by tools/shift_report.py (rpi/gps.py's gate on every
+ * fix, in Python because that is where the gate is: one rule in one place),
+ * asked two things: every usable fix in a window, thinned (`fixes`), and the
+ * car's position at each moment asked, the nearest usable fix within its
+ * NEAR_S (`at`).
+ *
+ * ONE READ FOR BOTH. Each was its own Python run of load_fixes over every log
+ * in its window: on an invented record of 1.06M fixes, 24 s and 23.7 s of an
+ * 80 s build, the same logs read twice. The second question cannot go in the
+ * first run's input (its moments are the drops timePresses moves off the
+ * first answer), so main keeps one helper open (gpsLog) and asks it twice.
+ * The helper keeps each log's fixes as it reads them (load_log: a log's
+ * fixes do not depend on which others are read beside it) and answers each
+ * window from the logs load_fixes would read for it, sorted as it sorts, so
+ * the answers are load_fixes's to the byte. Nothing is cached on disk: the
+ * fixes live in that process and go with it. gpsAt and gpsFixes, one
+ * question each, are the same helper asked once. */
 var GPS_HELPER = [
-  'import bisect, json, sys',
+  'import bisect, json, os, sys',
   'sys.path.insert(0, sys.argv[1])',
   'import shift_report as SR',
-  'req = json.load(sys.stdin)',
-  'ts = req["times"]',
-  'out = [None] * len(ts)',
-  'info = {}',
-  'if ts:',
-  '    fixes, info = SR.load_fixes(req["dir"], (min(ts) * 1000.0 - 3600e3, max(ts) * 1000.0 + 3600e3))',
-  '    keys = [f[0] for f in fixes or []]',
-  '    for n, t in enumerate(ts):',
-  '        i = bisect.bisect_left(keys, t)',
-  '        best = None',
-  '        for j in (i - 1, i):',
-  '            if 0 <= j < len(keys) and abs(keys[j] - t) <= SR.NEAR_S:',
-  '                if best is None or abs(keys[j] - t) < abs(best[0] - t):',
-  '                    best = fixes[j]',
-  '        out[n] = [best[1], best[2]] if best else None',
-  'print(json.dumps({"at": out, "files": info.get("files", 0), "passed": info.get("passed", 0)}))',
+  'd = sys.argv[2]',
+  'names = SR.log_names(d)[0] if d and os.path.isdir(d) else []',
+  'per = {}',
+  'def window(lo, hi):',
+  '    pick = SR._logs_for(names, (lo, hi))',
+  '    fixes, passed = [], 0',
+  '    for n in pick:',
+  '        if n not in per:',
+  '            per[n] = SR.load_log(d, n)',
+  '        fixes.extend(per[n][0])',
+  '        passed += per[n][1]["passed"]',
+  '    fixes.sort(key=lambda f: f[:3])',
+  '    return fixes, len(pick), passed',
+  'for line in sys.stdin:',
+  '    req = json.loads(line)',
+  '    if req["op"] == "fixes":',
+  '        fixes, files, passed = window(req["from"], req["to"])',
+  '        out, last = [], None',
+  '        for f in fixes:',
+  '            if f[0] * 1000.0 < req["from"] or f[0] * 1000.0 > req["to"]:',
+  '                continue',
+  '            if last is None or f[0] - last >= req["thin"]:',
+  '                out.append([round(f[0], 1), round(f[1], 6), round(f[2], 6)])',
+  '                last = f[0]',
+  '        got = {"fixes": out, "files": files, "passed": passed}',
+  '    else:',
+  '        ts = req["times"]',
+  '        out, files, passed = [None] * len(ts), 0, 0',
+  '        if ts:',
+  '            fixes, files, passed = window(min(ts) * 1000.0 - 3600e3, max(ts) * 1000.0 + 3600e3)',
+  '            keys = [f[0] for f in fixes]',
+  '            for n, t in enumerate(ts):',
+  '                i = bisect.bisect_left(keys, t)',
+  '                best = None',
+  '                for j in (i - 1, i):',
+  '                    if 0 <= j < len(keys) and abs(keys[j] - t) <= SR.NEAR_S:',
+  '                        if best is None or abs(keys[j] - t) < abs(best[0] - t):',
+  '                            best = fixes[j]',
+  '                out[n] = [best[1], best[2]] if best else None',
+  '        got = {"at": out, "files": files, "passed": passed}',
+  '    sys.stdout.write(json.dumps(got) + "\\n")',
+  '    sys.stdout.flush()',
 ].join('\n');
 
-function gpsAt(dir, timesMs) {
-  var got = cp.spawnSync('python3', ['-c', GPS_HELPER, TOOLS], {
-    input: JSON.stringify({ dir: dir, times: timesMs.map(function (t) { return t / 1000; }) }),
-    encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+function fixesAsk(fromMs, toMs, thin) {
+  return { op: 'fixes', from: fromMs, to: toMs, thin: thin || SPELL_THIN_S };
+}
+function atAsk(timesMs) {
+  return { op: 'at', times: timesMs.map(function (t) { return t / 1000; }) };
+}
+
+function gpsOnce(dir, ask) {
+  var got = cp.spawnSync('python3', ['-c', GPS_HELPER, TOOLS, dir], {
+    input: JSON.stringify(ask) + '\n', encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
   if (got.status !== 0) throw new Error('reading the GPS log failed: ' + (got.stderr || got.error || '').toString().slice(0, 400));
   return JSON.parse(got.stdout);
 }
 
-/* Every usable fix in [fromMs, toMs], thinned to one per `thin` seconds,
- * as [[tSec, lat, lon]] — load_fixes again, so the gate is rpi/gps.py's. */
-var FIXES_HELPER = [
-  'import json, sys',
-  'sys.path.insert(0, sys.argv[1])',
-  'import shift_report as SR',
-  'req = json.load(sys.stdin)',
-  'fixes, info = SR.load_fixes(req["dir"], (req["from"], req["to"]))',
-  'out, last = [], None',
-  'for f in fixes or []:',
-  '    if f[0] * 1000.0 < req["from"] or f[0] * 1000.0 > req["to"]:',
-  '        continue',
-  '    if last is None or f[0] - last >= req["thin"]:',
-  '        out.append([round(f[0], 1), round(f[1], 6), round(f[2], 6)])',
-  '        last = f[0]',
-  'print(json.dumps({"fixes": out, "files": info.get("files", 0), "passed": info.get("passed", 0)}))',
-].join('\n');
+/* The positions at `timesMs`, [[lat, lon] | null] in order, as `at`. */
+function gpsAt(dir, timesMs) { return gpsOnce(dir, atAsk(timesMs)); }
 
-function gpsFixes(dir, fromMs, toMs, thin) {
-  var got = cp.spawnSync('python3', ['-c', FIXES_HELPER, TOOLS], {
-    input: JSON.stringify({ dir: dir, from: fromMs, to: toMs, thin: thin || SPELL_THIN_S }),
-    encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
-  if (got.status !== 0) throw new Error('reading the GPS log failed: ' + (got.stderr || got.error || '').toString().slice(0, 400));
-  return JSON.parse(got.stdout);
+/* Every usable fix in [fromMs, toMs], thinned to one per `thin` seconds, as
+ * [[tSec, lat, lon]] in `fixes`. */
+function gpsFixes(dir, fromMs, toMs, thin) { return gpsOnce(dir, fixesAsk(fromMs, toMs, thin)); }
+
+/* The helper kept open for main's two questions: { fixes(), at(), close() },
+ * each question a Promise of what gpsFixes and gpsAt answer. Started on the
+ * first question; close() ends it, and main closes it in a finally. */
+function gpsLog(dir) {
+  var child = null, buf = '', waiting = [], err = '', ended = null;
+  function start() {
+    child = cp.spawn('python3', ['-c', GPS_HELPER, TOOLS, dir], { stdio: ['pipe', 'pipe', 'pipe'] });
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', function (d) {
+      buf += d;
+      var k;
+      while ((k = buf.indexOf('\n')) >= 0) {
+        var line = buf.slice(0, k);
+        buf = buf.slice(k + 1);
+        var w = waiting.shift();
+        if (w) { try { w.ok(JSON.parse(line)); } catch (e) { w.no(e); } }
+      }
+    });
+    child.stderr.on('data', function (d) { err = (err + d).slice(-4000); });
+    child.on('error', function (e) { ended = e; });
+    child.on('close', function (code) {
+      ended = ended || new Error('reading the GPS log failed: ' + (err || 'exit ' + code).slice(0, 400));
+      waiting.splice(0).forEach(function (w) { w.no(ended); });
+    });
+  }
+  function ask(q) {
+    if (!child) start();
+    return new Promise(function (ok, no) {
+      if (ended) { no(ended); return; }
+      waiting.push({ ok: ok, no: no });
+      child.stdin.write(JSON.stringify(q) + '\n');
+    });
+  }
+  return {
+    fixes: function (fromMs, toMs, thin) { return ask(fixesAsk(fromMs, toMs, thin)); },
+    at: function (timesMs) { return ask(atAsk(timesMs)); },
+    close: function () { if (child && !ended) { ended = new Error('closed'); child.stdin.end(); } },
+  };
 }
 
 /* The town a 2-mile cell's centre is in, by the NucBox's own Nominatim
@@ -490,26 +556,32 @@ async function main(argv) {
   var taken = Array.isArray(body.taken) ? body.taken : [];
   var spanTimes = offers.filter(counted).map(seenAt).filter(isFinite);
   var fx = null, presses = null;
-  if (o.gps && spanTimes.length) {
-    fx = gpsFixes(o.gps, minOf(spanTimes) - 3600e3, maxOf(spanTimes) + 3600e3);
-    var tp = timePresses(taken, fx.fixes);
-    taken = tp.taken;
-    presses = tp.stats;
-    console.log('presses timed by the GPS: ' + presses.timed + ' of ' + presses.pressed + ' (' + presses.inside
-                + ' inside a stop, ' + presses.early + ' early, ' + presses.late + ' late; ' + presses.none + ' no stop, '
-                + presses.short + ' at a stop the car had not driven the order to)');
-  }
+  // One helper for both questions of the log (gpsLog), closed however this ends.
+  var gps = o.gps ? gpsLog(o.gps) : null;
+  try {
+    if (o.gps && spanTimes.length) {
+      fx = await gps.fixes(minOf(spanTimes) - 3600e3, maxOf(spanTimes) + 3600e3);
+      var tp = timePresses(taken, fx.fixes);
+      taken = tp.taken;
+      presses = tp.stats;
+      console.log('presses timed by the GPS: ' + presses.timed + ' of ' + presses.pressed + ' (' + presses.inside
+                  + ' inside a stop, ' + presses.early + ' early, ' + presses.late + ' late; ' + presses.none + ' no stop, '
+                  + presses.short + ' at a stop the car had not driven the order to)');
+    }
 
-  // Taken trips: the GPS log at the drop, else the dropoff's door.
-  var byId = Object.create(null);
-  offers.forEach(function (row2) { if (row2 && typeof row2.id === 'string') byId[row2.id] = row2; });
-  var atDoor = taken.filter(function (t) { return AT_THE_DOOR.indexOf(t.by || 'drop') >= 0 && byId[t.id]; });
-  var gpsPos = Object.create(null);
-  if (o.gps && atDoor.length) {
-    var g = gpsAt(o.gps, atDoor.map(function (t) { return t.endedAt; }));
-    atDoor.forEach(function (t, j) { if (g.at[j]) gpsPos[t.id + '@' + t.endedAt] = { lat: g.at[j][0], lon: g.at[j][1] }; });
-    console.error('GPS log: ' + g.files + ' files, ' + g.passed + ' usable fixes, '
-                  + Object.keys(gpsPos).length + ' of ' + atDoor.length + ' drops placed by it');
+    // Taken trips: the GPS log at the drop, else the dropoff's door.
+    var byId = Object.create(null);
+    offers.forEach(function (row2) { if (row2 && typeof row2.id === 'string') byId[row2.id] = row2; });
+    var atDoor = taken.filter(function (t) { return AT_THE_DOOR.indexOf(t.by || 'drop') >= 0 && byId[t.id]; });
+    var gpsPos = Object.create(null);
+    if (o.gps && atDoor.length) {
+      var g = await gps.at(atDoor.map(function (t) { return t.endedAt; }));
+      atDoor.forEach(function (t, j) { if (g.at[j]) gpsPos[t.id + '@' + t.endedAt] = { lat: g.at[j][0], lon: g.at[j][1] }; });
+      console.error('GPS log: ' + g.files + ' files, ' + g.passed + ' usable fixes, '
+                    + Object.keys(gpsPos).length + ' of ' + atDoor.length + ' drops placed by it');
+    }
+  } finally {
+    if (gps) gps.close();
   }
   var dropPins = Object.create(null);
   for (var t = 0; t < atDoor.length; t++) {
@@ -638,19 +710,21 @@ async function main(argv) {
               truncated: !!body.truncated, since: o.since } });
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, 'index.html'), html(report));
-  fs.writeFileSync(path.join(outDir, 'places.csv'), csvOf(report, 'place'));
-  fs.writeFileSync(path.join(outDir, 'towns.csv'), csvOf(report, 'town'));
-  fs.writeFileSync(path.join(outDir, 'grid.csv'), csvOf(report, 'grid'));
-  fs.writeFileSync(path.join(outDir, 'dropoff_towns.csv'), dropCsv(report, 'dropTown'));
-  fs.writeFileSync(path.join(outDir, 'dropoff_grid.csv'), dropCsv(report, 'dropGrid'));
-  fs.writeFileSync(path.join(outDir, 'coverage.csv'), coverageCsv(report));
-  fs.writeFileSync(path.join(outDir, 'restaurants.csv'), restCsv(report));
-  fs.writeFileSync(path.join(outDir, 'restaurant_branches.csv'), restBranchCsv(report));
-  fs.writeFileSync(path.join(outDir, 'top_share_tests.csv'), shareCsv(report));
-  fs.writeFileSync(path.join(outDir, 'coverage_levels.csv'), levelsCsv(report));
-  fs.writeFileSync(path.join(outDir, 'strategy_curve.csv'), strategyCsv(report));
+  // Every CSV through one door, so none is written without csv.js's BOM.
+  function writeCsv(name, text) { fs.writeFileSync(path.join(outDir, name), CSV.BOM + text); }
+  writeCsv('places.csv', csvOf(report, 'place'));
+  writeCsv('towns.csv', csvOf(report, 'town'));
+  writeCsv('grid.csv', csvOf(report, 'grid'));
+  writeCsv('dropoff_towns.csv', dropCsv(report, 'dropTown'));
+  writeCsv('dropoff_grid.csv', dropCsv(report, 'dropGrid'));
+  writeCsv('coverage.csv', coverageCsv(report));
+  writeCsv('restaurants.csv', restCsv(report));
+  writeCsv('restaurant_branches.csv', restBranchCsv(report));
+  writeCsv('top_share_tests.csv', shareCsv(report));
+  writeCsv('coverage_levels.csv', levelsCsv(report));
+  writeCsv('strategy_curve.csv', strategyCsv(report));
   Object.keys(MORE_CSVS).forEach(function (name) {
-    fs.writeFileSync(path.join(outDir, name), tableCsv(report, MORE_CSVS[name][0], MORE_CSVS[name][1]));
+    writeCsv(name, tableCsv(report, MORE_CSVS[name][0], MORE_CSVS[name][1]));
   });
   console.log(summary(report));
   console.log('\nWritten: ' + path.join(outDir, 'index.html') + ' (and ' + (11 + Object.keys(MORE_CSVS).length)
@@ -661,6 +735,6 @@ async function main(argv) {
 module.exports = {
   JOURNAL_PAGE: JOURNAL_PAGE, loadJournal: loadJournal, hitsOf: hitsOf, DEGRADED_SHARE: DEGRADED_SHARE,
   DEGRADED_MIN: DEGRADED_MIN, degraded: degraded, nbxFetch: nbxFetch, streetsBase: streetsBase,
-  loadEarnings: loadEarnings, loadWaits: loadWaits, gpsAt: gpsAt, gpsFixes: gpsFixes, cellTownOf: cellTownOf,
+  loadEarnings: loadEarnings, loadWaits: loadWaits, gpsAt: gpsAt, gpsFixes: gpsFixes, gpsLog: gpsLog, cellTownOf: cellTownOf,
   inside: inside, realish: realish, parseArgs: parseArgs, main: main,
 };

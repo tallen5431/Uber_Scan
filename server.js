@@ -5537,10 +5537,22 @@ function saveStoreWaits() {
   }
 }
 
-// A store's name as said, or null for none or for a door or a corner.
+// A store's name as said, or null for none or for a door, a corner or a
+// street. The end-of-shift report's store_name is the same rule, so Restaurant
+// waits and the card's "usually" name the same stores; its docstring has the
+// fault and the cost. The corner was ' & ', which DoorDash's "Wren Hollow Cir
+// NW &, Faketown" slipped past, and an UberX ride's pickup (the rider's street,
+// "Celebration Blvd, Faketown") passed whole. Now an '&' anywhere, or a part
+// before the comma ending on a street's type (a quadrant after it allowed),
+// is no store: Assemble.STREET_SUFFIX, the list offer_parser's STREET_SUFFIX
+// is, never a third. The cost: "Market Square, Faketown" and "Ash&Oak Grill"
+// get no name and their waits are not kept; "Gateway Center" keeps its own.
+var STORE_STREET_HEAD = new RegExp('\\S\\s+' + Assemble.STREET_SUFFIX.source.replace(/^\^|\$$/g, '')
+                                   + '\\.?(?:\\s+(?:nw|ne|sw|se|n|s|e|w))?$', 'i');
 function storeNameSaid(t) {
   var s = MV.plannerName(Assemble.storeOf(typeof t === 'string' ? t : ''));
-  if (!Assemble.storeKey(s) || /^\d/.test(s) || / & /.test(s)) return null;
+  if (!Assemble.storeKey(s) || /^\d/.test(s) || /&/.test(s)
+      || STORE_STREET_HEAD.test(s.split(',')[0].trim())) return null;
   return s;
 }
 

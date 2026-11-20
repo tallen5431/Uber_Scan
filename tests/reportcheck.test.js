@@ -117,9 +117,9 @@ var how = roRes.pay.reofferedHow;
 eq('re-offered by: four in same-trip pairs, one by its id coming back alone',
    [how.marked, how.byPair, how.bySpanOnly], [5, 4, 1]);
 eq('...the pairs: two keyed on a printed dropoff, one agreeing on miles and minutes, pay up once and down once, '
-   + 'the median gap the shorter, 5 min',
+   + 'the median gap between 5 and 10 min, 7.5 (advice.js median: the lower middle value read 5)',
    [how.pairs.total, how.pairs.named, how.pairs.sameBoth, how.pairs.payUp, how.pairs.paySame, how.pairs.payDown,
-    how.pairs.gapMedianMin], [2, 2, 1, 1, 0, 1, 5]);
+    how.pairs.gapMedianMin], [2, 2, 1, 1, 0, 1, 7.5]);
 var roText = RC.format(roRes);
 ok('...and said in the words, with how old the newest offer is (5 days: a stopped sync looks like no driving)',
    /re-offered by: same trip under two ids 4, one id back on screen only 1/.test(roText)

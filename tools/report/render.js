@@ -222,8 +222,11 @@ function html(r) {
   var data = JSON.stringify(Object.assign({}, r, { hourly: hourly }), function (k, v) {
     return k === 'minutes' && v && Array.isArray(v.good) && Array.isArray(v.take) ? undefined : v;
   }).replace(/</g, '\\u003c');
-  var span = r.span ? new Date(r.span[0]).toISOString().slice(0, 10) + ' to '
-    + new Date(r.span[1]).toISOString().slice(0, 10) : 'no offers';
+  // Both ends as driver days (advice.js dayKeyOf, the 4am day every tab
+  // counts by). They were the UTC dates: an evening's last offer after 8pm in
+  // New York is the next day in UTC, and a 2am one the day after the shift,
+  // so the range ran a day past the tabs' own.
+  var span = r.span ? A.dayKeyOf(r.span[0]) + ' to ' + A.dayKeyOf(r.span[1]) : 'no offers';
   var cvAll = r.coverage.all, placedTotal = cvAll.placed.n + cvAll.unplaced.n;
   // Every section, keyed by its tab, so they can be written in the nav's
   // order whatever order they were built in: a reader paging through the
