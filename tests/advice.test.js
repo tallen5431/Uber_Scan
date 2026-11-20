@@ -2420,6 +2420,26 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
        JSON.stringify(mixedLad));
   }
 
+  // The offers copied once for the whole sweep, not once a rung. Each of the
+  // five passes copied every field of every offer, the OCR text and all, to
+  // change one — 223 ms of a 15,000-offer sweep against 96 copied once — so
+  // a field the sweep never changes is read here to count the copies. The
+  // answer is the table above, and the offers handed in stay as they were.
+  var reads = 0;
+  var watched = market.map(function (o) {
+    var c = {}, k;
+    for (k in o) { if (Object.prototype.hasOwnProperty.call(o, k)) c[k] = o[k]; }
+    Object.defineProperty(c, 'text', { enumerable: true,
+      get: function () { reads++; return 'Delivery\n$' + o.pay; } });
+    return c;
+  });
+  var asHanded = JSON.stringify(market);
+  eq('the sweep over offers that count their copies is the same table',
+     JSON.stringify(A.costLadder(watched, { target: 25 })), JSON.stringify(lad));
+  eq('...each offer copied once for all ' + (lad ? lad.length : 0) + ' rungs, not once a rung',
+     reads, market.length);
+  eq('...and the offers it was handed are as they were', JSON.stringify(market), asHanded);
+
   var noTarget = A.costLadder(market, {});
   ok_('with no line set, the sweep says nothing about one',
       noTarget && noTarget.every(function (r) { return r.holds === null; }));

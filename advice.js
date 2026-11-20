@@ -1877,15 +1877,29 @@
     // What that leaves is a behaviour nothing states, so it is stated here and
     // both cases are pinned in tests/advice.test.js against the OUTCOME rather
     // than against whichever line produces it.
+    //
+    // The offers are copied once and only `cost` is written on each pass.
+    // They were copied field by field on every one of the five, the OCR
+    // text and all, for a pass that changes one field: the sweep over an
+    // invented 15,000-offer journal took 223 ms in node, and 96 copied once.
+    // Safe because nothing on the way reads a copy after its pass or writes
+    // one: `usable` builds new rows out of them (reading pay, cost, minutes
+    // and the flags, never writing) and `bestAt` sees only those, so each
+    // pass reads exactly the fields it read before, `cost` set for this
+    // rate. The caller's offers are never written; the copies are why.
+    var rescored = null;
     [0.5, 0.75, 1, 1.5, 2].forEach(function (mult) {
       var rate = Math.round(mine * mult * 100) / 100;
       if (out.length && out[out.length - 1].perMile === rate) return;
-      var rescored = (offers || []).map(function (row) {
+      rescored = rescored || (offers || []).map(function (row) {
         var copy = {}, k;
         for (k in row) { if (Object.prototype.hasOwnProperty.call(row, k)) copy[k] = row[k]; }
+        return copy;
+      });
+      rescored.forEach(function (copy, i) {
+        var row = offers[i];
         copy.cost = (typeof row.miles === 'number' && isFinite(row.miles) && row.miles > 0)
           ? row.miles * rate : 0;
-        return copy;
       });
       var b = bestAt(usable(rescored), o.breakMinutes || SHOWN_AT);
       if (!b) return;
