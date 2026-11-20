@@ -734,6 +734,38 @@ eq('[waits] the store is the card\'s pickup less its bracketed street; a door, a
                                '1981 Cobb Pkwy NW, Kennesaw', 'Elm St & Oak Ave, Faketown',
                                None, '', 'oe Larkspur Tacos')],
    ['Imaginary Bistro', 'Larkspur Tacos', None, None, None, None, 'Larkspur Tacos'])
+# The corner test was ' & ': DoorDash's corner cut at its comma ("... NW &,
+# Town") went past it, and an UberX ride's pickup, the rider's street, passed
+# whole. Both were printed as stores. Invented streets and stores; the last
+# three are the cost and what the cost is not.
+_STORE_PROBES = ('Wren Hollow Cir NW &, Faketown', 'Celebration Blvd, Faketown',
+                 'Kestrel Pkwy W', 'Old Mill Rd. NE, Faketown', 'Ash&Oak Grill',
+                 'Market Square, Faketown', 'Larkspur Tacos', 'Gateway Center, Faketown',
+                 'Loop', 'Imaginary Bistro (1 Nowhere Ln)', 'oe Wren Noodle Bar')
+eq('[waits] a corner cut at its comma, a rider\'s street (a type, a quadrant after it) and any '
+   '"&" are no store; "Market Square" is the cost, "Gateway Center" keeps its name',
+   [SR.store_name(t) for t in _STORE_PROBES],
+   [None, None, None, None, None, None, 'Larkspur Tacos', 'Gateway Center, Faketown', 'Loop',
+    'Imaginary Bistro', 'Wren Noodle Bar'])
+# ...and server.js storeNameSaid says the same stores: its own text, run in
+# node beside the assemble.js and map-view.js it calls, over the same names,
+# and the street list it asks is offer_parser's word for word.
+with open(os.path.join(ROOT, 'server.js'), encoding='utf-8') as fh:
+    _srvjs = fh.read()
+_snsrc = re.search(r'\nvar STORE_STREET_HEAD = [\s\S]*?\nfunction storeNameSaid\(t\) \{[\s\S]*?\n\}\n',
+                   _srvjs)
+_snrun = subprocess.run(
+    ['node', '-e', 'var Assemble = require(process.argv[1]), MV = require(process.argv[2]);\n'
+     + (_snsrc.group(0) if _snsrc else '') + '\nprocess.stdout.write(JSON.stringify({names: '
+     'JSON.parse(process.argv[3]).map(storeNameSaid), list: Assemble.STREET_SUFFIX.source}));',
+     os.path.join(ROOT, 'assemble.js'), os.path.join(ROOT, 'map-view.js'),
+     json.dumps(_STORE_PROBES)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+_snout = json.loads(_snrun.stdout or b'{}') if _snrun.returncode == 0 else {}
+eq('[waits] ...and server.js storeNameSaid names the same stores (%s)' % _snrun.stderr[-200:],
+   _snout.get('names'), [SR.store_name(t) for t in _STORE_PROBES])
+import offer_parser as _OP                                    # noqa: E402
+eq('[waits] ...by the one street list: assemble.js STREET_SUFFIX is offer_parser\'s',
+   _snout.get('list'), '^(?:%s)$' % _OP.STREET_SUFFIX)
 # The owner's 29 Oct shift: a pickup returned as the card's store line and the
 # whole line under it, the trip's address, run together ("<Store> <n> <Street>
 # Pkwy W, <Town>"), printed and grouped by that. unglued takes the address

@@ -3832,6 +3832,10 @@
            SAME_STORE_NEAR_MI: SAME_STORE_NEAR_MI, chainName: chainName, doorOf: doorOf,
            // ...and the name a store's waits are kept by (server.js storeNameSaid).
            storeOf: storeOf,
+           // ...and the short street-type list, offer_parser's STREET_SUFFIX
+           // word for word, by which storeNameSaid refuses a pickup ending on
+           // a street's type: a rider's street, not a store.
+           STREET_SUFFIX: STREET_SUFFIX,
            sameDoor: sameDoor, pickupSide: pickupSide, samePickup: samePickup,
            attribute: attribute, park: park, unpark: unpark, unowned: unowned,
            retryUnowned: retryUnowned,

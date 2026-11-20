@@ -875,19 +875,44 @@ def unglued(pickup, texts):
     return pickup
 
 
+# A name whose part before the comma ENDS on a street's type, a quadrant
+# after it allowed ("Celebration Blvd, Faketown", "Wren Hollow Cir NW"): a
+# street, not a store. offer_parser's STREET_SUFFIX, the USPS list the
+# readers already draw a street's end by, and the list assemble.js keeps the
+# same copy of for server.js (storeNameSaid asks Assemble.STREET_SUFFIX; the
+# suite holds the two equal). A word before the type is required, so a store
+# called "Loop" alone keeps its name.
+_STREET_HEAD = re.compile(r'\S\s+(?:%s)\.?(?:\s+(?:nw|ne|sw|se|n|s|e|w))?$' % OP.STREET_SUFFIX,
+                          re.IGNORECASE)
+
+
 def store_name(t):
     """The store a card's pickup names, or None. Uber's bracketed street
     off its end (assemble.js storeOf), the Trip Planner's icon letters off its
-    front (map-view.js plannerName), and no name at all for a door or a
-    corner — a leading house number, an '&' — which would be an address:
-    server.js storeNameSaid's rule, so the two say the same stores."""
+    front (map-view.js plannerName), and no name at all for a door, a corner
+    or a street — a leading house number, an '&' anywhere, a part before the
+    comma that ends on a street's type — which would be an address:
+    server.js storeNameSaid's rule, so the two say the same stores.
+
+    THE FAULT (the tools review, Nov 2026): the corner test was ' & ', which
+    DoorDash's "Wren Hollow Cir NW &, Faketown" (the corner cut at its comma)
+    slipped past, and an UberX ride's pickup, the rider's street ("Celebration
+    Blvd, Faketown"), passed whole: Restaurant waits printed both as stores.
+    THE COST: a store named for its street ("Market Square, Faketown", "Noodle
+    Way") and one with an '&' anywhere in its name ("Ash&Oak Grill"; one with
+    ' & ' was refused before) get no name, and their waits go uncounted. A
+    wait unnamed is a line missing; a rider's street printed as a restaurant
+    is a line that is wrong. "Gateway Center, Faketown" keeps its name: Center
+    is not on this list (assemble.js doorOf's longer one has it, and would
+    cost every "... Center" store its name)."""
     if not isinstance(t, str):
         return None
     s = re.sub(r'\s*\([^()]*\)?\s*$', '', re.sub(r'\s+', ' ', t).strip()).strip()
     m = re.match(r'^[a-z]{1,2} (?=[A-Z])', s)
     if m:
         s = s[m.end():]
-    if not re.sub(r'[^a-z0-9]', '', s.lower()) or re.match(r'^\d', s) or ' & ' in s:
+    if not re.sub(r'[^a-z0-9]', '', s.lower()) or re.match(r'^\d', s) or '&' in s \
+            or _STREET_HEAD.search(s.split(',')[0].strip()):
         return None
     return s[:NAME_MAX]
 
