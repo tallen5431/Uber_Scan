@@ -21,8 +21,8 @@ So, run before gpspipe starts:
     left as it is. The `.gz` keeps the log's own modification time, so the age
     rule below counts from when the log was last written, not from when it was
     compressed.
-  * a log is FINISHED unless it is the newest one, or was written to in the
-    last QUIET_S. The newest is the one gpspipe is most likely still writing,
+  * a log is FINISHED unless it is the newest one, carries the latest
+    GPS-time name (GPS_NAMED), or was written to in the last QUIET_S. The newest is the one gpspipe is most likely still writing,
     and a writer can still be attached to the one before it while a second
     gpspipe starts; neither can be told from a closed file by looking at it.
     The newest is compressed on the next run, once a newer one exists.
@@ -51,6 +51,7 @@ missing with nothing saying so.
 import argparse
 import gzip
 import os
+import re
 import stat
 import sys
 import time
@@ -77,6 +78,12 @@ LEVEL = 6
 CHUNK = 1 << 20
 
 LOG = '.jsonl'
+
+# A log named by the GPS's own clock (tools/gpslog_name.py name_for:
+# `<date>_<HHMM>`, the shape shift_report's _LOG_NAME reads; a date alone, the
+# README's older `date +%F`, sorts before the minutes of that date). Not
+# `-unsynced`: that name is the Pi's clock, which the mtime rule already is.
+GPS_NAMED = re.compile(r'^\d{4}-\d\d-\d\d(?:_\d{4})?\.jsonl$')
 PACKED = '.jsonl.gz'
 
 
@@ -94,12 +101,24 @@ def plan(directory, now, days=KEEP_DAYS):
             files.append((name, st))
     logs = [(name, st) for name, st in files if name.endswith(LOG)]
     newest = max(logs, key=lambda f: (f[1].st_mtime, f[0]))[0] if logs else None
+    # ...and the log with the greatest GPS-time name, whatever its mtime. The
+    # mtime alone is the Pi's clock, and after a reboot that runs from the
+    # minute fake-hwclock saved at shutdown until NTP steps it: the log gpspipe
+    # has just opened can carry an mtime older than the one before it, written
+    # up to the shutdown, and was gzipped and removed from under the writer.
+    # The namer waits for the receiver's fix, so the open log's name is the
+    # latest however wrong the clock.
+    named = [name for name, _ in logs if GPS_NAMED.match(name)]
+    last_named = max(named) if named else None
     out = []
     for name, st in files:
         age = now - st.st_mtime
         if name.endswith(LOG):
             if name == newest:
                 out.append(('skip', name, 'the newest log, which gpspipe may still be writing'))
+            elif name == last_named:
+                out.append(('skip', name, 'the latest by its GPS-time name, which gpspipe may still '
+                            'be writing'))
             elif age < QUIET_S:
                 out.append(('skip', name, 'written %d s ago, under the %d min a finished log has been left'
                             % (max(0, age), QUIET_S // 60)))
