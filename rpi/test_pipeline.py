@@ -1831,6 +1831,21 @@ if TC.available():
        'is never priced off it', (_od['cardBox'], _od['parsed']['pay'] in (None, 14.48)),
        (None, True))
 
+    # A stops line the reader spaced with U+FEFF or U+00A0 is a stops line to
+    # the pipeline as it is to find_stores (OP.stops_line): STORES_LINE's \s is
+    # ASCII, and asked of the raw text it refused the remembered crop's read
+    # for "no stops line in it" and never raised the box over the card whose
+    # stores the parser had just read off that line.
+    _sp_memo = {'journey': {'minutes': 33.0, 'miles': 8.7, 'deliverBy': None}, 'stops': True}
+    eq('a stops line spaced with U+FEFF or U+00A0 is one to the remembered crop and the raise',
+       [PL.card_box_refused(_sp_memo, {'parsed': OP2.parse(_t), 'text': _t, 'clipped': False})
+        for _t in ('$14.10 incl. tips\n3 stops (8.7﻿mi) - 33 min\nCustomer dropoff',
+                   '$14.10 incl. tips\n3 stops (8.7 mi) - 33 min')]
+       + [PL.raise_journey({'text': '3 stops (8.7﻿mi) - 33 min\n& Lark Owl Pizza',
+                            'parsed': OP2.parse('3 stops (8.7﻿mi) - 33 min\n& Lark Owl Pizza'),
+                            'clipped': False}) is not None],
+       [None, None, True])
+
     # card_box_refused holds each of the rescue's rules, and one stricter.
     _memo = {'journey': {'minutes': 33.0, 'miles': 8.7, 'deliverBy': None}, 'stops': True}
 

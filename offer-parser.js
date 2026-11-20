@@ -2975,6 +2975,15 @@
   var STORE_CHIP = /\b(?:pick\s*up|drop\s*off)\s*\d|\bid\s*check\b|\bage\s*21/i;
   var STORES_LINE = new RegExp(
     'ps\\s*\\(\\s*' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?\\s*m(?:i|iles?)\\b\\s*\\)', 'i');
+  // Asked of the line with each whitespace character of either language one
+  // space, one for one, and the name taken from the raw line: Python's \s in
+  // these four is ASCII, and off one card the ports read "(2.6<U+FEFF>mi)"
+  // and "Pick<U+00A0>up 2 orders" two ways. This port's answers were the
+  // card's; Python's now match. With the line spaced, the \r, U+2028 and
+  // U+2029 STORE_STREET's comma arm allows for never reach it. See _spaced in
+  // offer_parser.py.
+  var ONE_SPACE = /[\s\u001c-\u001f\u0085]/g;
+  function spaced(line) { return String(line || '').replace(ONE_SPACE, ' '); }
 
   // The union of what the two languages call a space, as normalize() has it:
   // split and trimmed on this rather than on \s and trim(), which leave
@@ -3202,15 +3211,15 @@
   function findStores(rawText, doors) {
     var lines = String(rawText || '').split('\n'), at = -1, i;
     for (i = 0; i < lines.length; i++) {
-      if (STORES_LINE.test(lines[i])) { at = i; break; }
+      if (STORES_LINE.test(spaced(lines[i]))) { at = i; break; }
     }
     if (at < 0) return [];
     var out = [], pending = [], doorOf = [], underName = false;
     for (i = at + 1; i < lines.length; i++) {
-      var line = lines[i];
-      if (STORE_END.test(line)) break;
-      if (STORE_CHIP.test(line)) { underName = false; continue; }
-      if (STORE_STREET.test(line)) {
+      var line = lines[i], flat = spaced(line);
+      if (STORE_END.test(flat)) break;
+      if (STORE_CHIP.test(flat)) { underName = false; continue; }
+      if (STORE_STREET.test(flat)) {
         if (pending.length) {
           out.push(pending.join(' ').slice(0, MAX_PLACE));
           doorOf.push(underName ? storeDoor(line) : null);
