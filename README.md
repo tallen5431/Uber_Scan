@@ -598,6 +598,7 @@ used. A one-line key across the map's foot names the marks on it.
 | `tools/install-sync.sh` | Puts the rig's journal on a timer to the machine at home; see the rig's README |
 | `tools/places_report.js`, `tools/places_nightly.sh` | The NucBox's offline report of where good offers start, and its nightly rebuild; see *Where the good offers start* |
 | `tools/report_check.js` | The reports checked against the real journal on the NucBox, aggregates only; see *Checking the reports against the real journal* |
+| `tools/autoupdate.sh`, `tools/install-autoupdate.sh` | The nightly update of the rig and the NucBox — fetch the gated branch, fast-forward, restart, check, roll back — and the timer that runs it; see *Updating itself at night* |
 | `tools/strategy.js` | What $/hr to expect and what holding out for a line paid, off the record: one computation for the report's Strategy tab and `tools/shift_report.py --strategy`; see *The Strategy tab* |
 | [`lite/`](lite/README.md) | The lite edition: the camera, the reader and one big card on a display with nothing to touch, on at boot — the full rig with its experimental half switched off by one flag (`LITE=1`), not a copy of it. Its page, its server switch, its installer and kiosk, and its parts list; see [lite/README.md](lite/README.md) |
 | [`CLAUDE.md`](CLAUDE.md) | What a new working session needs before it starts: the lite decision and its rules, the standing conventions (twin parsers, signed commits, privacy, branches) and the settled list. Short on purpose; AUDITS.md has the reasons |
@@ -1143,7 +1144,21 @@ RIG_HOST=pi@<the rig's address>        # unset: no copy from the rig
 #PLACES_OUT=~/places-report
 #PLACES_LOG=~/places-report.log
 #PLACES_SINCE=2026-09-01
+#PLACES_JOURNAL=/var/lib/uberscan/journal.jsonl  # the copy's journal (the server's JOURNAL), for twin_ids
+#PLACES_CHECKS=0                       # no diagnostics beside the report
 ```
+
+**The diagnostics, every morning.** Before the swap the same run also runs
+`node tools/report_check.js` against `PLACES_SERVER` and `python3
+tools/twin_ids.py` against `PLACES_JOURNAL`, and keeps what they print as
+`checks.txt` and `checks.html` beside the report — the header's **nightly
+checks** link, `/places/checks.html`. Both print counts only (each is held to
+it by its own suite), so the double-filed cards' breakdown is there to read
+without running anything. A tool that fails or runs past `CHECKS_TIMEOUT`
+(900 s) is said on the page and in the log, and the night still succeeds: the
+report is the job. Set `PLACES_JOURNAL` to the file the NucBox's server was
+given as `JOURNAL`; left unset it is the checkout's `rpi/journal.jsonl`, the
+server's own default.
 
 Once, so rsync can reach the rig with no password from cron:
 
@@ -1186,6 +1201,76 @@ re-read, suspect, unread or re-offered (and which half of the re-offered rule
 marked them, and whether its same-trip pairs agree on miles and minutes), how
 many days old the newest offer is, and how long the main computations took. Nothing
 is written; nothing on the rig runs it.
+
+## Updating itself at night: the rig and the NucBox
+
+Every change used to reach the two machines only when somebody remembered to
+`git pull` and restart each one. `tools/autoupdate.sh` does that pull itself,
+from a systemd timer at **04:20** (plus up to ten minutes), just after the 4am
+driver-day turn and long before the places report at 05:17 — and every way it
+can go wrong ends in a skip or a rollback, said in one line:
+
+* **Never during a shift.** On the rig it asks its own server first and
+  skips on an order held, an offer or a reading in the last `QUIET_MIN`
+  minutes (60), an offer in the journal that recent, or the car moving; a
+  server that does not answer is a skip too, the cautious side. A Pi booted
+  less than 30 minutes ago is a shift starting and is left alone. On the
+  NucBox, which has no scanner, the question is only whether it answers.
+* **Fast-forward only, on a clean tree.** Tracked changes, a local commit, a
+  checkout on another branch, an untracked file the update would overwrite:
+  skipped and said, never stashed, reset or cleaned. Only the configured
+  branch is fetched (`main` by default, the one the test gate moves).
+* **Checked after, and rolled back.** After the merge it restarts the server
+  (`uberscan.service`, and lite's `uberscan-kiosk.service` where there is one;
+  on the NucBox, the manager's own command) and waits for `/api/status` to
+  answer **from the new process** (`upMs` says how long it has been up) and,
+  on the rig, for the scanner to stay up. If not, it resets to the exact
+  commit it was at, restarts again, and records "rolled back" — and does not
+  try that commit again; the next one on the branch is taken as usual.
+* **No installs.** A change to a requirements file, `package.json`'s
+  dependencies or `lite/install.sh`'s package list is skipped with "needs a
+  manual update". A changed installer is taken and noted, to be re-run when
+  convenient.
+* **One at a time.** It holds a lock; on the NucBox the lock is
+  `places_nightly.sh`'s own, so an update and the report never overlap. On the
+  rig a running sync is waited out by skipping.
+
+**On the rig** (once `rpi/install-service.sh` or `lite/install.sh` has made
+the service), from the checkout:
+
+```sh
+git checkout main                       # once: it follows the gated branch
+sudo bash tools/install-autoupdate.sh rig
+```
+
+**On the NucBox**, from its checkout, with the command the manager's
+"Restart Uber Scan" button runs (the installer asks for it, and says how to
+find it, when it is not given):
+
+```sh
+git checkout main
+sudo bash tools/install-autoupdate.sh nucbox --restart-cmd 'THE RESTART COMMAND'
+```
+
+The NucBox's unit runs as the checkout's owner, so the restart command runs as
+the account that pressed the button (`--root` if it must be root). Both
+installs run the update once with `--dry-run` to show the fetch works from a
+timer: a key with a passphrase cannot fetch at 4am, and it says so.
+
+**The last outcome:** `bash tools/autoupdate.sh --status`, the file
+`rpi/update-status.json` (gitignored), `journalctl -u uberscan-update`, or the
+`update` field of `/api/status` (`{outcome, words, ageMs, from, to}`) —
+display only, nothing on the driving bar.
+
+**Off:** `sudo bash tools/install-autoupdate.sh off` (or `ENABLED=0` in
+`/etc/uberscan/autoupdate.env`). **Pinning a branch:** `--branch NAME`, with
+the checkout on that branch — `experimental` takes ungated work as the hand
+pull did; a lite rig can follow `lite` once that branch exists. The settings
+file also holds `PORT`, `QUIET_MIN`, `RESTART_CMD` and `LOCK`, and is read
+fresh every night. **Signed commits only:** `--verify-signed` takes a commit
+only when `git verify-commit` passes on it, which needs git's signature
+checking set up for the account that runs the update (for SSH signatures, a
+`gpg.ssh.allowedSignersFile`); it is off by default.
 
 ## What the server will not serve
 

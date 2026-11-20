@@ -191,6 +191,18 @@ The `lite` branch only ever receives builds that passed the full test suite.
 Re-running the installer is safe: it only installs what is missing and
 rewrites its own files.
 
+Or let it update itself at night (a timer, not a thread, so a Zero 2 W pays
+nothing for it between runs). Until the `lite` branch exists it follows `main`:
+
+```sh
+sudo bash tools/install-autoupdate.sh rig                  # follows main
+sudo bash tools/install-autoupdate.sh rig --branch lite    # once lite exists
+```
+
+It skips any night a shift could be on, and a change to this installer's
+package list is left for the commands above (README.md, "Updating itself at
+night").
+
 ## Coming
 
 - **Read-only filesystem and a watchdog** (milestone 2): so cutting the

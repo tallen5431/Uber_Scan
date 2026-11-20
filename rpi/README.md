@@ -167,6 +167,18 @@ Use one or the other, not both — two processes cannot share the camera, and
 two servers cannot share the port. Stop the service before `npm start` or any
 of the `rpi/` scripts by hand: `sudo systemctl stop uberscan`.
 
+The rig's services, then: `uberscan.service` (this), `uberscan-sync.timer`
+(the copy, below), `uberscan-kiosk.service` on a lite rig without a desktop,
+and **`uberscan-update.timer`**, the nightly update — fetch the gated branch at
+04:20, fast-forward, restart, check, roll back — which skips whenever a shift
+could be on (an order held, an offer or reading in the last hour, the car
+moving, a boot under half an hour old, the server not answering):
+
+```sh
+sudo bash tools/install-autoupdate.sh rig    # README.md, "Updating itself at night"
+bash tools/autoupdate.sh --status            # what the last night did
+```
+
 ## Why the fixed mount changes everything
 
 The phone-camera experiment kept losing the decimal point in `3.6 mi` — a
@@ -9432,6 +9444,12 @@ python3 rpi/test_loop.py        # 401 on the scan loop re-telling a card once
                                 #     the rest of it arrives, going quiet when
                                 #     a read never returns, and saying so when
                                 #     a button press is refused
+python3 tools/test_autoupdate.py    # 117 on the nightly update on a real git: a
+                                    #     shift, a dirty tree, a diverged branch,
+                                    #     the lock and a dependency change each a
+                                    #     skip; a bad build rolled back to the
+                                    #     exact commit; and the nightly's
+                                    #     diagnostics never failing the night
 python3 tools/test_gpslog_tidy.py   #  45 on tidying the GPS logs unattended
 python3 tools/test_shift_report.py  # 267 on what each order really took and
                                     #     what the shift adds up to: a gap in
