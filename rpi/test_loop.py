@@ -4549,6 +4549,32 @@ ok_('[re-read] a labelled read of the card is never doubted for its pay (%r)'
     not any(v[0][0].get('doubt') == 'pay' for v in _bmis['verdicts']
             if len(v[0]) > 1 and isinstance(v[0][0], dict)))
 
+# ...and the voice says what the panel says. tell_offer spoke from the reading's
+# own rate, so over the card above the panel said CHECK THE PAY and the voice
+# said "pass. 3.3 an hour." about the $1.09 — the figure the panel would not
+# price, said aloud to a driver whose eyes are on the road. Now the voice
+# speaks the panel's copy: "check the pay." over the doubt, and, when a read
+# with the payout over its label settles it, the verdict of that read, said
+# then although the payout and the minutes are the ones already spoken of.
+_voice = []
+_was_say = SP.say
+SP.say = _voice.append
+try:
+    _bsay = run(lambda n, k: (_BARE.format(pay='9.09') if n <= 3
+                              else _BARE.format(pay='1.09') if n <= 6
+                              else _BOOST.format(pay='1.09')),
+                extra_argv=('--speak',), seconds=14.0,
+                until=lambda rows, ann, calls: calls >= 10)
+finally:
+    SP.say = _was_say
+ok_('[re-read] the voice says "check the pay." over the doubted read, as the panel does '
+    '(said %r)' % _voice, 'check the pay.' in _voice)
+ok_('[re-read] ...and never prices the $1.09 aloud before a label settles it (said %r)'
+    % _voice, [s.startswith('check') for s in _voice] == [False, True, False])
+ok_('[re-read] ...and the labelled read that settles it is spoken, the same payout and '
+    'minutes as the doubt (said %r)' % _voice,
+    len(_voice) >= 3 and _voice[-2] == 'check the pay.' and not _voice[-1].startswith('check'))
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d loop checks passed' % ok)
 sys.exit(1 if bad else 0)
