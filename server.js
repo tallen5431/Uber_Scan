@@ -11011,6 +11011,44 @@ function toCsv(offers) {
   return lines.join('\n') + '\n';
 }
 
+/* The last night's update, as tools/autoupdate.sh left it in
+ * rpi/update-status.json (gitignored): the outcome in a few words and how
+ * long ago, or null when no update has run here. Display only — no control
+ * rides on it (the driving bar keeps its six), and nothing here acts on it.
+ * Read again only when the file's mtime moves, and its mtime asked at most
+ * every UPDATE_STAT_MS, so a panel polling /api/status costs one stat in ten
+ * seconds. Its age, not its time, by this file's rule for every moment it
+ * hands out; the time is this machine's own, which the script wrote it on. */
+// UPDATE_STATUS moves it, as the script's STATUS_FILE does (the tests).
+var UPDATE_STATUS_PATH = process.env.UPDATE_STATUS || path.join(ROOT, 'rpi', 'update-status.json');
+var UPDATE_STAT_MS = 10 * 1000;
+var updateSeen = { askedAt: 0, mtime: -1, value: null };
+function updateStatusOut(now) {
+  if (now - updateSeen.askedAt >= UPDATE_STAT_MS || now < updateSeen.askedAt) {
+    updateSeen.askedAt = now;
+    var mtime = -1;
+    try { mtime = fs.statSync(UPDATE_STATUS_PATH).mtimeMs; } catch (e) { mtime = -1; }
+    if (mtime !== updateSeen.mtime) {
+      updateSeen.mtime = mtime;
+      updateSeen.value = null;
+      if (mtime >= 0) {
+        try {
+          var s = JSON.parse(fs.readFileSync(UPDATE_STATUS_PATH, 'utf8'));
+          if (s && typeof s === 'object' && typeof s.outcome === 'string') {
+            updateSeen.value = { outcome: s.outcome, words: typeof s.words === 'string' ? s.words : s.outcome,
+                                 atMs: typeof s.atMs === 'number' ? s.atMs : null,
+                                 from: s.from || null, to: s.to || null };
+          }
+        } catch (e) { updateSeen.value = null; }
+      }
+    }
+  }
+  var v = updateSeen.value;
+  if (!v) return null;
+  return { outcome: v.outcome, words: v.words, from: v.from, to: v.to,
+           ageMs: v.atMs === null ? null : Math.max(0, now - v.atMs) };
+}
+
 /* What /api/status answers, as an object rather than as a response.
  *
  * Its own function because two things now ask it the same question: the
@@ -11198,7 +11236,14 @@ function statusNow() {
       b.ageMs = Math.max(0, Date.now() - at);
       return b;
     }()),
-    status: scanner.status
+    status: scanner.status,
+    // How long this server process has been up. tools/autoupdate.sh holds a
+    // restart to it: an answer from a process older than the restart is the
+    // old code still answering, not the new code saying it is well, and one
+    // younger than the settle is a server that fell over and was restarted.
+    upMs: Math.round(process.uptime() * 1000),
+    // ...and what the last night's update did (updateStatusOut).
+    update: updateStatusOut(Date.now())
   };
 }
 

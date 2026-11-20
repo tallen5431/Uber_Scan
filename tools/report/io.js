@@ -422,7 +422,7 @@ function parseArgs(argv) {
   var o = { server: null, out: path.join(os.homedir(), 'places-report'), gps: null, since: null,
             nominatim: null, cache: path.join(os.homedir(), '.cache', 'uber-scan', 'places-report-answers.json'),
             gap: MV.NBX_GAP_MS, minN: MIN_N, streets: null, waits: null, relay: null, roadAsks: 5000,
-            allowDegraded: false };
+            allowDegraded: false, checks: null };
   for (var i = 0; i < argv.length; i++) {
     var a = argv[i];
     var val = function () { if (i + 1 >= argv.length) throw new Error(a + ' wants a value'); return argv[++i]; };
@@ -438,6 +438,7 @@ function parseArgs(argv) {
     else if (a === '--relay') o.relay = val();
     else if (a === '--road-asks') o.roadAsks = Number(val());
     else if (a === '--allow-degraded') o.allowDegraded = true;
+    else if (a === '--checks') o.checks = val();
     else if (a === '-h' || a === '--help') o.help = true;
     else if (/^--/.test(a)) throw new Error('unknown option ' + a);
     else if (!o.server) o.server = a;
@@ -448,6 +449,11 @@ function parseArgs(argv) {
   if (!(o.minN >= 2)) throw new Error('--min-n is a number, 2 or more');
   if (!(o.gap >= 0)) throw new Error('--gap is milliseconds');
   if (!(o.roadAsks >= 0)) throw new Error('--road-asks is a number');
+  // A page's name beside index.html, never a path or a URL: it goes into an
+  // href as written.
+  if (o.checks !== null && !/^[A-Za-z0-9_-][A-Za-z0-9._-]*\.html$/.test(o.checks)) {
+    throw new Error('--checks is a page name beside the report, e.g. checks.html');
+  }
   [['--streets', o.streets], ['--waits', o.waits], ['--relay', o.relay]].forEach(function (x) {
     if (x[1] && !/^https?:\/\//.test(x[1])) throw new Error(x[0] + ' is an http(s) URL');
   });
@@ -459,6 +465,7 @@ var USAGE = [
   '         [--gps ~/gpslog] [--since YYYY-MM-DD] [--nominatim http://localhost:8088]',
   '         [--cache ~/.cache/uber-scan/places-report-answers.json] [--gap ms] [--min-n 30]',
   '         [--streets URL] [--waits URL] [--relay URL] [--road-asks 5000] [--allow-degraded]',
+  '         [--checks checks.html]',
   '',
   'Run on the NucBox. Reads the copy at home (its /api/journal), places pickups with the',
   'NucBox\'s own Nominatim (directly with --nominatim, else through that server\'s /api/nbx),',
@@ -477,6 +484,8 @@ var USAGE = [
   '--allow-degraded: write the report even when more than ' + DEGRADED_SHARE * 100 + '% (and more than '
     + DEGRADED_MIN + ') of the',
   'fresh NucBox questions went unanswered; without it such a run writes nothing and exits 1.',
+  '--checks: the page beside the report that the header links to (places_nightly.sh writes',
+  'checks.html there: report_check and twin_ids, counts only).',
   'Every night: tools/places_nightly.sh (see the README, "Every night, on the NucBox").',
 ].join('\n');
 
@@ -707,7 +716,7 @@ async function main(argv) {
     records: Array.isArray(body.records) ? body.records : [],
     presses: presses, region: region, streetsSaid: st.said, roadSaid: roadSaid, waitsFrom: waitsFrom,
     source: { server: o.server, count: body.count, total: body.total, pages: body.pages || 1,
-              truncated: !!body.truncated, since: o.since } });
+              truncated: !!body.truncated, since: o.since, checks: o.checks } });
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, 'index.html'), html(report));
   // Every CSV through one door, so none is written without csv.js's BOM.

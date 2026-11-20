@@ -2511,6 +2511,16 @@ function nbx() {
   ok('[R2] ...and the page says so at its head, not only on stdout',
      /id="capped"><b>Not the whole journal:<\/b> the server sent 20 of 45 offers/.test(P.html(capRep))
      && P.html(repSW).indexOf('id="capped"') < 0);
+  // The nightly's diagnostics page (places_nightly.sh --checks checks.html):
+  // linked from the header when asked for, and a name beside the page only.
+  var chkRep = Object.assign({}, repSW, { source: { checks: 'checks.html' } });
+  ok('--checks: the header links the nightly checks page, and only when asked',
+     /<header class="head">[\s\S]*<a href="checks\.html">nightly checks<\/a>[\s\S]*<\/header>/.test(P.html(chkRep))
+     && P.html(repSW).indexOf('nightly checks') < 0
+     && P.parseArgs(['--checks', 'checks.html']).checks === 'checks.html' && P.parseArgs([]).checks === null
+     && ['../x.html', 'http://h/x.html', 'x.txt', 'a"b.html'].every(function (bad) {
+       try { P.parseArgs(['--checks', bad]); return false; } catch (e) { return /--checks/.test(e.message); }
+     }));
 
   /* --- offers around you: dots where the car was, home left out (19 Nov 2026) ---
    *

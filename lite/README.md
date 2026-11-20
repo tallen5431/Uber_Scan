@@ -191,6 +191,21 @@ The `lite` branch only ever receives builds that passed the full test suite.
 Re-running the installer is safe: it only installs what is missing and
 rewrites its own files.
 
+Or let it update itself (a timer, not a thread, so a Zero 2 W pays nothing for
+it between runs). Until the `lite` branch exists it follows `main`:
+
+```sh
+sudo bash tools/install-autoupdate.sh rig                  # follows main
+sudo bash tools/install-autoupdate.sh rig --branch lite    # once lite exists
+```
+
+It tries every hour the Pi is on and updates once a driver day, only when the
+rig has been on, quiet and still for 90 minutes outside the lunch and dinner
+rushes — parked with the engine running, or on a charger. A rig that is only
+ever on while driving never meets that, and the three commands above are still
+how it updates. A change to this installer's package list is always left for
+them (README.md, "Updating itself").
+
 ## Coming
 
 - **Read-only filesystem and a watchdog** (milestone 2): so cutting the

@@ -3954,7 +3954,18 @@ try:
         except (OSError, ValueError):
             return None
     _status = _json_in(_dir, 'status.json')
-    eq('status.json is what /api/status answers', _status, get(_u, '/api/status'))
+    _now = get(_u, '/api/status')
+
+    # Less the process's age (upMs, tools/autoupdate.sh's), which is a clock
+    # and moves between the press and this ask; it is held to having moved.
+    def _less_age(st):
+        st = dict(st or {})
+        return st.pop('upMs', None), st
+    _up_then, _then = _less_age(_status)
+    _up_now, _now = _less_age(_now)
+    eq('status.json is what /api/status answers', _then, _now)
+    ok_('...and the server\'s age only grew between them (%r, %r)' % (_up_then, _up_now),
+        isinstance(_up_then, int) and isinstance(_up_now, int) and 0 <= _up_then <= _up_now)
     eq('the reply says all three were kept and nothing is missing',
        ([p.get('what') for p in _rep.get('contents') or [] if p.get('saved')], _rep.get('said')),
        (['panel', 'camera', 'status'], 'saved'))
