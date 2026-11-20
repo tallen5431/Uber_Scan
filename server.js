@@ -15531,8 +15531,17 @@ function route(req, res) {
     // Whole-file and not per key. Correcting ONE place was proposed twice and
     // refused twice — see AUDITS — and this is not that: it is the wholesale
     // wipe the page already offered and could not deliver.
+    //
+    // Under the same lock as the save (the server review's second round, Nov
+    // 2026). Outside it, a POST already holding the lock had read the file,
+    // and the rename that ended it put back every place this had just
+    // removed, the new one added: "Forget lookups" pressed while map.html was
+    // saving a batch was undone, and said `removed: 3000` over a file that
+    // held 3,001 a moment later. Ten runs of the two at once: ten undone.
     if (req.method === 'DELETE') {
-      return fs.readFile(placesPath, 'utf8', function (readErr, text) {
+      return fileLock('places', function (release) {
+      var forgot = function (code, body) { release(); placesReply(code, body); };
+      fs.readFile(placesPath, 'utf8', function (readErr, text) {
         var had = 0;
         if (!readErr) {
           try {
@@ -15549,10 +15558,11 @@ function route(req, res) {
           // endpoint exists to end.
           if (rmErr && rmErr.code !== 'ENOENT') {
             console.error('places: ' + rmErr.message);
-            return placesReply(500, { ok: false, error: rmErr.code });
+            return forgot(500, { ok: false, error: rmErr.code });
           }
-          placesReply(200, { ok: true, removed: had });
+          forgot(200, { ok: true, removed: had });
         });
+      });
       });
     }
     if (req.method === 'POST') {

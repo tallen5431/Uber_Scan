@@ -4363,6 +4363,11 @@ Checks: rpi/test_server.py `[today]` 3, through the `[fresh]` preload: the offer
 
 Checks: rpi/test_server.py `[kept]` 7, counted by a preload that wraps Advice.targets and strategy.analyse: once over one file, again for other rows (a limit) and kept on the way back, four kept at most, the Gold card once and again after its settings move, again after an append, and again when a row stamped six seconds ahead comes due and moves the line from 25 to 31. All seven failed before; with the line out of the key, the last one fails. AUDITS.md's Open note on targetsOut's cost says what is left: the first load after each append.
 
+**map.html's Forget lookups was put back by a save already under way, because DELETE /api/places took no lock (the server review's second round, Nov 2026).** The save reads places.json, merges and renames under `fileLock('places')`; the DELETE read and unlinked outside it, so the save's rename restored every place it had just removed. Ten runs of a one-place save and a Forget at once against a 3,000-place file: ten undone, each Forget saying `removed: 3000` over a file that held 3,001 after.
+  - The DELETE runs under `fileLock('places')`, every exit giving it back (`forgot`).
+
+Checks: rpi/test_server.py `[forget]`, through a preload that holds the save's rename: the Forget answered on its own while the save waited and the file came back with 3,001; now it queues, the save adds its one, and Forget removes 3,001. The reviewer's race: 0 of 10 undone.
+
 ---
 
 ## Settled — do not re-propose

@@ -16193,6 +16193,53 @@ finally:
     stop(proc)
 shutil.rmtree(_kpdir, ignore_errors=True)
 
+# DELETE /api/places (map.html's "Forget lookups") ran outside the lock the
+# save holds, so a save already under way put every forgotten place back with
+# its rename. A preload holds that rename while HOLD_DIR/hold exists; the
+# Forget is sent while it waits and given two seconds to answer on its own,
+# which it did before, and cannot now: it queues behind the save. The place
+# file after both is what Forget left or what the save added, never the 3,000.
+_HOLD_RENAME = r"""
+var fs = require('fs'), path = require('path'), D = process.env.HOLD_DIR;
+var rename = fs.rename;
+fs.rename = function (from, to, cb) {
+  if (path.basename(to) !== 'places.json') return rename.apply(fs, arguments);
+  var said = false;
+  (function go() {
+    if (fs.existsSync(D + '/hold')) {
+      if (!said) { said = true; fs.appendFileSync(D + '/events', 'held\n'); }
+      return setTimeout(go, 5);
+    }
+    rename.call(fs, from, to, cb);
+  })();
+};
+"""
+_pfdir = tempfile.mkdtemp()
+_pfj = os.path.join(_pfdir, 'offers.jsonl')
+open(_pfj, 'w').close()
+with open(os.path.join(_pfdir, 'places.json'), 'w') as _fh:
+    json.dump({'Invented Place %d, Springfield' % _i: {'lat': 33 + _i / 1e4, 'lon': -84.0}
+               for _i in range(3000)}, _fh)
+proc, base, _pflog = _logged({'SCANNER': '0', 'HOLD_DIR': _pfdir}, _pfj, preload=_HOLD_RENAME)
+try:
+    open(os.path.join(_pfdir, 'hold'), 'w').close()
+    _pft1, _pfr1 = _in_thread(post, base, '/api/places', {'New Place, Shelbyville': {'lat': 34.0, 'lon': -84.0}})
+    ok_('[forget] a save of one new place is held at its rename', _hold_saw(_pfdir, 'held'))
+    _pft2, _pfr2 = _in_thread(delete, base, '/api/places')
+    _pft2.join(2)
+    _pfwaited = _pft2.is_alive()
+    os.remove(os.path.join(_pfdir, 'hold'))
+    _pft1.join(20)
+    _pft2.join(20)
+    eq('[forget] Forget lookups waits for the save under way, and is not undone by it: '
+       'queued, the save said, Forget said, the file after',
+       (_pfwaited, (_pfr1.get('got') or [None])[0], (_pfr2.get('got') or [None, {}])[1].get('removed'),
+        get(base, '/api/places')['stored']),
+       (True, 200, 3001, 0))
+finally:
+    stop(proc)
+shutil.rmtree(_pfdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)
