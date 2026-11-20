@@ -617,6 +617,12 @@ function nbx() {
      ['"\'=HYPERLINK(""x"")"', "'@Home Kitchen", "'-", "'+ 1 order", "'\tTab Inn", '-3.5', '-3.50', 'Utopian Bowl',
       '"Ash\rRow"']);
   ok('[csv] ...and the BOM put on each file is the offers page\'s', CSVM.BOM === '﻿');
+  // The page's range is in driver days, as every tab counts: 9:30pm on the
+  // 5th and 2am on the 7th (EST, before the change) were 2026-03-06 to
+  // 2026-03-07 in UTC, a day past the shifts they were.
+  var spanPage = P.html(Object.assign({}, rep5, { span: [at(5, 21, 30), at(7, 2, 0)] }));
+  ok('[span] the page\'s date range is the 4am driver day at both ends, not the UTC date',
+     spanPage.indexOf('2026-03-05 to 2026-03-06') >= 0 && spanPage.indexOf('2026-03-07') < 0);
   ok('the page\'s script parses', (function () {
     var js = page.split('<script>\n')[1].split('\n</script>')[0];
     try { new Function(js); return true; } catch (e) { console.log(e); return false; }
