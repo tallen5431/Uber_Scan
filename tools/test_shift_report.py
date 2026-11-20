@@ -1334,6 +1334,19 @@ with open(os.path.join(ROOT, 'journal.html'), encoding='utf-8') as fh:
 _jcols = re.search(r'var RECORD_COLUMNS = \[([^\]]*)\];', _jh)
 eq('[record csv] the offers page\'s CSV has these columns, word for word',
    tuple(re.findall(r"'([a-z_]+)'", _jcols.group(1))) if _jcols else None, SR.RECORD_COLUMNS)
+# ...and defuses what a spreadsheet would run as the page does (journal.html
+# csvCell, trends.js safeCell): this file wrote a pickup of =HYPERLINK(...)
+# raw. One order's places and notes made to open the way a misread card can.
+_rinj = dict(_rr['orders'][0], places={'pickupName': '@Home Kitchen', 'pickup': '=HYPERLINK("x")',
+                                       'dropoff': '-'},
+             notes=['+ 1 order'])
+_rinj_row = next(csv.DictReader(io.StringIO(SR.to_records_csv([{'orders': [_rinj]}]))))
+eq('[record csv] a cell a spreadsheet would run is led with an apostrophe, as on the offers page',
+   tuple(_rinj_row[k] for k in ('pickup_name', 'pickup', 'dropoff', 'notes')),
+   ("'@Home Kitchen", "'=HYPERLINK(\"x\")", "'-", "'+ 1 order"))
+eq('[record csv] ...and a figure keeps its sign',
+   [SR.safe_cell(v) for v in ('-3.50', '+2', '12.00', -1.5, None, 'Utopian Bowl')],
+   ['-3.50', '+2', '12.00', '-1.5', '', 'Utopian Bowl'])
 
 # --- what the app paid (8 Nov 2026) ------------------------------------------------
 #

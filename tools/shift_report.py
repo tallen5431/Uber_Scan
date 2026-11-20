@@ -2369,6 +2369,22 @@ def record_cells(o):
                                     else []))) + paid_cells(o) + (o.get('timedBy') or '',) + uber_cells(o)
 
 
+# A cell a spreadsheet would run as a formula, led with an apostrophe:
+# trends.js safeCell's rule, which journal.html's "Download CSV" keeps over
+# these same columns. The store, its door, the dropoff and the notes are what
+# a reader made of a phone, and this file wrote them raw, so a pickup read as
+# =HYPERLINK(...), a misread icon row "-" or Uber's "+ 1 order" ran in Excel
+# while the page's copy of the same order did not. A plain number keeps its
+# sign: paid_minus_card's -3.50 is a figure. csv.writer already quotes a \r.
+_FORMULA_LEAD = re.compile(r'[=+\-@\t\r]')
+_PLAIN_NUMBER = re.compile(r'[-+]?(\d+\.?\d*|\.\d+)\Z')
+
+
+def safe_cell(v):
+    s = '' if v is None else str(v)
+    return "'" + s if _FORMULA_LEAD.match(s) and not _PLAIN_NUMBER.match(s) else s
+
+
 def to_records_csv(reps):
     """The records CSV over one report or several (a range of days), as text."""
     buf = io.StringIO()
@@ -2376,7 +2392,7 @@ def to_records_csv(reps):
     w.writerow(RECORD_COLUMNS)
     for rep in reps:
         for o in rep['orders']:
-            w.writerow(record_cells(o))
+            w.writerow([safe_cell(c) for c in record_cells(o)])
     return buf.getvalue()
 
 
