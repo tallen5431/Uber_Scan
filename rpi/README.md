@@ -9288,6 +9288,11 @@ node tests/earnings.test.js     # 220 on what the app paid and which order it
                                 #     clear match, a chain's two orders left to
                                 #     the driver, the rig off, the app's clock
                                 #     off the rig's, one order per trip
+node tests/sw.test.js           #  11 on the offline worker in Chromium, with
+                                #     no signal and with a rig slower than it
+                                #     waits: live.html?route opens as the
+                                #     panel, a page never cached is the honest
+                                #     notice, a script's query still exact
 python3 rpi/test_earnings.py    #  17 on the same screen drawn at the phone's
                                 #     size and read by the real tesseract, as
                                 #     the server runs it: PNG, JPEG, the time on

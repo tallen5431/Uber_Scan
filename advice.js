@@ -1877,15 +1877,29 @@
     // What that leaves is a behaviour nothing states, so it is stated here and
     // both cases are pinned in tests/advice.test.js against the OUTCOME rather
     // than against whichever line produces it.
+    //
+    // The offers are copied once and only `cost` is written on each pass.
+    // They were copied field by field on every one of the five, the OCR
+    // text and all, for a pass that changes one field: the sweep over an
+    // invented 15,000-offer journal took 223 ms in node, and 96 copied once.
+    // Safe because nothing on the way reads a copy after its pass or writes
+    // one: `usable` builds new rows out of them (reading pay, cost, minutes
+    // and the flags, never writing) and `bestAt` sees only those, so each
+    // pass reads exactly the fields it read before, `cost` set for this
+    // rate. The caller's offers are never written; the copies are why.
+    var rescored = null;
     [0.5, 0.75, 1, 1.5, 2].forEach(function (mult) {
       var rate = Math.round(mine * mult * 100) / 100;
       if (out.length && out[out.length - 1].perMile === rate) return;
-      var rescored = (offers || []).map(function (row) {
+      rescored = rescored || (offers || []).map(function (row) {
         var copy = {}, k;
         for (k in row) { if (Object.prototype.hasOwnProperty.call(row, k)) copy[k] = row[k]; }
+        return copy;
+      });
+      rescored.forEach(function (copy, i) {
+        var row = offers[i];
         copy.cost = (typeof row.miles === 'number' && isFinite(row.miles) && row.miles > 0)
           ? row.miles * rate : 0;
-        return copy;
       });
       var b = bestAt(usable(rescored), o.breakMinutes || SHOWN_AT);
       if (!b) return;
@@ -2198,13 +2212,27 @@
    */
   function busy(rows) {
     var out = {};
+    // The ticked rows' places, found once. Every row used to walk every other
+    // row to skip the unticked ones inside the loop, so the join was rows²
+    // when only rows × ticks of it could ever count: 519 ms over 15,000 rows
+    // in node and 2,059 ms over 30,000 (54 and 229 now), on the offers page's
+    // every range press. The same rows are asked the same question in the same order —
+    // ascending place, the row itself skipped — so `into` and `stacked` come
+    // out as they did, byte for byte (tests/advice.test.js holds it against
+    // the whole join written out). Speed only: the window it joins over is
+    // the whole window, as AUDITS.md's Settled says it must stay.
+    var ticked = [];
+    for (var t = 0; t < rows.length; t++) {
+      if (rows[t].took) ticked.push(t);
+    }
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
       if (row.id === undefined || row.id === null) continue;
       var into = [];
-      for (var j = 0; j < rows.length; j++) {
+      for (var k = 0; k < ticked.length; k++) {
+        var j = ticked[k];
+        if (j === i) continue;
         var w = rows[j];
-        if (j === i || !w.took) continue;
         if (w.at < row.at && row.at < freeAgain(w)) {
           into.push({ at: w.at, net: w.net, mins: w.mins, id: w.id });
         }

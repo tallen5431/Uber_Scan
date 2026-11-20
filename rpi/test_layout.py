@@ -6728,6 +6728,120 @@ try:
            (None, '— ' + 'W' * _NOTE_MAX, 3))
         no_('...and the longest note there is does not push it sideways at %s' % panel,
             sf.get('sideways', True))
+
+    # --- [row tags] the offers list's longest tags on a phone ------------------
+    # The tags on a folded offer row ("during a job", "stacked on", "odd",
+    # "partial") were `flex: none`, and a ticked row's summary has nothing left
+    # to give once `.meta` has shrunk away: at 360px a row tagged "during a
+    # job" ran 11px past its summary, and at 390px a row with two tags made
+    # the page 397px wide (the reviewer's invented 15,000-offer journal). The
+    # list here is invented: one ticked job of an hour and, inside it, the
+    # widest summaries this page draws — a three-digit rate with its raw line,
+    # the ✓ pressed, two tags, and the widest clock, "10:58 PM" in UTC.
+    _t0 = (int(time.time() * 1000 // 86400000) - 1) * 86400000 + (22 * 60 + 40) * 60000
+    def _tagrow(i, mins_in, **kw):
+        r = {'id': 'g%d' % i, 'at': _t0 + mins_in * 60000, 'firstAt': _t0 + mins_in * 60000,
+             'pay': 28.49, 'minutes': 15, 'miles': 13.3, 'perHour': 113.96,
+             'grossPerHour': 116.0, 'cost': 4.66, 'costPerMile': 0.35, 'state': 'go',
+             'target': 25, 'band': 15, 'legs': 2, 'whole': True}
+        r.update(kw)
+        return r
+    _tag_offers = [
+        _tagrow(0, 0, minutes=60, perHour=25.83, grossPerHour=28.49, accepted=True),
+        _tagrow(1, 5),                                       # DURING A JOB
+        _tagrow(2, 8, perHour=None, grossPerHour=None),      # ODD, DURING A JOB
+        _tagrow(3, 12, perHour=None, grossPerHour=None, accepted=True),  # ODD, STACKED ON, ✓
+        _tagrow(4, 15, whole=False, accepted=True),          # PARTIAL, STACKED ON (a pairing), ✓
+        _tagrow(5, 18, accepted=True),                       # STACKED ON, ✓, 10:58 PM
+    ]
+    _tag_offers.reverse()
+    _tag_feed = {'count': len(_tag_offers), 'total': len(_tag_offers), 'truncated': False,
+                 'days': 1, 'hidden': 0, 'watched': {'saw': 6, 'kept': 6}, 'unreadable': None,
+                 'pairs': [{'v': 1, 'kind': 'pair', 'at': _t0 + 15 * 60000, 'id': 'g4',
+                            'held': {'pay': 12.0, 'minutes': 30, 'dropoff': 'Example Ct, Make Town',
+                                     'scanned': True, 'heldMs': 600000},
+                            'offer': {'pay': 9.0, 'minutes': 20, 'dropoff': 'Nowhere Rd', 'pickup': None},
+                            'stack': {'pay': 17.4, 'worst': 26.1, 'best': 34.8, 'leftMinutes': 20,
+                                      'minMinutes': 20, 'maxMinutes': 40, 'state': 'go', 'sure': True,
+                                      'ends': 'elsewhere', 'uncosted': False}, 'judged': True}],
+                 'offers': _tag_offers}
+    _tag_js = os.path.join(work, 'rowtags.js')
+    open(_tag_js, 'w').write(r'''
+const { chromium } = require('playwright');
+(async () => {
+  const [base, feed, widths] = [process.argv[2], process.argv[3], JSON.parse(process.argv[4])];
+  let browser = null;
+  for (const exe of JSON.parse(process.env.PW_EXES || '[]').concat([null])) {
+    try { browser = await chromium.launch(exe ? { executablePath: exe } : {}); break; } catch (e) {}
+  }
+  if (!browser) { console.log(JSON.stringify({ skip: 'no chromium' })); return; }
+  const out = {};
+  for (const w of widths) {
+    const ctx = await browser.newContext({ viewport: { width: w, height: 740 }, deviceScaleFactor: 1,
+                                           timezoneId: 'UTC', locale: 'en-US', serviceWorkers: 'block' });
+    const page = await ctx.newPage();
+    await page.route('**/api/journal?*', (rt) => rt.fulfill({ status: 200,
+      contentType: 'application/json', body: feed }));
+    await page.goto(base + '/journal.html#offers', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForSelector('#log details.offer', { timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(600);
+    out[w] = await page.evaluate(() => {
+      const d = document.documentElement;
+      return {
+        pageWide: d.scrollWidth,
+        glass: d.clientWidth,
+        rows: [].slice.call(document.querySelectorAll('#log details.offer')).map((row) => {
+          const sm = row.querySelector('summary').getBoundingClientRect();
+          const box = (el) => el ? el.getBoundingClientRect() : null;
+          const when = box(row.querySelector('summary .when'));
+          const took = box(row.querySelector('summary [data-act="took"]'));
+          return {
+            id: row.getAttribute('data-id'),
+            tags: [].slice.call(row.querySelectorAll('summary .tag')).map((t) => ({
+              text: (t.textContent || '').trim(), w: Math.round(t.getBoundingClientRect().width) })),
+            clock: row.querySelector('summary .when').textContent,
+            // The clock and the ✓ whole, inside the summary and on the glass.
+            whenIn: !!when && when.left >= sm.left - 0.5 && when.right <= sm.right + 0.5
+                    && when.right <= d.clientWidth + 0.5,
+            tookW: took ? Math.round(took.width) : 0,
+          };
+        }),
+      };
+    });
+    await ctx.close();
+  }
+  await browser.close();
+  console.log(JSON.stringify(out));
+})().catch((e) => { console.log(JSON.stringify({ __crashed: String((e && e.stack) || e) })); });
+''')
+    _tr = subprocess.run(['node', _tag_js, base, json.dumps(_tag_feed), json.dumps([360, 390])],
+                         env=env, capture_output=True, text=True, timeout=180)
+    _tl = (_tr.stdout or '').strip().split('\n')[-1] if _tr.stdout else ''
+    try:
+        _tg = json.loads(_tl)
+    except Exception:
+        _tg = {'__crashed': (_tr.stderr or '')[-400:] or 'no output'}
+    if _tg.get('__crashed'):
+        crashed(_tg['__crashed'])
+    if not _tg.get('skip'):
+        for _w in ('360', '390'):
+            _m = _tg.get(_w) or {}
+            _rows = _m.get('rows') or []
+            _two = [r['id'] for r in _rows if len(r['tags']) >= 2]
+            eq('[row tags] at %spx the invented list draws the rows it is built for' % _w,
+               sorted((r['id'], len(r['tags'])) for r in _rows),
+               [('g0', 0), ('g1', 1), ('g2', 2), ('g3', 2), ('g4', 2), ('g5', 1)])
+            ok_('[row tags] ...the widest clock there is among them, at %spx' % _w,
+                '10:58 PM' in [r['clock'] for r in _rows])
+            eq('[row tags] the longest tags do not push the page sideways at %spx (%s wide)'
+               % (_w, _m.get('pageWide')), _m.get('pageWide'), _m.get('glass'))
+            eq('[row tags] ...every row\'s clock whole, inside its row and on the glass, at %spx' % _w,
+               [r['id'] for r in _rows if not r['whenIn']], [])
+            eq('[row tags] ...and every ✓ its full 52px at %spx' % _w,
+               sorted(set(r['tookW'] for r in _rows)), [52])
+            ok_('[row tags] ...each tag still drawn, cut rather than gone, at %spx (%r)'
+                % (_w, [t['w'] for r in _rows for t in r['tags']]),
+                all(t['w'] >= 12 for r in _rows for t in r['tags']))
 finally:
     proc.terminate()
     try:

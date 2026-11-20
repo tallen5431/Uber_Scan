@@ -428,7 +428,22 @@
   /* Dim, not hidden, and still legible — these are exactly the rows a driver
      goes looking for when a job they remember is not in the figures. */
   .offer.aside > summary { opacity: .62; }
-  .offer .tag { flex: none; font-size: 9.5px; font-weight: 700; letter-spacing: .06em;
+  /* Shrinks, and cuts its words with an ellipsis, rather than pushing the row
+     past the glass — but only once `.meta` has given all it has. It was
+     `flex: none`, and a row with a tag can run out of summary with `.meta`
+     already at nothing: at 360px a row tagged "during a job" ran 11px past
+     its summary, and at 390px a row with two tags made the page 397px wide
+     and scroll sideways under the driver's thumb (the reviewer's invented
+     15,000-offer journal; rpi/test_layout.py's [row tags] list drew 420px at
+     both). `.meta` shrinks a thousand times faster, so a row that fitted
+     before is drawn exactly as it was, the tag whole; only a row that did
+     not fit cuts its tags, and the opened row says the same thing in full.
+     A tag shrinking at `.meta`'s rate instead was tried first, and cut
+     "during a job" to "DUR…" on rows where it had fitted whole. */
+  .offer .meta { flex-shrink: 1000; }
+  .offer .tag { flex: 0 1 auto; min-width: 0; overflow: hidden;
+                text-overflow: ellipsis; white-space: nowrap;
+                font-size: 9.5px; font-weight: 700; letter-spacing: .06em;
                 text-transform: uppercase; color: var(--warn);
                 border: 1px solid currentColor; border-radius: 4px; padding: 1px 4px; }
   .offer .why { font-size: 11px; color: var(--warn); padding: 0 0 8px 20px; }
@@ -1980,9 +1995,32 @@
   // hour blocks above (Advice.BLOCK_NAMES, "12–3pm") and the cards themselves
   // all speak AM/PM. One helper, so no row of the page keeps the other clock.
   // Words only: every sort, key and day boundary here reads the stamp itself.
-  function clock12(d) {
-    return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+  //
+  // One formatter, made once. toLocaleTimeString with options builds a new
+  // Intl.DateTimeFormat on every call — the locale resolved, the pattern
+  // compiled — and pressing All on an invented 15,000-offer journal made
+  // 1,405 of them, here and in each row's "Read at", every one the same.
+  // Made once, the press's longest task at 4x throttle went from 1,213 ms
+  // to 840. Same options, same undefined locale, so the words are the same
+  // (checked over 90,000 instants in six locales and three zones); only the
+  // building is not done again.
+  //
+  // Except where there is no time to write. toLocaleTimeString answers a
+  // stamp no clock can read with "Invalid Date"; format() throws, and the
+  // throw took the whole render with it — rpi/test_offerspage.py's row
+  // "stamped past the end of time" turned the page into "Cannot reach the
+  // scanner". `clockWords` keeps the old answer for it.
+  var CLOCK12 = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+  function clockWords(f, d) {
+    return isNaN(d) ? 'Invalid Date' : f.format(d);
   }
+  function clock12(d) {
+    return clockWords(CLOCK12, d);
+  }
+  // ...and the row's "Read at", which keeps its seconds and its date.
+  var READ_AT_DAY = new Intl.DateTimeFormat();
+  var READ_AT_TIME = new Intl.DateTimeFormat(undefined,
+    { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
 
   var unitTags = document.querySelectorAll('.stats .unit');
 
@@ -2245,8 +2283,16 @@
   /* `busy` is what Advice.busy returned for this row, or undefined, and `pair`
      is the pairing the rig recorded at the time, or undefined. Both are passed
      in rather than looked up here so the join happens once per render instead
-     of once per row, and so this function stays a pure formatter. */
-  function offerRow(r, when, target, band, busy, pair, recs) {
+     of once per row, and so this function stays a pure formatter.
+
+     The folded row only: the summary, and nothing under it until the row is
+     opened (offerBody, fillOffer). Every range press rebuilt all 300 rows
+     whole, and 16,584 of the page's 40,600 elements were inside offer rows
+     nobody had opened. Pressing All on an invented 15,000-offer journal at
+     4x throttle: 24,016 elements now, and the longest task 840 ms → 700;
+     opening a row builds its body in about a millisecond. `n` is the row's
+     place in `listed`, which holds what the body is built from. */
+  function offerRow(r, when, target, band, busy, pair, n) {
     var aside = !counted(r);
     // The verdict the panel gave at the time, when the row carries one, and
     // only re-judged for rows written before `state` existed. The dot was
@@ -2261,48 +2307,11 @@
                  && Math.round(r.grossPerHour) !== Math.round(r.perHour))
       ? '<em>' + money(r.grossPerHour, 0) + ' raw</em>' : '';
 
-    // The billed time is the one number a driver cannot reconstruct from the
-    // card, and the one that explains a rate that looks wrong: it is the card's
-    // minutes plus a pad plus a shopping allowance, and it is what the rate was
-    // actually divided by.
-    var billed = (typeof r.billedMinutes === 'number') ? r.billedMinutes : null;
-    var padded = (billed !== null && r.minutes !== null
-                  && Math.abs(billed - r.minutes) >= 0.5);
-
-    var read = [];
-    if (r.legs) read.push(r.legs + (r.legs === 1 ? ' leg' : ' legs'));
-    if (r.hasTotal) read.push('a total line');
-    if (r.mergedFrom) read.push(r.mergedFrom + (r.mergedFrom === 1 ? ' frame' : ' frames'));
-
-    var flags = [];
-    if (r.milesCorrected) flags.push('a decimal was put back in the distance');
-    if (r.milesUncertain) flags.push('the distance was not trusted, so no running cost was charged');
-    if (r.settled === false) flags.push('the reading was still changing when it was stored');
-    if (r.whole === false) flags.push('only part of the card was in view');
-    // Two different things wear this flag now, and only one of them is about
-    // a figure being out of range. A reading missing most of its journey is
-    // marked not-to-be-trusted for a reason that has nothing to do with the
-    // size of any number in it — every one of them is a number the card
-    // printed — so it may not borrow the other's sentence.
-    if (r.suspect) {
-      flags.push(r.doubt === 'leg'
-        ? 'a leg of the journey never read, so this is part of it'
-        // ...and a third reason, which is neither a figure out of range nor a
-        // journey half read: a screen that was not an offer at all.
-        : r.doubt === 'screen'
-        ? 'the app itself rather than an offer'
-        : r.doubt === 'unread'
-        ? 'its payout never read: the figure was a part of it'
-        : 'outside the range a real offer falls in');
-    }
-    // Typed on the keypad rather than read off a card: the figures are the
-    // driver's own, there is no card text under this row, and "Seen as" has
-    // nothing to say about it.
-    if (r.typed) flags.push('typed on the keypad, not read by the camera');
-
     return '<details class="offer' + (aside ? ' aside' : '')
       + (r.hidden ? ' hiddenrow' : '')
       + (r.accepted ? ' mine' : '') + '" data-id="' + (r.id || '') + '"'
+      // Which of the listed rows this is, for offerBody when it opens.
+      + ' data-n="' + n + '"'
       // What the driver had said about this offer before any press here, for
       // Undo to put back exactly: taken, passed, or nothing. The ✓ only draws
       // two of those, and an Undo that restored "not ticked" as `false` filed
@@ -2355,8 +2364,58 @@
          : busy ? '<span class="tag">' + (busy.stacked ? 'stacked on' : 'during a job')
                   + '</span>' : '')
       + '<span class="when">' + clock12(when) + '</span>'
-      + '</summary>'
-      + (aside ? '<p class="why">' + whyAside(r) + '</p>' : '')
+      + '</summary></details>';
+  }
+
+  /* What an opened row holds under its summary: the card, the arithmetic,
+     the verdict, the record, the text the reader read and the buttons. Built
+     the first time the row is opened rather than with the list (see
+     offerRow), from the same arguments the list had; nothing in it is read
+     before then — the chips, the search and the CSV read the offers
+     themselves, and paintInCar and the ✓ only the summary. */
+  function offerBody(r, when, busy, pair, recs) {
+    var aside = !counted(r);
+
+    // The billed time is the one number a driver cannot reconstruct from the
+    // card, and the one that explains a rate that looks wrong: it is the card's
+    // minutes plus a pad plus a shopping allowance, and it is what the rate was
+    // actually divided by.
+    var billed = (typeof r.billedMinutes === 'number') ? r.billedMinutes : null;
+    var padded = (billed !== null && r.minutes !== null
+                  && Math.abs(billed - r.minutes) >= 0.5);
+
+    var read = [];
+    if (r.legs) read.push(r.legs + (r.legs === 1 ? ' leg' : ' legs'));
+    if (r.hasTotal) read.push('a total line');
+    if (r.mergedFrom) read.push(r.mergedFrom + (r.mergedFrom === 1 ? ' frame' : ' frames'));
+
+    var flags = [];
+    if (r.milesCorrected) flags.push('a decimal was put back in the distance');
+    if (r.milesUncertain) flags.push('the distance was not trusted, so no running cost was charged');
+    if (r.settled === false) flags.push('the reading was still changing when it was stored');
+    if (r.whole === false) flags.push('only part of the card was in view');
+    // Two different things wear this flag now, and only one of them is about
+    // a figure being out of range. A reading missing most of its journey is
+    // marked not-to-be-trusted for a reason that has nothing to do with the
+    // size of any number in it — every one of them is a number the card
+    // printed — so it may not borrow the other's sentence.
+    if (r.suspect) {
+      flags.push(r.doubt === 'leg'
+        ? 'a leg of the journey never read, so this is part of it'
+        // ...and a third reason, which is neither a figure out of range nor a
+        // journey half read: a screen that was not an offer at all.
+        : r.doubt === 'screen'
+        ? 'the app itself rather than an offer'
+        : r.doubt === 'unread'
+        ? 'its payout never read: the figure was a part of it'
+        : 'outside the range a real offer falls in');
+    }
+    // Typed on the keypad rather than read off a card: the figures are the
+    // driver's own, there is no card text under this row, and "Seen as" has
+    // nothing to say about it.
+    if (r.typed) flags.push('typed on the keypad, not read by the camera');
+
+    return (aside ? '<p class="why">' + whyAside(r) + '</p>' : '')
       // One list per heading. `<h3>` inside a `<dl>` is not valid, and a screen
       // reader walking the list loses the headings that say what each group of
       // rows is — which on this panel is the difference between "what the card
@@ -2481,8 +2540,7 @@
       + '<h3>How it was read</h3>'
       + '<dl class="facts">'
       + row('Seen as', read.join(', ') || null, 'quiet')
-      + row('Read at', when.toLocaleDateString() + ', ' + when.toLocaleTimeString(undefined,
-          { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }), 'quiet')
+      + row('Read at', clockWords(READ_AT_DAY, when) + ', ' + clockWords(READ_AT_TIME, when), 'quiet')
       + row('Time to read', typeof r.ms === 'number' ? r.ms + ' ms' : null, 'quiet')
       + (flags.length ? row('Worth knowing', flags.join('; '), 'quiet') : '')
       + '</dl>'
@@ -2510,7 +2568,7 @@
            + money(r.pay, 2) + ' \u00b7 ' + Math.round(r.minutes) + ' min'
            + (r.miles === null ? '' : ' \u00b7 ' + num(r.miles) + ' mi') + '</button>'
          : '')
-      + '</div></details>';
+      + '</div>';
   }
 
   // What the driver typed, against the figures on the row.
@@ -2531,6 +2589,9 @@
   // so the "during a job" chip can ask it. It is a join over the whole window
   // and is worked out once per render, not once per row.
   var lastBusy = {};
+  // ...and what each listed row's body is built from, filled by renderList
+  // in list order and read by fillOffer when a row opens.
+  var listed = [];
 
   // Whether one row belongs to the pile a chip names.
   //
@@ -4868,7 +4929,7 @@
     }
     var tab = document.querySelector('#tabs button[data-view="offers"]');
     if (tab && document.getElementById('app').getAttribute('data-view') !== 'all') tab.click();
-    row.open = true;
+    openOffer(row);
     setTimeout(function () { row.scrollIntoView({ block: 'start' }); }, 0);
   });
 
@@ -5955,6 +6016,9 @@
 
     var out = [];
     var currentDay = null;
+    // What each row's body is built from when it opens, in list order; a
+    // fresh list each draw, as the rows are (offerRow, fillOffer).
+    listed = [];
     shown.forEach(function (r) {
       var when = new Date(r.at);
       var day = dayKey(r.at);
@@ -5994,7 +6058,8 @@
                   + money(tookPay, 2) : '')
                + '</span></div>');
       }
-      out.push(offerRow(r, when, target, band, busyBy[r.id], pairedBy[r.id], recordsBy[r.id]));
+      listed.push({ r: r, when: when, busy: busyBy[r.id], pair: pairedBy[r.id], recs: recordsBy[r.id] });
+      out.push(offerRow(r, when, target, band, busyBy[r.id], pairedBy[r.id], listed.length - 1));
     });
     // Rebuilt in place, not from scratch: the rows that were open stay open
     // and the page stays where it was. Ticking an offer refetches and redrew
@@ -6009,7 +6074,7 @@
     var y = window.scrollY;
     el.log.innerHTML = out.join('');
     Array.prototype.forEach.call(el.log.querySelectorAll('details.offer'), function (d) {
-      if (wasOpen[d.getAttribute('data-id')]) d.open = true;
+      if (wasOpen[d.getAttribute('data-id')]) openOffer(d);
     });
     paintInCar();
     if (y) window.scrollTo(0, y);
@@ -6558,6 +6623,43 @@
     // it is about.
     e.preventDefault();
     showOnMap(b.getAttribute('data-map'), b.getAttribute('data-end'));
+  });
+
+  /* An offer row's body, built the first time the row opens (offerRow says
+   * why it is not built with the list). Three ways a row opens, and each
+   * builds it first:
+   *
+   *   a press on the summary   built in the click, before the browser opens
+   *                            the row, so it is never drawn open and empty
+   *                            (the ✓ is a button and opens nothing);
+   *   anything else            the 'toggle' it fires — the keyboard's press
+   *                            arrives as a click too, but a script setting
+   *                            `open`, or the browser itself, does not;
+   *   this page reopening one  openOffer, at once, because 'toggle' comes a
+   *                            task later and the record or the scroll after
+   *                            it would find the row empty.
+   *
+   * 'toggle' does not bubble, so it is caught on the way down, as the paid
+   * days' list catches its own. */
+  function fillOffer(d) {
+    if (!d || d.hasAttribute('data-built')) return;
+    var it = listed[+d.getAttribute('data-n')];
+    if (!it) return;
+    d.setAttribute('data-built', '');
+    d.insertAdjacentHTML('beforeend', offerBody(it.r, it.when, it.busy, it.pair, it.recs));
+  }
+  function openOffer(d) {
+    fillOffer(d);
+    d.open = true;
+  }
+  el.log.addEventListener('toggle', function (e) {
+    var d = e.target;
+    if (d && d.open && d.classList && d.classList.contains('offer')) fillOffer(d);
+  }, true);
+  el.log.addEventListener('click', function (e) {
+    var s = e.target.closest ? e.target.closest('summary') : null;
+    if (!s || e.target.closest('button')) return;
+    if (s.parentNode && s.parentNode.classList.contains('offer')) fillOffer(s.parentNode);
   });
 
   // One handler for the whole log, because the rows are rebuilt on every load

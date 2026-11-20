@@ -1212,14 +1212,50 @@ const TEXT = (sel) => {
       name === 'in the car 24h' ? { locale: 'en-GB' } : {}));
     const page = await ctx.newPage();
     await page.addInitScript(STUB(feed));
+    // [clock formatters] Every date formatter the page builds, counted: a
+    // new Intl.DateTimeFormat, and a toLocaleTimeString, which builds one
+    // inside on each call. clock12 did that once per row's time.
+    await page.addInitScript(() => {
+      window.__fmtBuilt = 0;
+      const F = Intl.DateTimeFormat;
+      const W = function () { window.__fmtBuilt++; return new F(...arguments); };
+      W.prototype = F.prototype;
+      W.supportedLocalesOf = F.supportedLocalesOf.bind(F);
+      Intl.DateTimeFormat = W;
+      const T = Date.prototype.toLocaleTimeString;
+      Date.prototype.toLocaleTimeString = function () { window.__fmtBuilt++; return T.apply(this, arguments); };
+    });
     await page.goto(base + '/journal.html#all', { waitUntil: 'domcontentloaded' })
               .catch(() => {});
     await page.waitForTimeout(1500);
+    // [lazy rows] A row's body is built the first time it opens, not with
+    // the list (journal.html offerBody): as drawn, no folded row holds one.
+    // Then one row opened the way a script or the browser opens it, with no
+    // press: built when its 'toggle' lands, and once however often it opens.
+    const lazy = name === 'took six' ? await page.evaluate(async () => {
+      const rows = [].slice.call(document.querySelectorAll('#log details.offer'));
+      const unopened = rows.filter((d) => !d.open && d.querySelector('dl.facts')).length;
+      const d = rows.filter((x) => !x.open)[0];
+      if (!d) return { rows: rows.length, unopened: unopened };
+      d.open = true;
+      await new Promise((r) => setTimeout(r, 60));
+      const later = d.querySelectorAll('dl.facts').length;
+      d.open = false;
+      await new Promise((r) => setTimeout(r, 60));
+      d.open = true;
+      await new Promise((r) => setTimeout(r, 60));
+      const again = d.querySelectorAll('dl.facts').length;
+      d.open = false;
+      await new Promise((r) => setTimeout(r, 60));
+      return { rows: rows.length, unopened: unopened, later: later, again: again };
+    }) : null;
     out[name] = await page.evaluate((sel) => {
       const text = new Function('s', 'return (' + sel + ')(s)');
       const list = (s) => [].slice.call(document.querySelectorAll(s))
         .map((e) => (e.textContent || '').replace(/\s+/g, ' ').trim());
       return {
+        // First, before anything below opens a row.
+        fmtBuilt: window.__fmtBuilt,
         headline: text('#headline'),
         // Every row's clock, for the 12-hour check (clock12).
         whens: list('.offer .when'),
@@ -1361,9 +1397,12 @@ const TEXT = (sel) => {
                      n: b.querySelector('.n').textContent.trim() };
           }),
         // What each row says about arriving during a ticked job, opened.
+        // Opened by a press on its summary, as a driver opens one: a row's
+        // body is built the first time it opens (journal.html offerBody),
+        // and setting `open` from a script builds it only a task later.
         arrivals: [].slice.call(document.querySelectorAll('#log details.offer'))
           .map(function (d) {
-            d.open = true;
+            if (!d.open) d.querySelector('summary').click();
             var dt = [].slice.call(d.querySelectorAll('dt'))
               .filter(function (e) { return e.textContent.trim() === 'Arrived'; })[0];
             var tags = [].slice.call(d.querySelectorAll('summary .tag'))
@@ -1388,6 +1427,7 @@ const TEXT = (sel) => {
           }),
       };
     }, TEXT.toString());
+    if (lazy) out[name].lazy = lazy;
     // The chips and the order, on the feed with a verdict spread. Each press
     // is read back as the rows it left, the sentence describing them, and
     // whether the day headers survived — a ranking has no days.
@@ -1485,7 +1525,7 @@ const TEXT = (sel) => {
         ['r1', 'r2', 'r3'].forEach((id) => {
           const d = row(id);
           if (!d) { got[id] = null; return; }
-          d.open = true;
+          if (!d.open) d.querySelector('summary').click();
           got[id] = { meta: flat(d.querySelector('.meta')),
                       note: flat(d.querySelector('.meta .reread')),
                       noteTitle: (d.querySelector('.meta .reread') || { title: '' }).title || '',
@@ -1502,7 +1542,7 @@ const TEXT = (sel) => {
         const flat = (el) => el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : '';
         const row = (id) => document.querySelector('#log details.offer[data-id="' + id + '"]');
         const d1 = row('r1');
-        if (d1) d1.open = true;
+        if (d1 && !d1.open) d1.querySelector('summary').click();
         const block = (d) => d && d.querySelector('dl.record');
         const a = document.getElementById('recordsCsv');
         let csv = null, bom = null;
@@ -1566,7 +1606,7 @@ const TEXT = (sel) => {
         const all = [].slice.call(document.querySelectorAll('#log details.offer'));
         const d = all.filter((x) => x.getAttribute('data-id') === 'r0')[0];
         if (!d) return { ids: all.map((x) => x.getAttribute('data-id')) };
-        d.open = true;
+        if (!d.open) d.querySelector('summary').click();
         const flat = (el) => el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : '';
         return { aside: d.classList.contains('aside'),
                  why: flat(d.querySelector('.why, .aside-why, p')),
@@ -1636,9 +1676,12 @@ const TEXT = (sel) => {
         asked: window.__geo.map((g) => g.q),
         boxes: window.__geo.map((g) => !!g.box),
       });
-      // Open every row, so the controls inside them can be pressed.
+      // Open every row, so the controls inside them can be pressed: by a
+      // press on each summary, which builds the row's body as it opens.
       await page.evaluate(() => {
-        document.querySelectorAll('#log details.offer').forEach((d) => { d.open = true; });
+        document.querySelectorAll('#log details.offer').forEach((d) => {
+          if (!d.open) d.querySelector('summary').click();
+        });
       });
       await page.waitForTimeout(200);
       out[name].beforeAny = await page.evaluate(sheet);
@@ -1843,7 +1886,7 @@ const TEXT = (sel) => {
       rv.hideAt = await page.evaluate(() => {
         const d = document.querySelector('#log details.offer[data-id="p1"]');
         if (!d) return false;
-        d.open = true;
+        if (!d.open) d.querySelector('summary').click();
         const b = d.querySelector('[data-act="hide"]');
         if (b) b.click();
         return !!b;
@@ -1981,7 +2024,7 @@ const TEXT = (sel) => {
       out[name].mark = await page.evaluate(async () => {
         const rows = document.querySelectorAll('#log details.offer');
         const d = rows[rows.length - 1];
-        d.open = true;
+        if (!d.open) d.querySelector('summary').click();
         d.scrollIntoView({ block: 'center' });
         const before = { y: window.scrollY, top: d.getBoundingClientRect().top };
         // One control for the mark on a row, not two: the tick on the
@@ -2518,6 +2561,32 @@ try:
     ok_('[12 hr clock] ...the same rows the en-US page shows (%r)' % _w[:3],
         _w and [re.sub(r'\s', '', w.upper()) for w in _w12]
         == [re.sub(r'\s', '', w.upper()) for w in _w])
+
+    # [lazy rows] Pressing All rebuilt every row whole, every time: on an
+    # invented 15,000-offer journal at 4x throttle, 16,584 of the page's
+    # 40,600 elements were inside 300 offer rows nobody had opened. Each
+    # row's body is now built as it opens; every reading of a row above opens
+    # it with a press on its summary first, as a driver does.
+    _lz = (got.get('took six') or {}).get('lazy') or {}
+    ok_('[lazy rows] no folded row holds its body as the list is drawn (%r)' % _lz,
+        (_lz.get('rows') or 0) >= 10 and _lz.get('unopened') == 0)
+    ok_('[lazy rows] ...a row a script opens, with no press, has it once its toggle lands (%r)'
+        % _lz.get('later'), (_lz.get('later') or 0) >= 3)
+    eq('[lazy rows] ...and it is built once, however often the row opens',
+       _lz.get('again'), _lz.get('later'))
+
+    # [clock formatters] ...and the clock made once, not once a row. Each
+    # toLocaleTimeString with options built its own Intl.DateTimeFormat, and
+    # pressing All on an invented 15,000-offer journal made 1,405 of them
+    # (clock12 and each row's "Read at"): the press's longest task at 4x
+    # throttle was 1,213 ms with them and 840 without. The words are held
+    # above; this holds the count, which a per-row formatter puts at twice
+    # the rows or more.
+    _lm = got.get('a line that moves') or {}
+    ok_('[clock formatters] %d rows build %r date formatters, not one a row'
+        % (_lm.get('rows') or 0, _lm.get('fmtBuilt')),
+        (_lm.get('rows') or 0) >= 100 and isinstance(_lm.get('fmtBuilt'), int)
+        and _lm['fmtBuilt'] * 10 < _lm['rows'])
 
     # --- the order record (the owner, 7 Nov) -----------------------------------
     # [reread] The payout the server's fold read again, said small beside it:
@@ -4616,7 +4685,11 @@ const { chromium } = require('playwright');
     const paid = (id) => {
       const d = document.querySelector('details.offer[data-id="' + id + '"]');
       if (!d) return null;
+      // Opened to read (its body is built on opening), and folded back.
+      const was = d.open;
+      if (!was) d.querySelector('summary').click();
       const row = Array.from(d.querySelectorAll('dl.record > div')).find((x) => x.querySelector('dt').textContent === 'Paid');
+      if (!was) d.open = false;
       return row ? row.querySelector('dd').textContent : null;
     };
     return {
