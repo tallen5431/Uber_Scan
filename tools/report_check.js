@@ -137,7 +137,10 @@ function reofferedHow(offers) {
     }
     list.push(o);
   });
-  var g = pairs.gaps.sort(function (x, y) { return x - y; });
+  // The median gap is advice.js's median, the one copy: this took the lower
+  // middle value, so two pairs 5 and 10 min apart printed "median gap 5 min"
+  // where the median is 7.5, and an even count always read short.
+  var gapMedian = A.median(pairs.gaps);
   var total = pairs.named + pairs.unnamed;
   return {
     marked: marked.length,
@@ -147,7 +150,7 @@ function reofferedHow(offers) {
              sameMiles: pairs.sameMiles, sameMinutes: pairs.sameMinutes, sameBoth: pairs.sameBoth,
              sameBothShare: share(pairs.sameBoth, total),
              payUp: pairs.payUp, paySame: pairs.paySame, payDown: pairs.payDown,
-             gapMedianMin: g.length ? r2(g[Math.floor((g.length - 1) / 2)]) : null,
+             gapMedianMin: gapMedian === null ? null : r2(gapMedian),
              withinAMinute: pairs.close, apart: total - pairs.close }
   };
 }

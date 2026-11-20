@@ -4356,6 +4356,8 @@ route() is 1,179 lines. Moved code is the old text dedented, with only the path'
 
 **Two UTC dates headed the places report, its range a day past the tabs' own after 8pm (the tools review, Nov 2026).** `tools/report/render.js` printed `r.span` through `toISOString`, so a shift's 9:30pm offer was the next day and a 2am one the day after the shift, while every tab counts the 4am driver day. Both ends are now advice.js `dayKeyOf`. Checks: tests/placesreport.test.js 522 → 523 ('[span] the page\'s date range is the 4am driver day at both ends, not the UTC date').
 
+**report_check's "median gap" between re-offered pairs was the lower middle value (the tools review, Nov 2026).** `tools/report_check.js` `reofferedHow` took `g[floor((n - 1) / 2)]` of the sorted gaps, so an even count always read short: two pairs 5 and 10 min apart said 5, and the suite's own check asserted it as "the shorter". It is advice.js `median` now, the one copy. Checks: tests/reportcheck.test.js 22 → 22 (the pairs' check now wants 7.5; at the old line it fails).
+
 ---
 
 ## Settled — do not re-propose
