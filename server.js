@@ -15080,7 +15080,7 @@ function journalRoute(req, res, p) {
 function route(req, res) {
   // The path as asked, worked out once for every door below that is asked
   // by it; the GET doors after the gate ask the decoded `pathname`.
-  var p = req.url.split('?')[0];
+  var p = Lite.askedPath(req.url);
   // Noting what happened to an offer, which ones were taken and which to
   // hide: see markRoute.
   if (req.method === 'POST' && p === '/api/offers/mark') return markRoute(req, res);
@@ -16017,7 +16017,8 @@ function route(req, res) {
   var wantView = '';
   try {
     var parsed = url.parse(req.url, true);
-    pathname = decodeURIComponent(parsed.pathname);
+    // The one rule lite/lite.js shuts its doors by (Lite.decodedPath).
+    pathname = Lite.decodedPath(req.url);
     // Node hands back an array for a repeated key. Only the frame endpoints
     // look at this, and only ever for one of two known words, so anything
     // else — an array, a number, a novel — falls through to the scene.

@@ -55,6 +55,7 @@
 
 var fs = require('fs');
 var path = require('path');
+var url = require('url');
 
 // Where the panel lives. `/` goes here under lite (see answer()).
 var PAGE = '/lite/lite.html';
@@ -118,14 +119,54 @@ function shut(pathname) {
   return null;
 }
 
+/* The path a request names, as server.js's route() asks it — route() calls
+ * these two, so lite and the router cannot work it out differently again.
+ *
+ * They did (the server review's second round, Nov 2026). This file took
+ * `req.url` up to its `?` and decoded it; route() asks its later doors by
+ * url.parse's pathname, which drops the scheme and host of an absolute-form
+ * request target (`GET http://rig:8080/api/shift HTTP/1.1`, which HTTP/1.1
+ * servers must accept) and the fragment, and turns a backslash into a slash.
+ * So every one of those spellings walked past the list above:
+ * `curl --request-target http://127.0.0.1:PORT/api/shift` on a lite rig
+ * started the shift report's Python, and /shift.html, /map.html,
+ * /places/index.html and /api/placeslink were served the same way.
+ *
+ * `askedPath`: the target as sent, up to its query — what route()'s doors
+ * ahead of the GET-only gate are asked by (the sync's, earnings, gold, the
+ * POST doors). `decodedPath`: url.parse's pathname, decoded — what the doors
+ * after it are asked by; it throws on a bad escape, as route() relies on to
+ * answer 400. */
+function askedPath(rawUrl) {
+  return String(rawUrl || '').split('?')[0];
+}
+
+function decodedPath(rawUrl) {
+  return decodeURIComponent(url.parse(String(rawUrl || '')).pathname);
+}
+
+/* What lite shuts for this request, asked of every spelling route() could
+ * act on: the target as sent, its decoded pathname, and that pathname
+ * resolved as the static handler resolves a file (path.resolve(ROOT, '.' +
+ * pathname)), so `/x/../shift.html` and `//map.html`, which it serves as
+ * shift.html and map.html, are shut as they are. A form route() would not
+ * serve the feature by only shuts a door that was already a 404. */
+function shutFor(rawUrl) {
+  var what = shut(askedPath(rawUrl));
+  if (what) return what;
+  var decoded;
+  try { decoded = decodedPath(rawUrl); } catch (e) { return null; }   // route() answers 400
+  return shut(decoded) || shut(path.posix.resolve('/', '.' + decoded));
+}
+
 /* Asked first by server.js's handler, before its own routing. Returns true
  * when it answered. `lite` is the boot-time bit; `send` is server.js's own
  * (so the headers are the same as every other answer). /api/lite is answered
  * either way, so the panel and a test can ask which program is running. */
 function answer(lite, req, res, send) {
-  var pathname;
-  try { pathname = decodeURIComponent(String(req.url || '').split('?')[0]); } catch (e) {
-    return false;   // server.js's own route() answers a bad URL, as ever
+  var pathname = null;
+  try { pathname = decodedPath(req.url); } catch (e) {
+    pathname = null;   // server.js's own route() answers a bad URL, as ever
   }
   var json = { 'Content-Type': 'application/json; charset=utf-8' };
   if (pathname === '/api/lite') {
@@ -141,7 +182,7 @@ function answer(lite, req, res, send) {
     res.end();
     return true;
   }
-  var what = shut(pathname);
+  var what = shutFor(req.url);
   if (what) {
     send(res, 404, JSON.stringify({ ok: false, lite: true,
                                     error: what + ': not part of the lite edition' }), json);
@@ -165,4 +206,5 @@ function noNucbox(nbx) {
 }
 
 module.exports = { on: on, answer: answer, shut: shut, noNucbox: noNucbox,
+                   askedPath: askedPath, decodedPath: decodedPath,
                    PAGE: PAGE, OFF: OFF, OFF_NAMES: OFF_NAMES, KEEPS: KEEPS };

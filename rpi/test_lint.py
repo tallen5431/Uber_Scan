@@ -1440,8 +1440,13 @@ eq('server.js hands send() the JSON Content-Type in one place, sendJson',
    (len(_json_sends), bool(_json_sends) and 'JSON.stringify(obj)' in _json_sends[0]), (1, True))
 # ...and the path as asked worked out once, in route(): it was read off the
 # URL 26 times, once a door, and again by four of the routes it hands off to.
-eq("server.js works out the path as asked once (req.url.split('?')[0])",
-   len(re.findall(r"req\.url\.split\('\?'\)\[0\]", _srv_code)), 1)
+# Through lite/lite.js's askedPath since lite and route() worked it out
+# differently (Nov 2026), so the spelling is counted there too.
+_lite_code = open(os.path.join(ROOT, 'lite', 'lite.js'), encoding='utf-8').read()
+eq("server.js works out the path as asked once (Lite.askedPath, lite/lite.js's req.url up to its '?')",
+   (len(re.findall(r"req\.url\.split\('\?'\)\[0\]", _srv_code)),
+    len(re.findall(r"Lite\.askedPath\(req\.url\)", _srv_code)),
+    len(re.findall(r"\.split\('\?'\)\[0\]", _lite_code))), (0, 1, 1))
 # ...and route()'s order, which the split out of markRoute and journalRoute had
 # to keep: every door that takes a POST is asked before the gate that refuses
 # all but GET and HEAD, the journal's sync doors with them, and the journal's
@@ -1450,7 +1455,7 @@ eq("server.js works out the path as asked once (req.url.split('?')[0])",
 _route = _srv_code[_srv_code.index('function route(req, res) {'):]
 _route = _route[:_route.index('\n}\n')]
 _gate = _route.find("if (req.method !== 'GET' && req.method !== 'HEAD')")
-_decode = _route.find('decodeURIComponent(parsed.pathname)')
+_decode = _route.find('pathname = Lite.decodedPath(req.url)')
 eq('route() asks every POST door, and the journal\'s sync doors, before its GET-only gate, '
    'and the journal\'s pages after the decode',
    (_gate > 0 and all(_m.start() < _gate for _m in re.finditer(r"req\.method === 'POST'", _route)),

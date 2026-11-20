@@ -319,6 +319,21 @@ def raw(base, path, body=None, method=None):
         return e.code, e.read().decode('utf-8', 'replace'), dict(e.headers)
 
 
+def target(base, tgt, method='GET'):
+    """A request whose target is sent exactly as given, which urllib will not
+    do: an absolute-form `http://host:port/path`, a backslash, a dot segment,
+    a fragment. (status, body)."""
+    import http.client
+    host, port = base.split('//', 1)[1].rsplit(':', 1)
+    conn = http.client.HTTPConnection(host, int(port), timeout=8)
+    try:
+        conn.request(method, tgt)
+        r = conn.getresponse()
+        return r.status, r.read().decode('utf-8', 'replace')
+    finally:
+        conn.close()
+
+
 def as_json(text):
     try:
         return json.loads(text)
@@ -419,6 +434,24 @@ try:
             _j = as_json(_body) or {}
             eq('[lite] %s %s is shut (404, saying lite)' % (_method, _path),
                (_s, _j.get('lite')), (404, True))
+        # ...by every spelling route() serves them by, not only the plain one.
+        # lite/lite.js read the target up to its `?` and decoded it, while
+        # route() asks url.parse's pathname, which drops an absolute-form
+        # target's scheme and host, and the fragment, and turns a backslash
+        # into a slash; the static handler then resolves dot segments and a
+        # doubled slash. Each of these reached the page or the report behind
+        # a shut door: `http://host/api/shift` started the shift report's
+        # Python on a lite rig. Now lite asks Lite.decodedPath, which is what
+        # route() calls.
+        for _tgt in [_lb + _p for _p in ('/api/shift', '/shift.html', '/map.html',
+                                         '/places/index.html', '/api/placeslink')] + [
+                '/%61pi/shift', '/shift%2Ehtml', '/api/shift#x', '/api\\shift',
+                '/x/../shift.html', '//map.html']:
+            _s, _body = target(_lb, _tgt)
+            eq('[lite] GET %s is shut too (404, saying lite)' % _tgt,
+               (_s, (as_json(_body) or {}).get('lite')), (404, True))
+        eq('[lite] ...and an absolute-form target to a kept door is still served',
+           target(_lb, _lb + '/api/status')[0], 200)
         for _path in KEPT:
             _s, _body, _h = raw(_lb, _path)
             # The frame answers 404 with no picture yet (this server has no
