@@ -100,3 +100,8 @@ rpi/earnings/
 # ...and the days the owner marked special on the Trends tab (server.js
 # specialDaysList): dates only, this record's and nobody else's.
 rpi/special-days.json*
+# ...and what the last night's update did (tools/autoupdate.sh): an outcome,
+# two commits and a time, this machine's own. Committed, every checkout would
+# report another machine's night, and the next update's status write would be
+# a local change that skips every update after it.
+rpi/update-status.json*
