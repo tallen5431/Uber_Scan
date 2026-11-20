@@ -7144,11 +7144,28 @@ def main():
         # announcing a number the scanner is still in the middle of
         # correcting, and a two-leg card missing a leg reads as a much
         # better offer than it is.
-        if args.speak and out['locked'] and whole and rate['ready']:
-            sig = (parsed['pay'], parsed['minutes'])
+        #
+        # ...and what is spoken is what the panel is shown: `shown_rate`, not
+        # the reading's own `rate`. They differ when price() doubts a payout
+        # the card on record was read with another of (pay_disagrees), and the
+        # voice spoke the raw rate: over a card the panel said CHECK THE PAY
+        # about, it said "pass. 1.9 an hour." — the figure the panel would not
+        # price, aloud, to a driver whose eyes are on the road. The state is in
+        # the signature because the doubt can clear with nothing else moving:
+        # a read with the payout over its label settles it at the payout and
+        # minutes already spoken of, and that verdict is the one to say.
+        if args.speak and out['locked'] and whole and shown_rate['ready']:
+            sig = (parsed['pay'], parsed['minutes'], shown_rate['state'],
+                   shown_rate.get('doubt'))
             if sig != spoke_for:
                 spoke_for = sig
-                say(spoken(rate))
+                say(spoken(shown_rate))
+        # Re-armed by a read with nothing priceable in it, as it was — the
+        # reading's own rate, not the panel's copy. The one read the panel holds
+        # back with the reading ready is unsure_payout's: a single frame's
+        # payout without its cents, which is the card still up and read again,
+        # never a read that came back empty. Re-arming on it would say the same
+        # verdict twice over one card whose reads went locked, unsure, locked.
         if not rate['ready']:
             spoke_for = None
 

@@ -2291,7 +2291,7 @@ def raise_journey(got):
     """The journey a raised read of a DoorDash stops card must agree with, or
     None when the box's read is not one to raise (Scanner._look).
 
-    A read with no payout whose text names a stops line (OP.STORES_LINE) and
+    A read with no payout whose text names a stops line (OP.stops_line) and
     whose journey is read: its own parse, or — the payout flush on the box's
     top, money_is_clipped having emptied it to parse('') — the parse of the
     clipped text, for its journey alone (rescue_refused reads nothing else of
@@ -2301,7 +2301,7 @@ def raise_journey(got):
     stops card.
     """
     text = got.get('text') or ''
-    if got['parsed']['pay'] is not None or not OP.STORES_LINE.search(text):
+    if got['parsed']['pay'] is not None or not OP.stops_line(text):
         return None
     journey = OP.parse(text) if got.get('clipped') else got['parsed']
     if not (journey['minutes'] or journey['deliverBy'] is not None):
@@ -2370,7 +2370,7 @@ def card_box_refused(memo, got):
         if parsed[key] != memo['journey'][key]:
             return 'it reads a different %s from the card it was learned on' % key
     refused = rescue_refused(memo['journey'], parsed, got.get('text') or '')
-    if refused is None and memo['stops'] and not OP.STORES_LINE.search(got.get('text') or ''):
+    if refused is None and memo['stops'] and not OP.stops_line(got.get('text') or ''):
         refused = 'no stops line in it'
     return refused
 
@@ -2716,8 +2716,15 @@ class Scanner:
         """
         frames = list(frames)
         geom = self.geometry() if geom is None else geom
-        if len(frames) == 1:
-            return [self._look(frames[0], now, geom)]
+        # A single frame goes through the pool too. It was read here, on the
+        # calling thread — scan_pi's reader — and the engine belongs to the
+        # thread, so the first single-frame read built a third engine beside
+        # the pool's two: measured, 1 after a single read, 3 after a paired
+        # one, lite and full alike, where lite's README and AUDITS said two.
+        # ~10-14MB of model on a Pi Zero 2 W's 512MB for nothing a pool
+        # thread could not read. The hop costs 0.1-0.3 ms of an 80 ms read on
+        # the development box (a single read's median 80-83 ms before and
+        # after, lite and full); rpi/test_tesseract.py holds the count.
         # The pool outlives the call. It used to be built per read and shut down
         # at the end of it, which was free when a read spawned a process and is
         # not now: the engine belongs to the thread, so a fresh pair of threads
@@ -2839,7 +2846,12 @@ class Scanner:
             self.forget_card_box('nothing to hold the next read to')
             return
         self.card_box = {'box': clamp_box(out['crop']), 'journey': journey,
-                         'stops': bool(OP.STORES_LINE.search(out.get('text') or '')),
+                         # OP.stops_line, not STORES_LINE on the raw text:
+                         # that pattern's \s is ASCII, so a stops line the
+                         # reader spaced with U+00A0 or U+FEFF was no stops
+                         # line here while find_stores, which asks it of the
+                         # line spaced, read the card's stores off it.
+                         'stops': OP.stops_line(out.get('text') or ''),
                          'by': out.get('rescuedBy'), 'dark': geom.dark_mode,
                          'roi': [float(v) for v in self.roi], 'at': self.clock()}
 
@@ -2996,7 +3008,7 @@ class Scanner:
                 refused = rescue_refused(got['parsed'] if dd_journey is None else dd_journey,
                                          again['parsed'], again['text'])
                 if refused is None and dd_journey is not None \
-                        and not OP.STORES_LINE.search(again['text'] or ''):
+                        and not OP.stops_line(again['text'] or ''):
                     refused = 'no stops line in it'
                 # A DoorDash sheet refused leaves the raise below to try: the
                 # sheet's walk sees no hairline, so a card stacked above on the
@@ -3034,7 +3046,7 @@ class Scanner:
         # lost in glare or a shadow, or a sheet whose crop it refused.)
         #
         # So for THIS card only — a read through a drawn card box that names a
-        # stops line (OP.STORES_LINE, "N stops (X mi)", DoorDash's own and
+        # stops line (OP.stops_line, "N stops (X mi)", DoorDash's own and
         # nobody else's) and has no payout, whose journey is read (the box's,
         # or for a clipped read the clipped text's: the half-shaved figure is
         # never what is kept, only the journey under it) — the box is read
@@ -3099,7 +3111,7 @@ class Scanner:
                         break
                     continue
                 refused = rescue_refused(held_to, again['parsed'], again['text'])
-                if refused is None and not OP.STORES_LINE.search(again['text'] or ''):
+                if refused is None and not OP.stops_line(again['text'] or ''):
                     refused = 'no stops line in it'
                 if refused is None:
                     got = again

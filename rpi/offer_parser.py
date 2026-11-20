@@ -5602,6 +5602,30 @@ STORE_CHIP = re.compile(r'\b(?:pick\s*up|drop\s*off)\s*\d|\bid\s*check\b|\bage\s
 STORES_LINE = re.compile(
     r'ps\s*\(\s*' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?\s*m(?:i|iles?)\b\s*\)',
     re.IGNORECASE | ASCII)
+# The four patterns above are ASCII, so their \s is the six ASCII spaces, and
+# JavaScript's is those and U+00A0, U+FEFF, U+2000-U+200A, U+2028/9, U+3000
+# and more. Off one card the ports disagreed: "2 stops (2.6<U+FEFF>mi)" was
+# no stops line here, so the store and its street ran together as one place
+# ("Fable Grill 1200 Fable St Suite 200" against "Fable Grill"), and a chip
+# "Pick<U+00A0>up 2 orders" was no chip here, so it became the store and the
+# pickup. The JavaScript answers are the card's. So both ports ask these
+# patterns of the line with every character of WHITESPACE's union turned into
+# one space — one for one, not collapsed, so `^\W{0,4}` counts the marks in
+# front of a house number as it did — and keep the raw line for the name,
+# which _store_name already splits on that union.
+_ONE_SPACE = re.compile(r'[\s\ufeff]')
+
+
+def _spaced(line):
+    """`line` with each whitespace character of either language one space."""
+    return _ONE_SPACE.sub(' ', line or '')
+
+
+def stops_line(text):
+    """Whether `text` holds DoorDash's `N stops (X mi)` line (STORES_LINE),
+    whatever space the reader put in it. See _spaced. What pipeline asks of a
+    read, so a read it calls a stops card is one find_stores reads as one."""
+    return STORES_LINE.search(_spaced(text)) is not None
 
 
 def _store_name(line):
@@ -5969,19 +5993,22 @@ def find_stores(raw_text, doors=None):
     street after one is not said to be the name's door.
     """
     lines = (raw_text or '').split('\n')
-    at = next((i for i, l in enumerate(lines) if STORES_LINE.search(l)), None)
+    at = next((i for i, l in enumerate(lines) if stops_line(l)), None)
     if at is None:
         return []
     out, pending, door_of = [], [], []
     # Whether the line before this one was the name's last line, for `doors`.
     under_name = False
     for line in lines[at + 1:]:
-        if STORE_END.search(line):
+        # The patterns read the line spaced, the name is taken from it raw.
+        # See _spaced.
+        flat = _spaced(line)
+        if STORE_END.search(flat):
             break
-        if STORE_CHIP.search(line):
+        if STORE_CHIP.search(flat):
             under_name = False
             continue
-        if STORE_STREET.search(line):
+        if STORE_STREET.search(flat):
             if pending:
                 out.append(' '.join(pending)[:MAX_PLACE])
                 door_of.append(store_door(line) if under_name else None)

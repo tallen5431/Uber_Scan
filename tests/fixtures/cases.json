@@ -4314,6 +4314,28 @@
    ]
   },
   {
+   "name": "a stops line whose \"mi\" the reader spaced with U+FEFF is still the stops line, so the store is not run into its street",
+   "_why": "find_stores' four patterns were ASCII in Python, whose \\s then misses U+FEFF and U+00A0 where JavaScript's does not: Python gave one place, the name and the street run together, and JavaScript the name. The line is now asked spaced in both ports. Invented.",
+   "text": "$5.30\n2 stops (2.6\ufeffmi) - 20 min\n@ Fable Grill\n1200 Fable St Suite 200\n& Customer dropoff",
+   "expect": [
+    "Fable Grill"
+   ]
+  },
+  {
+   "name": "a chip line spaced with U+00A0 is a chip in both ports, not the store",
+   "text": "$5.30\n2 stops (2.6 mi) - 20 min\n& Corner Bagel Co\nPick\u00a0up 2 orders\n1200 Fable St Suite 200\nCustomer dropoff",
+   "expect": [
+    "Corner Bagel Co"
+   ]
+  },
+  {
+   "name": "...and one spaced with U+001C, which Python calls a space and JavaScript does not",
+   "text": "$5.30\n2 stops (2.6 mi) - 20 min\n& Corner Bagel Co\nPick\u001cup 2 orders\n1200 Fable St Suite 200\nCustomer dropoff",
+   "expect": [
+    "Corner Bagel Co"
+   ]
+  },
+  {
    "name": "a corner's quadrant read \"NUP\" before its \"&\" is NW, and \"SW.\" before the town's comma is SW",
    "_why": "The owner's snap of 30 Oct, 20:21: the planner's \"NW\" read \"NUP\", and the held door's search refused it. A slip of the quadrant's W is mended from a closed list, as a street's last word only (QUADRANT_SLIP / quadrantSlip). Invented.",
    "text": "Add-on\n$9.40\nIncludes expected tip\n22 min (6.1 mi) total\nKestrel Noodle Bar (40 Fable Rd)\nVantry Ln NUP & Orrin Ct SW., Marietta\nAccept",

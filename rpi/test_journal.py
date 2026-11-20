@@ -1940,6 +1940,92 @@ ok_('[corrects] same_card: the card on record, another payout',
 no_('[corrects] ...not another shop',
     _log.same_card(P.parse(_cb('1.09', shop='Birch Market (88 Juniper Way)')),
                    at=1_700_000_000_000 + 500))
+
+# --- a restart under the card keeps what the card had ---------------------------
+#
+# resume() adopted the id, the seq and the payout and left landed_id and
+# settled_written at their defaults: after a restart with the card still up,
+# same_card() said False, a labelled read could not correct the payout (it
+# became a second offer), and the next identical settled read wrote the settled
+# upgrade again — seq 1, 2 settled, 3 settled.
+
+
+def _restart(name, before, after, settle_before=False):
+    """`before` through one OfferLog, then a fresh one resumed over the same
+    file, then `after` through that. Returns (resumed log, rows written)."""
+    path = os.path.join(work, name)
+    one = JR.OfferLog(JR.Journal(path))
+    feed(one, before)
+    if settle_before:
+        p = P.parse(before[-1])
+        one.consider(p, P.rate(p, MONEY), now=1_700_000_000.0 + len(before) * 0.5,
+                     settled=True)
+    two = JR.OfferLog(JR.Journal(path))
+    ok_('[resume] %s: the card is adopted' % name,
+        two.resume(now=1_700_000_004.0) is not None)
+    two.same_before = two.same_card(P.parse(after[0]), at=1_700_000_004_000)
+    out, acc = [], OfferAccumulator()
+    for i, text in enumerate(after):
+        p = acc.add(P.parse(text), now=1_700_000_004.0 + i * 0.5)
+        out.append(two.consider(p, P.rate(p, MONEY), now=1_700_000_004.0 + i * 0.5,
+                                settled=True))
+    return two, out
+
+
+_two, _out = _restart('resume-settled.jsonl', [OFFER], [OFFER, OFFER],
+                      settle_before=True)
+eq('[resume] the settled upgrade is not written again after a restart (%r)'
+   % [(r['seq'], r['settled']) for r in _two.journal.rows()],
+   [(r['seq'], r['settled']) for r in _two.journal.rows()], [(1, False), (2, True)])
+ok_('[resume] same_card holds for the card still on screen, before anything is read',
+    _two.same_before)
+_two, _out = _restart('resume-corrects.jsonl', [_cb('1.09')], [_cb('9.09')] * 3)
+_rows = _two.journal.rows()
+eq('[resume] a labelled read after a restart still corrects the payout, one offer (%r)'
+   % [(r['id'], r['seq'], r['pay']) for r in _rows],
+   (len(set(r['id'] for r in _rows)), _rows[-1]['pay'],
+    (_rows[-1].get('corrected') or {}).get('from')), (1, 9.09, 1.09))
+# ...and one stray labelled read after it does not undo a labelled payout the
+# card held, as it would not have without the restart.
+_two, _out = _restart('resume-stray.jsonl', [_cb('9.09')] * 3, [_cb('1.09')])
+eq('[resume] one stray labelled read after a restart corrects nothing (%r)'
+   % [(r['seq'], r['pay']) for r in _two.journal.rows()],
+   [r['pay'] for r in _two.journal.rows()], [9.09])
+# ...and a correction made before the restart is still on the newest row.
+_two, _out = _restart('resume-corrected.jsonl', [_cb('1.09')] + [_cb('9.09')] * 3,
+                      [_cb('9.09')])
+eq('[resume] the correction is carried on the first row after a restart (%r)'
+   % [(r['seq'], r['pay'], bool(r.get('corrected'))) for r in _two.journal.rows()],
+   (_out[-1] or {}).get('corrected', {}).get('from'), 1.09)
+
+# --- an append that fails is tried again on the next read of the same card -------
+#
+# consider() moved `content`, `seq` and `settled_written` before the append and
+# left them moved when it returned False, so the next identical read matched
+# `content` and wrote nothing: a card whose one append met a full card for a
+# moment was never recorded, however long it stayed on screen.
+_fl = fresh('append-fails.jsonl')
+_fl_real = _fl.journal.append
+_fl.journal.append = lambda row: False
+_fl_p = P.parse(OFFER)
+_fl_r = P.rate(_fl_p, MONEY)
+eq('[append] a read whose append fails returns nothing',
+   _fl.consider(_fl_p, _fl_r, now=1_700_000_000.0), None)
+_fl.journal.append = _fl_real
+_fl_row = _fl.consider(_fl_p, _fl_r, now=1_700_000_000.5)
+ok_('[append] ...and the same card read again once the disk is back is written',
+    _fl_row is not None)
+eq('[append] ...under the seq the lost row had, so the card\'s rows still count 1, 2 (%r)'
+   % [r['seq'] for r in _fl.journal.rows()], [r['seq'] for r in _fl.journal.rows()], [1])
+# The settled upgrade the same way: one that fails is owed, not spent.
+_fl.journal.append = lambda row: False
+eq('[append] a settled upgrade whose append fails returns nothing',
+   _fl.consider(_fl_p, _fl_r, now=1_700_000_001.0, settled=True), None)
+_fl.journal.append = _fl_real
+_fl_up = _fl.consider(_fl_p, _fl_r, now=1_700_000_001.5, settled=True)
+eq('[append] ...and the next settled read writes it, as seq 2 (%r)'
+   % [(r['seq'], r['settled']) for r in _fl.journal.rows()],
+   [(r['seq'], r['settled']) for r in _fl.journal.rows()], [(1, False), (2, True)])
 shutil.rmtree(work, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad

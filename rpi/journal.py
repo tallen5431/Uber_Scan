@@ -785,6 +785,35 @@ class OfferLog:
         # _returning. None with the payout, for the same reason.
         self.figures = (tuple(stored[1:3]) if self.pay is not None
                         and len(stored) >= 3 else None)
+        # The row is on disk: that is where it was just read from. landed_id
+        # was left at None, and three things ask it. same_card() said False
+        # for the card still on screen, so scan_pi's pay_disagrees stopped
+        # guarding it and a labelled read could not correct its payout — a
+        # restart made it a second offer, the failure _corrects exists to
+        # end. And with settled_written left False, the next identical read
+        # wrote the settled upgrade again: seq 1, 2 settled, 3 settled.
+        self.landed_id = self.id
+        self.settled_written = bool(row.get('settled'))
+        # ...and what _corrects counts with, as far as one row can say it: its
+        # payout read once, over its label if the row says so. Left empty, a
+        # labelled payout on record was "never labelled" after a restart, and
+        # one stray labelled read replaced it at once, where the same card read
+        # without the restart counted it a stray. One vote is a floor on what
+        # the card had; the votes before the restart are not on the row.
+        self.pay_votes = {}
+        self.pay_labelled = set()
+        if self.pay is not None:
+            cents = _cents(self.pay)
+            self.pay_votes[cents] = 1
+            if row.get('payLabelled'):
+                self.pay_labelled.add(cents)
+        # A correction is on every row of the card after it, so the newest
+        # says it; left None, the first row after a restart dropped it.
+        self.corrected = (dict(row['corrected'])
+                          if isinstance(row.get('corrected'), dict) else None)
+        # Still deliberately not restored: screen_wanted and promo_said (see
+        # note_screen — a stamp nothing in this process wrote), recent (a
+        # restart forgets it) and `written`, which counts this process's rows.
         # The episode is left as None so the next reading of this same card is
         # matched on content, not on a counter that restarted at zero with the
         # process.
@@ -976,8 +1005,25 @@ class OfferLog:
                     self.screen_wanted = self._owe_screen(at)
                     self.landed_id = self.id
                     return upgrade
+                # Not on disk, so not written: the next settled read tries
+                # again. See the same three lines below.
+                self.settled_written = False
+                self.seq -= 1
             return None
 
+        # Put back if the append fails. They moved before it, so a row that
+        # never reached the file still counted as said: the next identical read
+        # matched `content` and wrote nothing, and a card whose one append hit a
+        # full or read-only card for a moment was never recorded once the card
+        # came back, read after read of it on screen. The seq goes back with
+        # them, so the retry carries the number the lost row had and the card's
+        # rows stay 1, 2, 3 (the sync keys a row on (id, seq), and the failed
+        # row was never sent: it is not in the file to send). The one case
+        # where a failed append left its line in the file is a write that
+        # landed and an fsync that then raised; the retry is then a second row
+        # under the same pair, of the same reading, and the far end keeps
+        # whichever it was sent first.
+        was = (self.content, self.seq, self.settled_written)
         self.content = content
         self.settled_written = False
         self.seq += 1
@@ -993,6 +1039,7 @@ class OfferLog:
             self.screen_wanted = self._owe_screen(at)
             self.landed_id = self.id
             return row
+        self.content, self.seq, self.settled_written = was
         return None
 
     def _corrects(self, parsed, at):
