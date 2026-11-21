@@ -1721,6 +1721,198 @@
              thin: Object.keys(apps).some(function (a) { return apps[a].thin; }) };
   }
 
+  /* --- rides against deliveries: what the card said and what was paid -------
+   * (the owner, Nov 2026: "I am curious if driving passengers pays more than
+   * the card suggests. All are almost under 1 $/mi but tipping can change that
+   * quite a lot.")
+   *
+   * WHICH KIND A TRIP WAS (tripKind). A ride where Uber's own line says one
+   * (`ride`, set by parse: a ride's kind, UberX and the rest, or a street
+   * address for its pickup); a delivery where Uber's line names one
+   * ("Delivery", Eats, courier), whatever the card's shape; otherwise the
+   * card's shape decides, as the offers page's Rides and shop orders split
+   * does: two legs or more and no shop chip is a ride card (the pickup leg
+   * and the trip leg), and anything else a delivery. Uber's word wins over
+   * the card's shape because the shape is the OCR's (a leg read twice is two
+   * legs) and the line is Uber's own account of what was done. The card is
+   * the order record's (`card.legs`, server.js CARD_FIELDS) or, for a match
+   * to a card never Took'd, the offer row's (`legs`, `shop`). journal.html's
+   * tripKindOf and the report's trip_kind write this same rule for the
+   * records CSV's `trip_kind`, held equal by their suites.
+   *
+   * WHAT IS SUMMED (ridesVsDeliveries), per kind, over matched trips in the
+   * range (the range's own rule, momentOf), canceled ones left out:
+   *   counts   matched; settled (the tip is in: a figure, or no tip line);
+   *            pending (the tip still processing), counted and left out of
+   *            every paid figure, never read as a $0 tip; and the ones not
+   *            compared for the range's own reasons (amount guessed, no pay
+   *            read off the card).
+   *   $/mi     over the settled trips: the card's (its pay over its miles);
+   *            paid before the tip (Uber's total less a settled tip — surge
+   *            and Uber's other parts stay in) and with it, over UBER'S
+   *            miles from the earnings line; and paid with the tip over the
+   *            CARD'S miles. Medians of the per-trip rates, each with its n
+   *            (a trip short of a mileage, or under MILES_MIN, is left out
+   *            of that one figure). Uber's miles and the card's can count
+   *            different stretches — whether a ride's drive to the rider is
+   *            in is not known from one screenshot — so the paid-minus-card
+   *            figure per mile below is over the card's own miles, which
+   *            makes it the money alone.
+   *   the tip  its share of the total paid over the settled trips; how far
+   *            it moves $/mi (the tip over Uber's miles), its median, and
+   *            the share of trips it lifts by TIP_LIFT or more.
+   *   paid less card  per trip, in dollars and as a share of the card, and
+   *            per card mile: the median with Advice.medianCI's 95% interval
+   *            (order statistics, the same answer every time; none under its
+   *            TARGET_CI_MIN), the one interval the reports already share.
+   *   $/hr     where the rig timed the trip (`rigMinutes`): what was paid
+   *            with the tip over those minutes, and the card's own $/hr
+   *            (its pay over its minutes) for the same trips, beside it.
+   * `thin` under KIND_MIN settled trips, and then no median is printed for
+   * that kind: the floor is the interval's own (TARGET_CI_MIN, 8), so a
+   * kind with a figure always has its interval.
+   *
+   * DESCRIPTIVE ONLY, as rangeSummary: no verdict, target, line, panel or
+   * rule reads it; nothing here is a $/mile rule or a payout floor (AUDITS.md,
+   * Settled). Figures and counts only: no place, name or text. */
+  var KIND_MIN = Advice.TARGET_CI_MIN;
+  var TIP_LIFT = 0.25;
+  var MILES_MIN = 0.1;
+  var DELIVERY_WORD = /deliver|eats|courier/i;
+  var KIND_DOTS_MAX = 400;
+
+  function cardShapeIsRide(card) {
+    if (!card) return false;
+    var legs = num(card.legs);
+    return legs !== null && legs >= 2 && card.shop !== true;
+  }
+  function tripKind(e, card) {
+    if (!e) return null;
+    if (e.ride === true) return 'ride';
+    if (DELIVERY_WORD.test(e.type || '')) return 'delivery';
+    return cardShapeIsRide(card) ? 'ride' : 'delivery';
+  }
+
+  function kindGroup() {
+    return { matched: 0, settled: 0, pending: 0, noTipLine: 0, guessed: 0, noCard: 0,
+             cardPm: [], basePm: [], totalPm: [], totalPmCard: [], liftPm: [], diffs: [], shares: [],
+             diffPm: [], paidPh: [], cardPh: [], tips: 0, paid: 0, card: 0, dots: [] };
+  }
+  function medOf(xs, round) {
+    if (!xs.length) return null;
+    return round(Advice.median(xs));
+  }
+  function ciOf(xs, round) {
+    var ci = Advice.medianCI(xs);
+    return ci ? [round(ci[0]), round(ci[1])] : null;
+  }
+  function closeKind(g) {
+    var thin = g.settled < KIND_MIN;
+    var med = function (xs, round) { return thin ? null : medOf(xs, round || r2); };
+    var ci = function (xs, round) { return thin ? null : ciOf(xs, round || r2); };
+    var lifted = g.liftPm.filter(function (v) { return v >= TIP_LIFT - 1e-9; }).length;
+    return {
+      matched: g.matched, settled: g.settled, pending: g.pending, noTipLine: g.noTipLine,
+      guessed: g.guessed, noCard: g.noCard, thin: thin,
+      card: r2(g.card), paid: r2(g.paid), tips: r2(g.tips),
+      cardPerMile: { median: med(g.cardPm), n: g.cardPm.length },
+      paidPerMile: { base: med(g.basePm), total: med(g.totalPm), n: g.totalPm.length, miles: 'uber' },
+      paidPerCardMile: { total: med(g.totalPmCard), n: g.totalPmCard.length, miles: 'card' },
+      tip: { share: g.paid > 0 ? r4(g.tips / g.paid) : null, liftMedian: med(g.liftPm),
+             lifted: lifted, liftShare: g.liftPm.length ? r4(lifted / g.liftPm.length) : null, n: g.liftPm.length },
+      diff: { median: med(g.diffs), ci: ci(g.diffs), n: g.diffs.length,
+              share: med(g.shares, r4), shareCi: ci(g.shares, r4), shareN: g.shares.length },
+      diffPerMile: { median: med(g.diffPm), ci: ci(g.diffPm), n: g.diffPm.length },
+      perHour: { paid: med(g.paidPh), card: med(g.cardPh), n: g.paidPh.length },
+      dots: g.dots.slice(0, KIND_DOTS_MAX)
+    };
+  }
+
+  function ridesVsDeliveries(entries, records, opts) {
+    var o = opts || {};
+    var from = num(o.from), to = num(o.to);
+    function inRange(ms) {
+      if (ms === null) return from === null && to === null;
+      return (from === null || ms >= from) && (to === null || ms < to);
+    }
+    var cards = Object.create(null);
+    (o.offers || []).forEach(function (r) {
+      if (r && typeof r.id === 'string') cards[r.id] = { legs: r.legs, shop: r.shop };
+    });
+    // The order record's card wins over the offer row's: it is the card the
+    // Took was pressed on.
+    (records || []).forEach(function (r) {
+      if (r && r.kind === 'order' && typeof r.offer === 'string' && r.card) cards[r.offer] = r.card;
+    });
+    var g = { ride: kindGroup(), delivery: kindGroup() };
+    var matched = 0;
+    (entries || []).forEach(function (e) {
+      if (!e || !inRange(momentOf(e))) return;
+      var m = e.match || {};
+      if (m.status !== 'matched' && m.status !== 'picked') return;
+      if (e.status === 'canceled') return;
+      var k = g[tripKind(e, cards[m.offer])];
+      matched += 1;
+      k.matched += 1;
+      var card = num(cardPayOf(m)), paid = num(e.amount);
+      if (card === null) { k.noCard += 1; return; }
+      if (e.amountGuessed) { k.guessed += 1; return; }
+      if (paid === null) return;
+      if (e.tip === 'processing' || e.tipStatus === 'pending') { k.pending += 1; return; }
+      var tip = typeof e.tip === 'number' ? e.tip : 0;
+      if (typeof e.tip !== 'number') k.noTipLine += 1;
+      k.settled += 1;
+      k.card += card; k.paid += paid; k.tips += tip;
+      var cardC = Math.round(card * 100), dC = Math.round(paid * 100) - cardC;
+      k.diffs.push(dC / 100);
+      if (cardC > 0) k.shares.push(dC / cardC);
+      var cm = num(m.cardMiles), um = num(e.miles);
+      var dot = { card: null, paid: null };
+      if (cm !== null && cm >= MILES_MIN) {
+        k.cardPm.push(card / cm);
+        k.totalPmCard.push(paid / cm);
+        k.diffPm.push((paid - card) / cm);
+        dot.card = r2(card / cm);
+      }
+      if (um !== null && um >= MILES_MIN) {
+        k.basePm.push((paid - tip) / um);
+        k.totalPm.push(paid / um);
+        k.liftPm.push(tip / um);
+        dot.paid = r2(paid / um);
+      }
+      if (dot.card !== null || dot.paid !== null) k.dots.push(dot);
+      var rm = num(m.rigMinutes), cmin = num(m.cardMinutes);
+      if (rm !== null && rm > 0) {
+        k.paidPh.push(paid / (rm / 60));
+        if (cmin !== null && cmin > 0) k.cardPh.push(card / (cmin / 60));
+      }
+    });
+    return { from: from, to: to, matched: matched, min: KIND_MIN, tipLift: TIP_LIFT,
+             ride: closeKind(g.ride), delivery: closeKind(g.delivery) };
+  }
+
+  /* The block's one plain-words line: what each kind paid per card mile
+   * against its card once tips settled, the median with n and its 95%
+   * interval; or, under KIND_MIN settled, that there are too few yet. */
+  function signed2(v) { return (v > 0 ? '+' : v < 0 ? '−' : '') + '$' + Math.abs(v).toFixed(2); }
+  function kindWords(s) {
+    if (!s || !s.matched) return null;
+    function one(k, noun, first) {
+      var g = s[k];
+      if (g.thin || g.diffPerMile.median === null) {
+        return 'too few settled ' + noun + ' yet (' + g.settled + ', under ' + s.min + ')';
+      }
+      var d = g.diffPerMile, v = d.median;
+      var how = v > 0 ? ' more than' : v < 0 ? ' less than' : ' the same as';
+      return noun + (first ? ' paid a median ' : ' ')
+        + signed2(v) + '/mi' + (first ? how + ' their cards once tips settled' : '')
+        + ' (n=' + d.n + (d.ci ? ', 95%: ' + signed2(d.ci[0]) + ' to ' + signed2(d.ci[1]) : '') + ')';
+    }
+    var a = one('ride', 'rides', true), b = one('delivery', 'deliveries', !/ paid a median /.test(a));
+    var out = a.charAt(0).toUpperCase() + a.slice(1) + '; ' + b + '.';
+    return / paid a median /.test(a + b) ? out + ' Per mile of the card\'s own miles, so it is the money alone.' : out;
+  }
+
   /* --- Uber's Acceptance rate screen (the owner, 15 Nov 2026) -------------
    *
    * Uber Pro's own figures, read off a screenshot of that screen for the
@@ -1805,6 +1997,8 @@
   return {
     acceptanceScreen: acceptanceScreen,
     compareOf: compareOf, daySummary: daySummary, rangeSummary: rangeSummary, driverDayOf: driverDayOf,
+    tripKind: tripKind, ridesVsDeliveries: ridesVsDeliveries, kindWords: kindWords, KIND_MIN: KIND_MIN,
+    TIP_LIFT: TIP_LIFT, MILES_MIN: MILES_MIN,
     weekOfDay: weekOfDay, EVEN_CENTS: EVEN_CENTS, CHECK_SHARE: CHECK_SHARE, CHECK_MIN: CHECK_MIN, CHECK_ABS: CHECK_ABS,
     SPREAD_MIN: SPREAD_MIN, COVER_THIN: COVER_THIN, THIN_N: THIN_N, WEEK_MEDIAN_MIN: WEEK_MEDIAN_MIN, PAY_FLAG: PAY_FLAG, PAY_FLAG_SHARE: PAY_FLAG_SHARE,
     ON_TIME_MIN: ON_TIME_MIN, ON_TIME_SHARE: ON_TIME_SHARE, MILES_SAME: MILES_SAME,
