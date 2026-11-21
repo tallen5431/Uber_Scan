@@ -488,6 +488,12 @@ function scannerLine(line) {
       });
       // ...and what waited for a cue asked again: this sighting may be it.
       retryPool();
+      // ...and, with two Tooks, the time a planner read gave each door,
+      // which may now say whose one is (dueFiled).
+      if (read.sighting.screen === 'uber.planner') {
+        dueFiled(typeof read.sighting.at === 'number' ? read.sighting.at : sightedNow,
+                 read.sighting.app || 'uber', Date.now());
+      }
       return;
     }
     // DoorDash's place popup (rpi/scan_pi.py, emit_popup): an address the
@@ -2459,10 +2465,23 @@ function retryPool() {
  * `page` its sighting (Assemble.pageOf), for the app; `now` the line's
  * arrival. */
 function heldPlanFiled(held, planner, page, now) {
-  var orders = heldOrders(now);
-  if (orders.length < 2 || !held.planner) return;
+  if (!held.planner) return;
   var at = typeof planner.at === 'number' ? planner.at : now;
   var app = page && page.app ? page.app : 'uber';
+  // ONE Took: the planner the hold keeps is its route, every stop
+  // (heldTrip; the owner's decision of Nov 2026), and "end not guessed" —
+  // 'dropoffs' or 'list' — is then true of no order in the car.
+  if (heldTripFiled(at, app, now) && held.planner
+      && (held.planner.unfiled === 'dropoffs' || held.planner.unfiled === 'list')) {
+    held.planner.unfiled = null;
+    planner.unfiled = null;
+  }
+  var orders = heldOrders(now);
+  if (orders.length < 2 || !held.planner) return;
+  // ...and with two Tooks, each order's door by its time first (dueFiled),
+  // then by its card's street.
+  dueFiled(at, app, now);
+  orders = heldOrders(Date.now());
   var ends = Assemble.heldPlanEnds(orders, held.planner.stops, { app: app, at: at });
   ends.files.forEach(function (f) {
     if (choosing && Assemble.sameStreet(choosing.d && choosing.d.line, f.d.line)) {
@@ -2484,6 +2503,62 @@ function heldPlanFiled(held, planner, page, now) {
     held.planner.unfiled = null;
     planner.unfiled = null;
   }
+}
+
+/* ONE Took and its planner: the trip's every door, the last its end
+ * (Assemble.heldTrip), filed through the one road as a batch, forced onto
+ * that order with cue 'route' — again only when the end or the doors changed,
+ * so a stop read on a later page joins the route and a delivered stop the
+ * list no longer keeps leaves it. Map view routes car, pickups, every door
+ * and the end (MV.heldDrops); the panel says "3 drops". Off under lite,
+ * which has no planner flow and no map. True when the order of the app has a
+ * batch of doors on it now. `at` the planner read's time, `app` its app. */
+function heldTripFiled(at, app, now) {
+  if (LITE) return false;
+  var held = holding(now);
+  if (!held || !held.planner) return false;
+  var orders = heldOrders(now);
+  var trip = Assemble.heldTrip(orders, held.planner.stops, { app: app, at: at, st: assembly });
+  if (trip.d) {
+    console.log('trip planner: one Took, ' + trip.d.batch.drops.length
+                + ' dropoffs routed as its trip');
+    var said = { dropoff: trip.d, at: Date.now() };
+    dropoffArrived(said, { order: trip.order, cue: 'route' });
+    if (said.dropoff) broadcast(said);
+  }
+  var mine = heldOrders(Date.now()).filter(function (o) { return !o.app || o.app === app; });
+  return mine.length === 1 && batchDrops(mine[0]) !== null;
+}
+
+/* Two Tooks or more on one planner: each order's door by its time
+ * (Assemble.dueEnds, readings kept off every planner sighting since the
+ * Took), filed through the one road with cue 'time', as the card's street
+ * files (heldPlanFiled). Asked after a planner line merges and after each
+ * planner sighting, which may bring the time that decides. What it said for
+ * each order is kept for a snap's searches.json (`drop`). Off under lite. */
+function dueFiled(at, app, now) {
+  if (LITE) return;
+  var held = holding(now);
+  if (!held || !held.planner) return;
+  var orders = heldOrders(now);
+  if (orders.length < 2) return;
+  var due = Assemble.dueEnds(assembly, orders, held.planner.stops, { app: app, at: at });
+  due.notes.forEach(function (n) {
+    memoSafe(function () {
+      memoOrder(holdIdOf(n.order)).drop = { at: Date.now(), cue: n.line ? 'time' : null,
+                                            line: n.line, why: n.why };
+    });
+  });
+  due.files.forEach(function (f) {
+    if (choosing && Assemble.sameStreet(choosing.d && choosing.d.line, f.d.line)) {
+      choosing = null;
+      broadcast({ chooser: null });
+    }
+    console.log('planner door due when one order is: filed by ' + f.cue);
+    var said = { dropoff: f.d, at: Date.now() };
+    dropoffArrived(said, { order: f.order, cue: f.cue });
+    if (said.dropoff) broadcast(said);
+  });
 }
 
 /* A Trip Planner's pickups, each marked with the order it is for (`of`),
@@ -11181,8 +11256,8 @@ function statusNow() {
                    // doors {line, name, expectedBy, key} in `drops` — the end
                    // above is the last of them — or, with none, why the
                    // planner's dropoffs were not taken for one (`batchWhy`:
-                   // 'card end elsewhere', 'no card street', 'address', 'an
-                   // add-on'; null when no list of two dropoffs was seen).
+                   // 'address', 'an add-on'; null when no list of two
+                   // dropoffs was seen).
                    batch: batchDrops(h) !== null,
                    drops: batchDrops(h) !== null ? h.drops : null,
                    batchWhy: batchDrops(h) !== null ? null
