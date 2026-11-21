@@ -683,13 +683,24 @@ So the Pi scanner keeps one line per offer it was confident about, in
   dropoff — one on the screen, and both ends of the list in view: the title
   over the first stop and “Waybill” under the last — and its street and town
   read, that address becomes the order in the car's destination as any other
-  read one does. Otherwise the rig does not guess: it says why under the stops
+  read one does. **With ONE order marked taken, a planner of several dropoffs
+  is that order's route** (the owner's decision, Nov 2026: Uber puts several
+  stores and several customers under one offer): every dropoff goes on the
+  order in the planner's order, the last its destination once “Waybill” has
+  been read under it, with no press, and the driving screen says “3 drops”.
+  A stop read on a later page joins the route; a delivered one leaves it when
+  a read shows the list without it, never one due more than twenty minutes
+  on. So ⌖ over the Trip Planner is now mostly unnecessary on Uber, and it is
+  still there. With two orders marked taken the rig still does not guess
+  whose door is whose without a cue (the card's street, the store, each
+  order's time against the stops' “Expected by”): it says why under the stops
   (two dropoffs, the list cut off, the address unread) and leaves the order's
   destination as it was, and ⌖ over the navigation screen reads it as before.
   Each planner is also written to the journal as a row of its own, for the
   record only — nothing on the offers page reads it, and not at all with
-  `"keepPlaces": false`. The stops are not put on the map; only the one
-  dropoff it files is, as any read destination is.
+  `"keepPlaces": false`. Map view routes the car through the planner's
+  pickups and, once the destination is one of its dropoffs, every dropoff
+  before it.
 * **each order's own record.** When an order leaves the car — Drop, the
   chooser, the GPS at its door, the app's completion screen, a Took that
   replaced it, its own clock, a Took taken back — the server writes one row

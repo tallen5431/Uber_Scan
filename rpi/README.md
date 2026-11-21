@@ -7142,6 +7142,21 @@ car's end, and when it is not, says why in a word on that line:
 Otherwise the address goes out as an ordinary `dropoff` line and is filed by
 the one path every destination takes.
 
+**`dropoffs` with ONE ✓ Took is a route, not a question** (the owner's decision
+of Nov 2026, after a snap where one Took covered two stores and three
+customers and the end waited 46 s for a read that showed the last stop alone,
+past two ⌖ presses that could not answer). server.js asks
+`Assemble.heldTrip` after every planner line merges into the hold: the list
+the hold keeps, with two dropoffs or more, is that order's trip, its end the
+latest "Expected by" once a read has shown `Waybill` under it, every door on
+`drops` in the planner's order (cue `route` on the mark row). A ⌖ press over
+the planner is now mostly unnecessary on Uber; it still answers as above, and
+a pressed end is never replaced. With two Tooks the doors are still each
+order's only on a cue, and the order's own time is one (`Assemble.dueEnds`:
+its card's minutes after the accept against each stop's "Expected by", read
+twice in the four minutes after the Took, clear of every other stop by four
+minutes; cue `time`).
+
 **Read without a press, while an order is held.** Asked for after a shift,
 and for navigation screens after that. server.js writes `.holding.json`
 (`{until}`, the moment its `holding()` lets go — `holdEnds`) whenever the order
