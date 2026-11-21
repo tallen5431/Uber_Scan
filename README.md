@@ -665,7 +665,26 @@ So the Pi scanner keeps one line per offer it was confident about, in
   enough yet" with its count. Nothing in it changes a verdict.
 * **by time of day**, in three-hour blocks, each bar drawn on the same scale so
   the halfway mark is always your target.
-* **rides against shop orders**.
+* **rides against shop orders**, and beside it **rides against deliveries**:
+  the card's $/hr and $/mi side by side for each kind — rides by Uber's
+  product where five or more printed it — as the lower quarter, the middle,
+  the upper quarter and the top tenth, with counts, over the range pressed;
+  then the orders taken and timed the same way, off their records (real
+  $/hr, and real $/mi where the GPS counted the miles). One sentence says it
+  plainly ("Rides: median $36/hr against $24 for deliveries; $/mi $1.50
+  against $4.00"), or "too few rides yet" under five. A description, not a
+  rule: nothing in it reaches the panel, and what the app paid by kind is
+  the Money tab's.
+* **rides or deliveries in the list**: under the verdict chips, **All ·
+  Rides · Deliveries**, and with Rides pressed a chip for each of Uber's
+  products the range holds (UberX, UberXL, Comfort, ...). A ride is a card
+  that printed its product — read off the card's top line or just before
+  its payout, never guessed, and for an offer recorded before the field the
+  server reads the kept card text again with the same parser and says so —
+  else a two-leg card with none, "ride by card shape", which the line under
+  the list counts apart. Each ride row carries its product as a tag. Works
+  with the sorts (Best $/mi within UberX, say) and the range; this browser
+  remembers the choice, and the every-offer CSV has a `product` column.
 * **every offer**, grouped by day, with the day's count, median and total
   offered. Tap one and it opens to the whole record: what was on the card, what
   the rate was divided by and why it differs from the card's own minutes, what
