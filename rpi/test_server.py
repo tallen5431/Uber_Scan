@@ -2657,6 +2657,54 @@ finally:
     stop(_proc)
     shutil.rmtree(_work, ignore_errors=True)
 
+# --- Uber's ride product on the fold: the row's own, or its text read again --
+# The owner: "can the offers page have an option to select uber rides
+# specifically?" and "So it should be able to work on previous offer already
+# read?". A row the rig wrote with `product` keeps it, null included; a row
+# from before the field gets the parser's answer off its kept text, marked
+# `productFrom: 'text'`, or null — never a guess off the card's shape. An
+# invented record of six old ride rows: four whose kept text names the
+# product, two two-leg cards with none (a typed one, a top line cropped off).
+work = tempfile.mkdtemp()
+journal = os.path.join(work, 'journal.jsonl')
+_PT = '5 min (1.2 mi) away Oak Ln, Harrowen 23 min (8.4 mi) trip'
+write(journal, [
+    offer(1, NOW - 60000, product='Comfort', text='Comfort $11.00 ' + _PT),
+    # The rig asked and its reading found none: the same text is not asked again.
+    offer(2, NOW - 120000, product=None, text='UberX $12.00 ' + _PT),
+    # Old rows, no `product` key.
+    offer(3, NOW - 180000, text='UberX $13.00 ' + _PT),
+    offer(4, NOW - 240000, text='UberX Exclusive $14.00 4.95 Verified ' + _PT),
+    offer(5, NOW - 300000, text='Uber XL $15.00 ' + _PT),
+    offer(6, NOW - 360000, text='Comfort Exclusive $16.00 ' + _PT),
+    offer(7, NOW - 420000, typed=True),
+    offer(8, NOW - 480000, text='$18.00 ' + _PT),
+    # ...and not rides: a Comfort Inn POI over the payout, a delivery card.
+    offer(9, NOW - 540000, legs=1, text='Comfort Inn & Suites $19.00 ' + _PT),
+    offer(10, NOW - 600000, legs=1, shop=True,
+          text='Shop & Deliver $20.00 Guaranteed (incl. tip) 34 min (3.6 mi) total'),
+])
+proc, base = start({'SCANNER': '0'}, journal)
+try:
+    _po = {o['id']: o for o in get(base, '/api/journal?days=1')['offers']}
+    eq('a row the rig wrote a product into keeps it, and says nothing of where from',
+       (_po['off1'].get('product'), 'productFrom' in _po['off1']), ('Comfort', False))
+    eq('...and one it wrote null into stays null, whatever its text says',
+       (_po['off2'].get('product'), 'productFrom' in _po['off2']), (None, False))
+    eq('an old row gets the parser\'s answer off its kept text, marked as read from it',
+       [(_po['off%d' % i].get('product'), _po['off%d' % i].get('productFrom')) for i in (3, 4, 5, 6)],
+       [('UberX', 'text'), ('UberX', 'text'), ('UberXL', 'text'), ('Comfort', 'text')])
+    _old_rides = ['off%d' % i for i in (3, 4, 5, 6, 7, 8)]
+    eq('...filling 4 of the record\'s 6 old ride rows, and the typed and cropped ones stay null',
+       (sum(1 for i in _old_rides if _po[i].get('product')),
+        _po['off7'].get('product'), _po['off8'].get('product')), (4, None, None))
+    eq('...and no product off a Comfort Inn or a shop card, nor any productFrom on them',
+       [(_po[i].get('product'), 'productFrom' in _po[i]) for i in ('off9', 'off10')],
+       [(None, False), (None, False)])
+finally:
+    stop(proc)
+    shutil.rmtree(work, ignore_errors=True)
+
 # --- a hole in the one file that cannot be regenerated -----------------------
 #
 # The server skipped unparseable lines with a comment saying why and no count.
@@ -13618,11 +13666,12 @@ var ctx = { Advice: require(path.join(ROOT, 'advice.js')), Set: Set, Map: Map, D
             require: function (m) { return require(path.join(ROOT, m)); } };
 vm.createContext(ctx);
 ['CLOCK_BELIEVABLE_AFTER', 'WINDOWS_MAX', 'windows', 'latestCache', 'RowParser',
- 'PAY_REREAD', 'PAY_REREAD_MAX', 'payReread', 'REOFFER_SPAN_MS', 'REOFFER_WINDOW_MS'].forEach(function (n) {
+ 'PAY_REREAD', 'PAY_REREAD_MAX', 'payReread', 'REOFFER_SPAN_MS', 'REOFFER_WINDOW_MS',
+ 'PRODUCT_WORDS', 'rowProductSeen'].forEach(function (n) {
   vm.runInContext(grabVar(n), ctx);
 });
 ['inWindow', 'foldReads', 'windowTakes', 'windowOver', 'rowsFor', 'dayFloor', 'latestPerOffer',
- 'bestReading', 'rowApp', 'withApp', 'rereadPay', 'withPay', 'afterCorrection', 'placeKey', 'markReoffered',
+ 'bestReading', 'rowApp', 'withApp', 'rowProduct', 'withProduct', 'rereadPay', 'withPay', 'afterCorrection', 'placeKey', 'markReoffered',
  'latestPerOfferUncached'].forEach(function (n) {
   vm.runInContext(grab(n), ctx);
 });

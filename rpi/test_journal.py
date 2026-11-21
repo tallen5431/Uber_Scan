@@ -634,6 +634,20 @@ eq('an Uber card\'s rows say uber, a DoorDash card\'s doordash, and a total both
 eq('...the offer line and the row asking one function',
    JR.card_app(P.parse(OFFER)), P.screen_type(P.parse(OFFER)['text'])['app'])
 
+# ...and Uber's ride product (OP.ride_product), through the same accumulator
+# and OfferLog: an UberXL card whose later frames lost the top line still
+# writes UberXL, and a card that printed none writes None — the key on every
+# row, so server.js can tell "not printed" from a row written before it.
+_prod_rows = {}
+for _name, _texts in (('xl', ['UberXL $21.40 5 min (1.2 mi) away Oak Ln, Harrowen 23 min (8.4 mi) trip']
+                       + ['$21.40 5 min (1.2 mi) away Oak Ln, Harrowen 23 min (8.4 mi) trip'] * 3),
+                      ('none', [OFFER] * 4)):
+    _plog = fresh('product-%s.jsonl' % _name)
+    feed(_plog, _texts)
+    _prod_rows[_name] = [r.get('product', 'missing') for r in _plog.journal.rows()]
+eq('an UberXL card\'s row says UberXL though three frames lost the top line, and '
+   'a card that printed none says None', _prod_rows, {'xl': ['UberXL'], 'none': [None]})
+
 shutil.rmtree(work, ignore_errors=True)
 
 

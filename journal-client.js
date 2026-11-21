@@ -277,6 +277,8 @@ var JournalClient = (function () {
       // names neither app. A keypad row has no text, so it is null: three
       // typed figures say nothing of whose card they were.
       app: cardApp(parsed),
+      // ...and the ride product the parser read (rpi/journal.py, `product`).
+      product: parsed.product || null,
       // Rounded, because rpi/journal.py rounds. The same field, written by the
       // same project, into the same file, under two rules — and the second rule
       // was simply absent rather than different, which is the shape that drifts
