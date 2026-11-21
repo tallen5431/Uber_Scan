@@ -2933,6 +2933,14 @@
    }
   },
   {
+   "name": "ride product: a lone XL on the map over a delivery headline is no UberXL",
+   "text": "0 23min XL $9.40 Guaranteed (incl. tip) 18 min (5.1 mi) total Maple Grill (12 Fable Ct) Oak Ln, Harrowen",
+   "expect": {
+    "pay": 9.4,
+    "product": null
+   }
+  },
+  {
    "name": "ride product: never on a DoorDash card",
    "text": "Decline Comfort $8.50 Guaranteed (incl. tips) 3.1 mi Deliver by 7:15 PM Maple Grill Accept",
    "expect": {
