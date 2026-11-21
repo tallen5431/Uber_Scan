@@ -3826,10 +3826,12 @@ const framed = (page) => page.waitForFunction(
     await page.waitForFunction(() => document.getElementById('view').naturalWidth > 0,
                                null, { timeout: 5000 }).catch(() => {});
     const backMs = Date.now() - back0;
+    // The width at the moment it came back: read again two seconds on, it can
+    // land while the next still is loading, which is 0 and not a lost picture.
+    const backW = await page.evaluate(() => document.getElementById('view').naturalWidth);
     const given0 = asked.given;
     await page.waitForTimeout(2000);
-    out.noFrame = { refused: refused, given: asked.given - given0, backMs: backMs,
-                    w: await page.evaluate(() => document.getElementById('view').naturalWidth) };
+    out.noFrame = { refused: refused, given: asked.given - given0, backMs: backMs, w: backW };
     await page.close();
     await ctx.close();
   }
