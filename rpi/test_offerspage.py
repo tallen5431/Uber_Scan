@@ -4533,6 +4533,14 @@ const { chromium } = require('playwright');
         afterHeadline: before(document.getElementById('headline'), box),
         beforeTargets: before(box, document.getElementById('targets')),
         sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        quiet: (function () {
+          const q = document.getElementById('toQuiet');
+          const qa = q && q.querySelector('a');
+          const qr = qa ? qa.getBoundingClientRect() : { height: 0 };
+          return q ? { shown: !q.hidden && qr.height > 0, href: qa.getAttribute('href'), height: Math.round(qr.height),
+                       text: (qa.textContent || '').replace(/\s+/g, ' ').trim(),
+                       afterRefig: before(document.getElementById('refigHead'), q) } : null;
+        })(),
       };
     });
     await page.close();
@@ -4641,6 +4649,18 @@ try:
         0 <= (_lh.get('top') or -1) < 640 and (_lh.get('height') or 0) >= 52)
     no_('[report link] ...and the longer words on the rig do not push the page sideways at 360px',
         _ls.get('sideways') or _lh.get('sideways'))
+    # Rush vs quiet hours (tools/strategy.js section 8): worked out where the
+    # report is built, so the Strategy tab's way to it, beside the $/mi
+    # tables, goes wherever the report's own link goes, at its own anchor.
+    _lq, _lqs, _lqn = _lh.get('quiet') or {}, _ls.get('quiet') or {}, _ln.get('quiet') or {}
+    eq('[report link] rush vs quiet hours: on the NucBox a way to its own report\'s part, after the $/mi tables',
+       (_lq.get('shown'), _lq.get('href'), (_lq.get('text') or '').startswith('Rush vs quiet hours: $/hr line against $/mi line'),
+        _lq.get('afterRefig'), 'for reading only' in (_lq.get('text') or '')),
+       (True, 'places/#s-quiet', True, True, True))
+    eq('[report link] ...on the rig to the NucBox\'s copy, the same anchor; with nowhere to send it, hidden',
+       (_lqs.get('shown'), _lqs.get('href'), _lqn.get('shown')),
+       (True, 'http://nucbox.invalid:8082/places/#s-quiet', False))
+    ok_('[report link] ...a finger\'s 52px tall (%rpx)' % _lq.get('height'), (_lq.get('height') or 0) >= 52)
 finally:
     for _lp, _lb in _lservers.values():
         _lp.terminate()
