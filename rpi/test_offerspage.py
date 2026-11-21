@@ -4919,6 +4919,223 @@ finally:
     _eshutil.rmtree(_ework, ignore_errors=True)
 
 
+# --- [rides paid] rides against deliveries on the Money tab (Nov 2026) --------
+#
+# The owner: "I am curious if driving passengers pays more than the card
+# suggests. All are almost under 1 $/mi but tipping can change that quite a
+# lot." A real server per journal, each written with earnings rows already
+# matched (no picture, no tesseract): ten rides settled on a $6.00 card of 8.0
+# mi, tipped $2-$6 afterwards, two more still processing; nine deliveries on
+# an $8.00 card of 5.0 mi tipped little. Then three rides only, and a journal
+# with no earnings at all. What the block says, its table and strip at a
+# phone's 360px, the "pick them all at once" line by the button, and the
+# records CSV's trip_kind. Every figure is invented, as in
+# tests/earnings.test.js's [kinds], which works the same numbers by hand.
+RIDES_PAGE = r"""
+const { chromium } = require('playwright');
+(async () => {
+  const args = JSON.parse(process.argv[2]);
+  let browser = null;
+  for (const exe of JSON.parse(process.env.PW_EXES || '[]').concat([null])) {
+    try { browser = await chromium.launch(exe ? { executablePath: exe } : {}); break; }
+    catch (e) {}
+  }
+  if (!browser) { console.log(JSON.stringify({ skip: 'no chromium' })); return; }
+  const page = await browser.newPage({ viewport: { width: 360, height: 640 }, acceptDownloads: true });
+  const errs = [];
+  page.on('pageerror', (e) => errs.push(String(e)));
+  await page.goto(args.base + '/journal.html#money', { waitUntil: 'domcontentloaded' });
+  await page.click('#ranges button[data-days="0"]');
+  await page.waitForSelector('#earnings:not([hidden])', { timeout: 8000 }).catch(() => {});
+  if (args.expect) await page.waitForSelector('#ridesPaid:not([hidden])', { timeout: 8000 }).catch(() => {});
+  else await page.waitForTimeout(1500);
+  const out = await page.evaluate(() => {
+    const box = document.getElementById('ridesPaid');
+    const many = document.getElementById('earningsMany');
+    const pick = document.getElementById('earningsPick');
+    return {
+      shown: !!box && !box.hidden,
+      head: box && box.querySelector('h3') ? box.querySelector('h3').textContent : null,
+      says: (document.getElementById('ridesPaidSays') || {}).textContent || null,
+      counts: Array.from(box ? box.querySelectorAll('.kindcount') : []).map((p) => p.textContent),
+      cols: Array.from(box ? box.querySelectorAll('thead th') : []).map((t) => t.textContent),
+      rows: Array.from(box ? box.querySelectorAll('tbody tr') : []).map((r) =>
+        Array.from(r.children).map((c) => c.innerText.replace(/\s+/g, ' ').trim())),
+      dots: box ? box.querySelectorAll('svg circle.card').length + '/' + box.querySelectorAll('svg circle.paid').length : null,
+      notes: Array.from(box ? box.querySelectorAll('.note') : []).map((p) => p.textContent),
+      many: many ? many.textContent.replace(/\s+/g, ' ').trim() : null,
+      manyNext: !!(many && pick && pick.nextElementSibling === many),
+      sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+      boxWide: box ? box.scrollWidth > box.clientWidth + 1 : false,
+    };
+  });
+  out.errors = errs;
+  if (args.csv) {
+    const link = await page.$('#recordsCsv');
+    if (link) {
+      const href = await link.getAttribute('href');
+      out.csv = href ? await page.evaluate((h) => fetch(h).then((r) => r.text()), href) : null;
+    }
+  }
+  console.log(JSON.stringify(out));
+  await browser.close();
+})().catch((e) => console.log(JSON.stringify({ __crashed: String((e && e.stack) || e) })));
+"""
+
+_kwork = tempfile.mkdtemp()
+_kday0 = _dt.datetime.now().replace(hour=12, minute=0, second=0, microsecond=0) - _dt.timedelta(days=3)
+
+
+def _kms(d):
+    return int(d.timestamp() * 1000)
+
+
+def _krows(rides, pending, deliveries):
+    rows = []
+
+    def one(i, at, card, cmiles, legs, paid, tip, umiles, **x):
+        offer = 'k-%d' % i
+        took = _kms(at)
+        rows.append({'id': offer, 'at': took - 30000, 'firstAt': took - 30000, 'pay': card, 'minutes': 20.0,
+                     'miles': cmiles, 'legs': legs, 'perHour': 15, 'grossPerHour': 18, 'cost': 2.4,
+                     'costPerMile': 0.3, 'target': 25, 'band': 15, 'whole': True, 'app': 'uber', 'state': 'no'})
+        rows.append({'v': 1, 'kind': 'mark', 'id': offer, 'at': took, 'accepted': True, 'via': 'panel'})
+        rows.append({'v': 1, 'kind': 'order', 'id': '%s@%d' % (offer, took), 'offer': offer, 'app': 'uber',
+                     'at': took + 1800000, 'seq': took + 1800000, 'how': 'gps',
+                     'card': {'pay': card, 'minutes': 20, 'miles': cmiles, 'legs': legs},
+                     'times': {'offered': took - 30000, 'took': took, 'ended': took + 1500000}})
+        st = 'pending' if tip == 'processing' else 'settled' if isinstance(tip, (int, float)) else 'none'
+        e = {'v': 1, 'kind': 'earning', 'id': 'earn:k%d' % i, 'key': 'uber %d' % i, 'seq': took + 7200000,
+             'at': took + 7200000, 'app': 'uber', 'date': (at - _dt.timedelta(hours=4)).strftime('%Y-%m-%d'),
+             'startedAt': at.strftime('%H:%M'), 'amount': paid, 'tip': tip, 'tipStatus': st, 'status': 'completed',
+             'minutes': 20, 'seconds': 0, 'miles': umiles,
+             'match': {'status': 'matched', 'by': 'auto', 'offer': offer, 'order': '%s@%d' % (offer, took),
+                       'tookAt': took, 'cardPay': card, 'cardMiles': cmiles, 'cardMinutes': 20,
+                       'source': 'record'}}
+        e.update(x)
+        rows.append(e)
+
+    tips = [2, 3, 3, 4, 4, 4, 4, 5, 5, 6][:rides]
+    for i, t in enumerate(tips):
+        one(i, _kday0 + _dt.timedelta(minutes=5 * i), 6.0, 8.0, 2, 6.0 + t, float(t), 8.0, ride=True, type='UberX')
+    for j in range(pending):
+        one(50 + j, _kday0 + _dt.timedelta(hours=2, minutes=10 * j), 7.0, 6.0, 2, 7.0, 'processing', 6.0, ride=True)
+    extra = [0, 0, 0, 0, 0.5, 0.5, 1, 0, 0][:deliveries]
+    for k, t in enumerate(extra):
+        one(100 + k, _kday0 + _dt.timedelta(days=1, minutes=5 * k), 8.0, 5.0, 1, 8.0 + t, float(t) if t else None,
+            5.0, type='Delivery')
+    return rows
+
+
+def _kserver(name, rows):
+    home = os.path.join(_kwork, name)
+    os.makedirs(home)
+    jpath = os.path.join(home, 'journal.jsonl')
+    with open(jpath, 'w') as fh:
+        fh.write(''.join(json.dumps(r) + '\n' for r in rows))
+    kport = free_port()
+    kenv = dict(os.environ, SCANNER='0', PORT=str(kport), HTTPS_PORT='0', JOURNAL=jpath,
+                PLACES_REPORT_DIR=os.path.join(_kwork, 'no-report'), NUCBOX_PROBE_MS='0', GPSLOG_DIR='')
+    return (subprocess.Popen(['node', os.path.join(ROOT, 'server.js')], env=kenv,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL),
+            'http://127.0.0.1:%d' % kport)
+
+
+_kservers = {'both': _kserver('both', _krows(10, 2, 9)),
+             'few': _kserver('few', _krows(3, 0, 9)),
+             'none': _kserver('none', _krows(0, 0, 0) + _erows[:3])}
+try:
+    import urllib.request as _kurl
+    import time as _ktime
+    for _kp, _kb in _kservers.values():
+        for _ in range(120):
+            try:
+                _kurl.urlopen(_kb + '/api/earnings', timeout=1).read()
+                break
+            except Exception:
+                _ktime.sleep(0.1)
+    _kdriver = os.path.join(_kwork, 'rides.js')
+    open(_kdriver, 'w').write(RIDES_PAGE)
+    _kenv = dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS),
+                 PW_EXES=json.dumps([os.environ.get('CHROMIUM', ''),
+                                     '/opt/pw-browsers/chromium-1194/chrome-linux/chrome']))
+
+    def _kdrive(name, expect, csv_=False):
+        run = subprocess.run(['node', _kdriver, json.dumps({'base': _kservers[name][1], 'expect': expect,
+                                                            'csv': csv_})],
+                             env=_kenv, capture_output=True, text=True, timeout=180)
+        return json.loads((run.stdout or '{}').strip().split('\n')[-1] or '{}')
+
+    _kb = _kdrive('both', True, True)
+    no_('[rides paid] the browser driver ran (%r)' % _kb.get('__crashed'), _kb.get('__crashed') or _kb.get('skip'))
+    eq('[rides paid] the Money tab shows the block, headed with the question',
+       (_kb.get('shown'), _kb.get('head')), (True, 'Rides vs deliveries: what the card said and what was paid'))
+    eq('[rides paid] ...its plain words: rides beat their cards once tips settled, with n and the 95% interval; '
+       'deliveries beside', _kb.get('says'),
+       'Rides paid a median +$0.50/mi more than their cards once tips settled (n=10, 95%: +$0.25 to +$0.63); '
+       'deliveries $0.00/mi (n=9, 95%: $0.00 to +$0.10). Per mile of the card\'s own miles, so it is the money alone.')
+    eq('[rides paid] ...the counts: the two pending ride tips counted and left out, never read as $0',
+       _kb.get('counts'),
+       ['Rides: 12 trips matched; 10 with the tip settled; 2 tip still pending, left out of every paid figure '
+        '(not counted as $0).',
+        'Deliveries: 9 trips matched; 9 with the tip settled (6 printed no tip).'])
+    _krow = {r[0]: r[1:] for r in _kb.get('rows') or []}
+    eq('[rides paid] ...the table, a column per kind: the card $/mi, paid before and with the tip on Uber\'s miles '
+       'and with it on the card\'s',
+       [_kb.get('cols'), _krow.get('Card $/mi (its pay ÷ its miles)'),
+        _krow.get('Paid $/mi before the tip (Uber\'s miles)'), _krow.get('Paid $/mi with the tip (Uber\'s miles)'),
+        _krow.get('Paid $/mi with the tip (the card\'s miles)')],
+       [['Medians over the settled trips', 'Rides', 'Deliveries'], ['$0.75/mi', '$1.60/mi'],
+        ['$0.75/mi', '$1.60/mi'], ['$1.25/mi', '$1.60/mi'], ['$1.25/mi', '$1.60/mi']])
+    eq('[rides paid] ...the tip: 40% of what rides were paid, 3% of deliveries\'; it lifts rides a median $0.50/mi, '
+       'all ten by $0.25/mi or more, and no delivery',
+       [_krow.get('The tip\'s share of what was paid'), _krow.get('The tip lifts $/mi by'),
+        _krow.get('Trips the tip lifts ≥ $0.25/mi')],
+       [['40%', '3%'], ['+$0.50/mi', '$0.00/mi'], ['10 of 10 (100%)', '0 of 9 (0%)']])
+    eq('[rides paid] ...paid less card per trip, as a share and per card mile, each with its interval',
+       [_krow.get('Paid less card, per trip'), _krow.get('…per card mile')],
+       [['+$4.00 95%: +$2.00 to +$5.00', '$0.00 95%: $0.00 to +$0.50'],
+        ['+$0.50/mi 95%: +$0.25 to +$0.63', '$0.00/mi 95%: $0.00 to +$0.10']])
+    eq('[rides paid] ...real $/hr only where the rig timed it: none here, said so',
+       _krow.get('Real $/hr paid, where the rig timed it'), ['— (none timed)', '— (none timed)'])
+    eq('[rides paid] the strip: a hollow card dot and a filled paid dot per settled trip', _kb.get('dots'), '19/19')
+    ok_('[rides paid] ...says whose miles, and one line that nothing reaches the verdict (%r)' % (_kb.get('notes') or [])[-2:],
+        any('Uber\'s miles are the earnings line\'s' in n for n in _kb.get('notes') or [])
+        and (_kb.get('notes') or [''])[-1] == 'Reading only: nothing here reaches the verdict, the target, the panel '
+                                              'or any rule.')
+    eq('[rides paid] ...at 360px no sideways scroll, the page\'s or the block\'s, and no script error',
+       (_kb.get('sideways'), _kb.get('boxWide'), _kb.get('errors')), (False, False, []))
+    eq('[rides paid] beside the upload, plainly: pick them all at once',
+       (_kb.get('manyNext'), _kb.get('many')),
+       (True, 'Pick all of a day’s screenshots at once: select several in the picker (they may overlap; a trip seen '
+              'twice is filed once).'))
+    import csv as _kcsv
+    import io as _kio
+    _kc = list(_kcsv.DictReader(_kio.StringIO(_kb.get('csv') or '')))
+    eq('[rides paid] the records CSV ends with trip_kind: 12 rides and 9 deliveries',
+       (list(_kc[0].keys())[-1] if _kc else None,
+        [r.get('trip_kind') for r in _kc].count('ride'), [r.get('trip_kind') for r in _kc].count('delivery')),
+       ('trip_kind', 12, 9))
+    _kf = _kdrive('few', True)
+    eq('[rides paid] three settled rides are too few: said in the words and the count, the column left out',
+       (_kf.get('says'), (_kf.get('counts') or [''])[0], _kf.get('cols'), _kf.get('dots')),
+       ('Too few settled rides yet (3, under 8); deliveries paid a median $0.00/mi the same as their cards once tips '
+        'settled (n=9, 95%: $0.00 to +$0.10). Per mile of the card\'s own miles, so it is the money alone.',
+        'Rides: 3 trips matched; 3 with the tip settled. Too few settled rides yet: its figures start at 8.',
+        ['Medians over the settled trips', 'Deliveries'], '9/9'))
+    _kn = _kdrive('none', False)
+    eq('[rides paid] no earnings uploaded: the block is hidden, the upload box and its line still there',
+       (_kn.get('shown'), _kn.get('manyNext'), _kn.get('errors')), (False, True, []))
+finally:
+    for _kp, _kb_ in _kservers.values():
+        _kp.terminate()
+        try:
+            _kp.wait(timeout=5)
+        except Exception:
+            _kp.kill()
+    import shutil as _kshutil
+    _kshutil.rmtree(_kwork, ignore_errors=True)
+
 # --- [tabs] the page in groups (the owner, 15 Nov 2026) ---------------------
 #
 # "Consider improved ways to lay out the offers page for organizing all the

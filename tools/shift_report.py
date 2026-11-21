@@ -618,6 +618,10 @@ def _order(oid, took, readings, drops, visits, addon=False, finished=None, recor
     o['pay'] = _num(card.get('pay')) if card else _num(rc.get('pay'))
     o['cardMinutes'] = _num(card.get('minutes')) if card else _num(rc.get('minutes'))
     o['cardMiles'] = _num(card.get('miles')) if card else _num(rc.get('miles'))
+    # ...and the card's shape, for trip_kind: two legs and no shop chip is a
+    # ride card (the offers page's Rides and shop orders split).
+    o['cardLegs'] = _num(card.get('legs')) if card else _num(rc.get('legs'))
+    o['cardShop'] = (card.get('shop') if card else rc.get('shop')) is True
     o['billedMinutes'] = _num(card.get('billedMinutes')) if card \
         else _num(rc.get('billedMinutes'))
     o['places'] = order_places(pickup, card, record, ends)
@@ -2365,7 +2369,9 @@ RECORD_COLUMNS = ('date', 'app', 'offered', 'took', 'ended', 'how_ended', 'card_
                   # ...and the matched trip as Uber says it, beside the card's
                   # columns and never in them (uber_cells).
                   'uber_status', 'uber_start', 'uber_finish', 'uber_minutes', 'uber_miles',
-                  'uber_extras', 'time_vs_card', 'miles_vs_card')
+                  'uber_extras', 'time_vs_card', 'miles_vs_card',
+                  # ...and which kind the matched trip was (trip_kind).
+                  'trip_kind')
 
 # The card against what happened (the owner, 13 Nov: "see if the orders were
 # completed on time, faster, or any other helpful comparisons"): earnings.js
@@ -2443,7 +2449,25 @@ def record_cells(o):
             pl.get('pickupName') or '', pl.get('pickup') or '', pl.get('dropoff') or '',
             o['alongside'], 'yes' if o['reliable'] else 'no', o.get('source') or '',
             '; '.join(o['notes'] + (['places withheld: keepPlaces was off'] if pl.get('withheld')
-                                    else []))) + paid_cells(o) + (o.get('timedBy') or '',) + uber_cells(o)
+                                    else []))) + paid_cells(o) + (o.get('timedBy') or '',) + uber_cells(o) \
+        + (trip_kind(o),)
+
+
+def trip_kind(o):
+    """The records CSV's trip_kind: 'ride' or 'delivery' for an order a trip
+    was matched to, '' otherwise. earnings.js tripKind's rule and the offers
+    page's tripKindOf, word for word: Uber's ride word; else Uber's delivery
+    word; else a card of two legs or more and no shop chip is a ride. The
+    split is the Money tab's rides against deliveries, descriptive only."""
+    e = o.get('paid')
+    if not isinstance(e, dict):
+        return ''
+    if e.get('ride') is True:
+        return 'ride'
+    if re.search(r'deliver|eats|courier', e.get('type') or '', re.I):
+        return 'delivery'
+    legs = _num(o.get('cardLegs'))
+    return 'ride' if legs is not None and legs >= 2 and o.get('cardShop') is not True else 'delivery'
 
 
 # A cell a spreadsheet would run as a formula, led with an apostrophe:
