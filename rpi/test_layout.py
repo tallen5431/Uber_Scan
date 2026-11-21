@@ -819,6 +819,13 @@ CAPTION_LINES = [
      'this pickup is on your way — straight lines, not roads · 1 not found '
      '· trip: ≈ from DoorDash\'s map',
      'this pickup is on your way — straight lines, not roads'),
+    # ...and the label no answer of which fits the card's miles (MV.guessHold,
+    # the owner's snap of 20 Nov): not drawn, the ring of those miles round
+    # the store drawn instead, and said, at the widest figure a card prints.
+    ('the figure, DoorDash\'s map label not placed by the card\'s miles',
+     'this pickup is on your way by road · 1 not found · trip: ≈ label not placed: none '
+     '~88.8 mi from store',
+     'this pickup is on your way by road'),
     ('no pin, several with no fix',
      "no pin for " + WIDEST_DISC + " — 10 found · no GPS fix to choose between "
      "them",
@@ -1044,9 +1051,9 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 118)
-eq('...and fifty-six of its entries declare a tail the clamp may eat',
-   len(_DECLARED), 56)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 119)
+eq('...and fifty-seven of its entries declare a tail the clamp may eat',
+   len(_DECLARED), 57)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
                  for row in CAPTION_LINES]
 for _name, _text, _keep in CAPTION_LINES:

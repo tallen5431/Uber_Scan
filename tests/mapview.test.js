@@ -2080,6 +2080,129 @@ async function nucbox() {
                     + ' · trip: ≈ from DoorDash\'s map'),
      'NO PIN · 2471 Fable…, ≈ routed, 10+ within 1.0 mi · trip: ≈ from DoorDash\'s map');
 
+  /* ---- ...held to the card's own miles (the owner's snap of 20 Nov) -----
+   *
+   * "2 stops (9.8 mi)", the car beside the store, and the label's street
+   * answered as ONE door 2.5 mi the wrong way — another street of that name —
+   * drawn as the "≈" where a 9.8 mi job cannot end. Invented throughout: the
+   * store a block from the Square, "317 Wrenfold Cir" twice, one 2.5 mi due
+   * west of the store and one about 9 mi north-east; a stub router whose
+   * road is 8% over the crow line, so the far door's road fits the card. */
+  var hStore = { lat: 33.9540, lon: -44.5480 };
+  var hWest = { lat: 33.9540, lon: -44.5917, name: '317, Wrenfold Circle, Ostley, Vosk County' };
+  var hNorth = { lat: 34.0462, lon: -44.4368, name: '317, Wrenfold Circle, Brookvale, Vosk County' };
+  var hLabel = '317 Wrenfold Cir';
+  var hAsked = [];
+  function holdNbx(o) {
+    var st = { hits: o.hits, router: o.router || 'up' };
+    var nb = new MV.NbxSearch({ gap: 0, bandWait: o.wait, fetch: function (u) {
+      hAsked.push(u);
+      var body;
+      if (/\/search\?/.test(u)) body = { ok: true, cutAt: null, hits: st.hits };
+      else if (st.router === 'slow') return new Promise(function () {});
+      else if (st.router === 'down') body = { ok: false, unreachable: true, error: 'down' };
+      else {
+        var pts = decodeURIComponent(u.split('points=')[1]).split(';').map(function (c) {
+          var x = c.split(',').map(Number);
+          return { lat: x[1], lon: x[0] };
+        });
+        body = { ok: true, metres: MV.crowMiles(pts[0], pts[1]) * 1.08 * 1609.344, snaps: [3, 3] };
+      }
+      return Promise.resolve({ ok: !body.unreachable, status: body.unreachable ? 502 : 200,
+                               json: function () { return Promise.resolve(body); } });
+    } });
+    nb.st = st;
+    return nb;
+  }
+  var hCard = dash({ miles: 9.8 });
+  var hDisc = MV.guessDisc(hCard, hStore);
+  var hSpec = MV.bandTarget(hCard, 'dropoff');
+  var hR = MV.dashReach(9.8, 0.2);
+  eq('[guess hold] R is the job less the road to the store, its slack bandMiles(R); none for '
+     + 'no miles, a road longer than the job past its slack, or a negative road',
+     JSON.stringify([+hR.miles.toFixed(2), +hR.slack.toFixed(3), MV.dashReach(null, 0.2),
+                     MV.dashReach(2.0, 3.0), MV.dashReach(2.0, -1)]),
+     JSON.stringify([9.6, 1.44, null, null, null]));
+  eq('[guess hold] ...the one reading advice.js alongRoute makes of the card\'s miles',
+     JSON.stringify(require('../advice.js').alongRoute({ pickMi: 0, approachMi: 0.2, cardMi: 9.8,
+                                                         afterMi: 0, slackMi: 1.44 }).reachMi),
+     JSON.stringify(Math.ceil(MV.dashReach(9.8, 0.2, 1.44).hi * 10) / 10));
+
+  hAsked = [];
+  var hBothNb = holdNbx({ hits: [hWest, hNorth] });
+  var hBothRes = await hBothNb.place(hLabel, hDisc, {});
+  var hBoth = await hBothNb.guessHold(hLabel, hBothRes, hDisc, hSpec, hStore, { left: 24 });
+  eq('[guess hold] two streets of the label\'s name in the disc: the one whose road from the '
+     + 'store fits the card\'s miles is the "≈", approximate, never a pin',
+     JSON.stringify([hBothRes.why, hBoth && hBoth.at, hBoth && hBoth.kept]),
+     JSON.stringify(['several', { lat: hNorth.lat, lon: hNorth.lon, name: hNorth.name,
+                                  approx: true, guess: true }, 1]));
+  eq('[guess hold] ...asked as two-point roads from the store, one for R first',
+     hAsked.filter(function (u) { return /\/route\?/.test(u); }).length, 3);
+
+  var hWestNb = holdNbx({ hits: [hWest] });
+  var hWestRes = await hWestNb.place(hLabel, hDisc, {});
+  var hWestOnly = await hWestNb.guessHold(hLabel, hWestRes, hDisc, hSpec, hStore, { left: 24 });
+  eq('[guess hold] the wrong street alone: the search pins it, the card\'s miles refuse it, and '
+     + 'the label is not placed',
+     JSON.stringify([!!(hWestRes.at), MV.dropPoint(hWestRes) && MV.dropPoint(hWestRes).lat,
+                     hWestOnly && hWestOnly.none, hWestOnly && hWestOnly.at,
+                     hWestOnly && +hWestOnly.reach.miles.toFixed(1)]),
+     JSON.stringify([true, hWest.lat, true, undefined, 9.6]));
+  var hSaid = MV.routeSaid('this pickup is on your way by road',
+                           ['trip: ' + MV.guessUnplaced(hWestOnly.reach)]);
+  eq('[guess hold] ...said why after the caption, and the chip keeps it whole (ROUTE_TAIL)',
+     JSON.stringify([hSaid, MV.captionChip('no pin for 2471 Fable… — too many to be sure'
+                                           + ' · trip: ' + MV.guessUnplaced(hWestOnly.reach))]),
+     JSON.stringify(['this pickup is on your way by road · trip: ≈ label not placed: none ~9.6 '
+                     + 'mi from store',
+                     'NO PIN · 2471 Fable…, too many to be sure · trip: ≈ label not placed: none '
+                     + '~9.6 mi from store']));
+
+  var hNoMiles = await holdNbx({ hits: [hWest] }).guessHold(
+    hLabel, hWestRes, hDisc, MV.bandTarget(dash({ miles: null }), 'dropoff'), hStore, { left: 24 });
+  var hOneLeg = await holdNbx({ hits: [hWest] }).guessHold(
+    hLabel, hWestRes, hDisc, MV.bandTarget(card({ miles: 9.8, legs: 1, hasTotal: false }),
+                                           'dropoff'), hStore, { left: 24 });
+  eq('[guess hold] no card miles to hold to (none printed, a card of one leg): nothing held, '
+     + 'the old point stands',
+     JSON.stringify([hNoMiles, hOneLeg, MV.dropPoint(hWestRes).lat]),
+     JSON.stringify([null, null, hWest.lat]));
+  var hDown = await holdNbx({ hits: [hWest], router: 'down' })
+    .guessHold(hLabel, hWestRes, hDisc, hSpec, hStore, { left: 24 });
+  var hSlow = await holdNbx({ hits: [hWest], router: 'slow', wait: 30 })
+    .guessHold(hLabel, hWestRes, hDisc, hSpec, hStore, { left: 24 });
+  var hSpent = await holdNbx({ hits: [hWest] })
+    .guessHold(hLabel, hWestRes, hDisc, hSpec, hStore, { left: 0 });
+  eq('[guess hold] ...nor with the router down, slow, or the walk\'s road questions spent',
+     JSON.stringify([hDown, hSlow, hSpent]), JSON.stringify([null, null, null]));
+
+  /* The cache keeps the search's raw answer, keyed on its text and the
+     disc's box; the choice is made again each walk. So a walk that could
+     not hold (router down) leaves nothing behind, and the same question
+     answered from the cache is held to whatever card asks it. */
+  hAsked = [];
+  var hCacheNb = holdNbx({ hits: [hWest, hNorth], router: 'down' });
+  var hC1res = await hCacheNb.place(hLabel, hDisc, {});
+  var hC1 = await hCacheNb.guessHold(hLabel, hC1res, hDisc, hSpec, hStore, { left: 24 });
+  hCacheNb.st.router = 'up';
+  hCacheNb.st.hits = [hWest];   // ...a NucBox that would now answer the wrong door alone
+  var hC2res = await hCacheNb.place(hLabel, hDisc, {});
+  var hC2 = await hCacheNb.guessHold(hLabel, hC2res, hDisc, hSpec, hStore, { left: 24 });
+  var hShort = dash({ miles: 3.0 });
+  var hSdisc = MV.guessDisc(hShort, hStore);
+  var hS = await hCacheNb.guessHold(hLabel, await hCacheNb.place(hLabel, hSdisc, {}), hSdisc,
+                                    MV.bandTarget(hShort, 'dropoff'), hStore, { left: 24 });
+  var hC3 = await hCacheNb.guessHold(hLabel, await hCacheNb.place(hLabel, hDisc, {}), hDisc,
+                                     hSpec, hStore, { left: 24 });
+  eq('[guess hold] the cache: the label\'s search asked once per box, the choice made each walk '
+     + '(router down: nothing; back: the far door), and a short card\'s near door is not kept '
+     + 'for the long card after it',
+     JSON.stringify([hAsked.filter(function (u) { return /\/search\?/.test(u); }).length,
+                     hC1, hC2 && hC2.at && hC2.at.lat, hS && hS.at && hS.at.lat,
+                     hC3 && hC3.at && hC3.at.lat]),
+     JSON.stringify([2, null, hNorth.lat, hWest.lat, hNorth.lat]));
+
   ok_('...and a door is read off the first two parts of the name, so the '
       + 'postcode is never taken for the house number',
       MV.hasDoor({ name: '1985, Vosk Parkway, Tellmoor' }, '1985')

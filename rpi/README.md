@@ -2494,6 +2494,18 @@ doors are refused as the label however the map spells them ("Rd NW" for
 a label running on past its street into a town: DoorDash's customer label is
 a house number and a street, nothing more.
 
+**Where Map view draws the label is held to the card's miles.** A street name
+is not unique: on the owner's 20 Nov snap the label read exactly and the
+NucBox answered one door of that name 2.5 mi the wrong way, on a job whose
+"9.8 mi" were nearly all store to customer. So every answer for the label is
+held to R, the job less the road from the card's fix to the store (the
+reading the along-route line makes, map-view.js `dashReach`): the one whose
+road from the store fits R within the distance band is the "≈"; none fitting,
+the label is not drawn, the ring of R round the store is, and the caption says
+"≈ label not placed: none ~9.7 mi from store". Router down, no figure to hold
+to, or two stores on the card: drawn as before. A town printed on DoorDash's
+map is not read for it (another OCR pass on the Pi for a drawing hint).
+
 **A band starts at the top of the screen box.** It started 6% down, to keep
 the phone's status bar out, and the owner's 2 Nov label sat only 15 rows of
 1400 under that edge: a phone sitting a little higher in the mount (2% was

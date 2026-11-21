@@ -467,6 +467,21 @@ try:
             _s != 200 or not (as_json(_body) or {}).get('hits'))
         _s = raw(_lb, '/api/nbx/route?points=-44.5499,33.9526;-44.3880,33.7490')[0]
         ok_('[lite] ...and a route (%d)' % _s, _s != 200)
+        # DoorDash's map label held to the card's miles (map-view.js
+        # guessHold, the owner's snap of 20 Nov) is Map view's, which lite
+        # has not: its panel loads no map-view.js, and the questions the
+        # hold would ask, the label's street and the road from the store,
+        # are answered "not set" (and counted with the rest below).
+        _s, _body, _h = raw(_lb, '/lite/lite.html')
+        ok_('[lite] the panel loads no Map view, so no map label is ever placed or held',
+            _s == 200 and 'map-view.js' not in _body and 'guessHold' not in _body)
+        _s, _body, _h = raw(_lb, '/api/nbx/search?street=62%20Selbury%20Cir'
+                                 '&viewbox=-44.66,34.10,-44.40,33.84')
+        ok_('[lite] ...and the label\'s street asked of the relay is not relayed (%d)' % _s,
+            _s != 200 or not (as_json(_body) or {}).get('hits'))
+        _s = raw(_lb, '/api/nbx/route?points=-44.53000,33.97000;-44.47140,34.01860')[0]
+        ok_('[lite] ...nor the road from the store it would hold the label to (%d)' % _s,
+            _s != 200)
         # The verdict, carried as ever: the scanner decided it, the server keeps
         # it, /api/status serves it to the card.
         _last = None
