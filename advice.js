@@ -1251,6 +1251,14 @@
   // out-and-back. CHOSEN, NOT MEASURED.
   var ALONG_MI = 1.5;
 
+  // map-view.js, where dashReach lives: the page's global, else required
+  // (the server, the suites). Looked up when asked, so a page that loads this
+  // file without Map view (journal.html) loads as it did.
+  function mapView() {
+    if (typeof MapView !== 'undefined') return MapView;
+    try { return require('./map-view.js'); } catch (e) { return null; }
+  }
+
   function alongRoute(f) {
     var n = function (v) { return typeof v === 'number' && isFinite(v) ? v : null; };
     if (!f) return null;
@@ -1258,9 +1266,14 @@
     var slack = n(f.slackMi) || 0;
     if (pick === null || to === null || card === null || after === null
         || !(card > 0) || to < 0 || after < 0 || slack < 0) return null;
-    var reach = card - to;
-    if (reach + slack < 0) return null;
-    var lo = Math.max(0, reach - slack), hi = Math.max(0, reach + slack);
+    // R, the customer's road from the store: map-view.js dashReach, the one
+    // reading of the card's miles, which Map view also holds DoorDash's map
+    // label to (the owner's snap of 20 Nov). One copy, so the two cannot
+    // come to read one card two ways.
+    var MV = mapView();
+    var r = MV && MV.dashReach ? MV.dashReach(card, to, slack) : null;
+    if (!r) return null;
+    var reach = r.miles, lo = r.lo, hi = r.hi;
     var down = function (v) { return Math.floor(v * 10 + 1e-9) / 10; };
     var up = function (v) { return Math.ceil(v * 10 - 1e-9) / 10; };
     var out = {

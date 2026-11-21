@@ -168,6 +168,20 @@ var THISTLEDOWN = [place(85, 33.9300, -44.5900, 'amenity', 'restaurant', 'Exampl
                          'Example Curry, 77, Thistledown Road, Harrowen, Vosk County, Georgia, '
                          + '90660, United States')];
 
+/* DoorDash's map label held to the card's miles (map-view.js guessHold, the
+   owner's snap of 20 Nov): "62 Selbury Cir" is two streets of that name,
+   one door 2.0 mi due west of 250 Example Road and one about 4.7 mi
+   north-east of it, and "64 Selbury Cir" the west street's door alone.
+   Invented. */
+var SELBURY_WEST_62 = place(86, 33.9700, -44.5650, 'place', 'house', '',
+                            '62, Selbury Circle, Ostley, Vosk County, Georgia, 90661, United States');
+var SELBURY_62 = [SELBURY_WEST_62,
+                  place(87, 34.0186, -44.4714, 'place', 'house', '',
+                        '62, Selbury Circle, Brookvale, Vosk County, Georgia, 90664, '
+                        + 'United States')];
+var SELBURY_64 = [place(88, 33.9700, -44.5650, 'place', 'house', '',
+                        '64, Selbury Circle, Ostley, Vosk County, Georgia, 90661, United States')];
+
 /* ...and one 87 m from the door at 1985 Vosk Parkway (street=1975 Vosk
    Parkway): a restaurant next to a customer's door, which the GPS drop's
    restaurant guard exists for. Invented. */
@@ -468,6 +482,8 @@ function search(q) {
     else if (/^77 thistledown (rd|road)/.test(term)) all = THISTLEDOWN;
     else if (/^1975 vosk (pkwy|parkway)/.test(term)) all = DINER;
     else if (/^1981 vosk (pkwy|parkway)/.test(term)) all = TAQUERIA;
+    else if (/^62 selbury (cir|circle)$/.test(term)) all = SELBURY_62;
+    else if (/^64 selbury (cir|circle)$/.test(term)) all = SELBURY_64;
     else if (term === '1830 tansy creek sw') all = TANSY_1830;
     else if (term === '2040 tansy creek sw') all = TANSY_2040;
     else if (term === '1106 pelarons lane') all = PELARONS_1106;

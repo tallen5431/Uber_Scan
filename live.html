@@ -8900,6 +8900,26 @@
             if (gband) gres = Object.assign({}, gres, { bandArea: gband });
           }
           var gpt = MV.dropPoint(gres);
+          /* ...and every candidate held to the card's miles (the owner's snap
+             of 20 Nov: the label's street found 2.5 mi the wrong way, another
+             street of that name, on a 9.8 mi job from the store). The one
+             whose road from the store fits R, the job less the road to the
+             store (MV.dashReach), is the "≈"; none fitting, the label is not
+             drawn and the ring of R round the store is, said why. One store
+             only: past a second the card's miles are not R from the last.
+             Null (router down, no figure, budget spent): as it was. */
+          var ghold = gres && !storePts.length && mapNbx.guessHold && MV.bandTarget
+            ? await mapNbx.guessHold(want.guess, gres, gdisc, MV.bandTarget(want.card, 'dropoff'),
+                                     bandOrigin(pickOk), bandLeft)
+            : null;
+          if (gone()) return;
+          if (ghold && ghold.at) gpt = ghold.at;
+          else if (ghold && ghold.none) {
+            gpt = null;
+            areas.guessRing = { lat: pickOk.lat, lon: pickOk.lon, miles: ghold.reach.miles,
+                                line: want.guess };
+            notes.push('trip: ' + MV.guessUnplaced(ghold.reach));
+          }
           if (gpt) {
             guessAt = { lat: gpt.lat, lon: gpt.lon, approx: true, guess: true };
             dropOk = guessAt;
@@ -8929,7 +8949,10 @@
           else pickRoad = jr;
           // (A pickup area's own words stand for "pickup only".)
           if (jr && pickArea) notes.push('trip: ' + MV.areaNote(pickArea, true));
-          if (jr && jl.note && !(pickArea && !dropOk)) notes.push('trip: ' + jl.note);
+          // (...nor a label not placed's: "pickup only" is what it said.)
+          if (jr && jl.note && !(pickArea && !dropOk) && !areas.guessRing) {
+            notes.push('trip: ' + jl.note);
+          }
           // ...and its stores the run could not place.
           var sskip = storeMarks.filter(function (m) { return !m.at; }).length;
           if (jr && sskip && MV.storesSkipped) notes.push('trip: ' + MV.storesSkipped(sskip));
@@ -9686,6 +9709,26 @@
                               + ' dropoffs, which comes first not known'
                               : want.guessShare ? ', one of ' + (want.card || {}).dropoffs : ''),
           want.guess, false, '≈', { faded: true, aside: inCar });
+    }
+    /* ...or, no answer for the label fitting the card's miles (MV.guessHold;
+       the owner's snap of 20 Nov), not the label at a wrong place: the ring
+       of those miles round the store, faded and dashed, the area the card
+       allows the customer. Drawing only, like the label; no point, no
+       letter, nothing framed to it. */
+    if (!drop && !want.dropoff && !guessEnd && areas.guessRing) {
+      var gr = areas.guessRing;
+      var grTip = '≈ the card\'s miles leave the customer about ' + gr.miles.toFixed(1)
+        + ' mi by road from the store; DoorDash\'s map labels ' + gr.line
+        + ', and no street of that name is that far, so the label is not drawn';
+      tipOn(L.circle([gr.lat, gr.lon], {
+        radius: gr.miles * 1609.344, weight: 2, color: '#f5a524', opacity: .55,
+        dashArray: '6 8', fillColor: '#f5a524', fillOpacity: .05,
+        bubblingMouseEvents: false, className: 'mv-guess-ring'
+      }), grTip).addTo(mapLayer);
+      walkPts.push({ lat: Math.round(gr.lat * 1e5) / 1e5, lon: Math.round(gr.lon * 1e5) / 1e5,
+                     kind: 'guess ring', letter: null, name: String(gr.line).slice(0, 80),
+                     said: grTip.slice(0, 160), wrong: false,
+                     miles: Math.round(gr.miles * 10) / 10 });
     }
     /* ...and the order in the car's end by DoorDash's map label, no screen
        having given one (want.heldGuess; the owner, 31 Oct): a faded ring

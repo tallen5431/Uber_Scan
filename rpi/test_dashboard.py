@@ -5656,6 +5656,33 @@ const framed = (page) => page.waitForFunction(
             cls: String((l.opts || {}).className || ''), pts: l.pts,
             dashed: !!(l.opts || {}).dashArray }))),
           posts: areaPosts.slice() };
+        // ...held to the card's miles (map-view.js guessHold; the owner's
+        // snap of 20 Nov), invented: "62 Selbury Cir" is two streets of that
+        // name, one 2.0 mi west of the store and one whose road from it fits
+        // an 8.0 mi job; "64 Selbury Cir" the west one alone. The first is
+        // drawn at the far door; the second not at all, the ring of the
+        // card's miles round the store drawn instead and the caption saying
+        // why.
+        const guessMarks = () => page.evaluate(() => (window.__marks || []).filter(
+          (k) => String(k.popup || '').indexOf('DoorDash\'s map labels the customer') >= 0)
+          .map((k) => k.ll));
+        const guessRings = () => page.evaluate(() => (window.__circles || []).filter(
+          (c) => String((c.opts || {}).className || '').indexOf('mv-guess-ring') >= 0
+            && c.group === (window.__marks || []).slice(-1).map((k) => k.group)[0])
+          .map((c) => ({ ll: c.ll, mi: Math.round((c.opts || {}).radius / 1609.344 * 10) / 10,
+                         dashed: !!(c.opts || {}).dashArray, tip: c.mvTip || '' })));
+        const hold = Object.assign({}, dash, { miles: 8.0 });
+        await push({ id: 'n-hold', pickup: '250 Example Road', holdId: 'h-guess',
+                     card: Object.assign({ dropoffGuess: { line: '62 Selbury Cir',
+                                                           from: 'dd map label' } }, hold) });
+        await page.waitForTimeout(2500);
+        r.guessHold = { note: await note(), at: await guessMarks(), rings: await guessRings() };
+        await push({ id: 'n-hold1', pickup: '250 Example Road', holdId: 'h-guess',
+                     card: Object.assign({ dropoffGuess: { line: '64 Selbury Cir',
+                                                           from: 'dd map label' } }, hold) });
+        await page.waitForTimeout(2500);
+        r.guessHoldNone = { note: await note(), at: await guessMarks(), rings: await guessRings(),
+                            pick: await pick(), posts: areaPosts.slice() };
         page.off('request', onPost);
         // The same street-only door, no place, but the SERVER armed it by
         // the short street (endBy 'street', its point): Map view draws that
@@ -12278,6 +12305,20 @@ try:
         (_gg.get('note') or '').replace(' \u00b7 trip: \u2248 from DoorDash\'s map', '')
         == _gg.get('before'), 'DoorDash\'s map' in (_gg.get('note') or ''), _gg.get('posts')),
        ([(True, True)], 0, True, True, True, []))
+    _gh = both.get('guessHold') or {}
+    eq('[dd map label, held] two streets of the label\'s name: the "≈" drawn at the one whose '
+       'road from the store fits the card\'s 8.0 mi, no ring (%r)' % (_gh.get('note'),),
+       (_gh.get('at'), _gh.get('rings'), 'DoorDash\'s map' in (_gh.get('note') or '')),
+       ([[34.0186, -44.4714]], [], True))
+    _gn = both.get('guessHoldNone') or {}
+    eq('[dd map label, held] the wrong street alone: no "≈" anywhere, the ring of the card\'s '
+       'miles round the store, dashed, the caption saying why, nothing posted (%r)'
+       % (_gn.get('note'),),
+       (_gn.get('at'), [(r.get('ll'), r.get('mi'), r.get('dashed'), '64 Selbury Cir' in r.get('tip'))
+                        for r in _gn.get('rings') or []],
+        'trip: \u2248 label not placed: none ~5.9 mi from store'
+        in (_gn.get('note') or ''), bool(_gn.get('pick')), _gn.get('posts')),
+       ([], [([33.97, -44.53], 5.9, True, True)], True, True, []))
     # ...and the same card for two customers: the label is one of the two
     # dropoffs, which first not known (MV.guessOneOf). cdfe959 routed the run
     # to it as the end, the last stop; now it hangs off the pickup on a dashed

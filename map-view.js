@@ -1479,7 +1479,7 @@
 
   // The notes routeSaid put after a sentence, as one tail; captionChip
   // chips the sentence before them and keeps them after the chip.
-  var ROUTE_TAIL = /((?: · (?:trip: )?(?:route to (?:street, not door|corner|pickup only)|≈ from DoorDash's map|≈ route to (?:street )?area(?:, \d+\+? within [\d.]+ mi|, by card's [\d.]+ mi)?|route skips \d+ dropoffs?, not found))+)$/;
+  var ROUTE_TAIL = /((?: · (?:trip: )?(?:route to (?:street, not door|corner|pickup only)|≈ from DoorDash's map|≈ label not placed: none ~[\d.]+ mi from store|≈ route to (?:street )?area(?:, \d+\+? within [\d.]+ mi|, by card's [\d.]+ mi)?|route skips \d+ dropoffs?, not found))+)$/;
   function routeTail(text) {
     var m = ROUTE_TAIL.exec(String(text || ''));
     return m ? { said: text.slice(0, m.index), tail: m[1] } : { said: text, tail: '' };
@@ -2253,6 +2253,101 @@
     var g = o && !o.dropoff && o.dropoffGuess;
     return g && typeof g === 'object' && g.from === GUESS_FROM && typeof g.line === 'string'
       && g.line ? g.line : null;
+  }
+
+  /* --- ...held to the card's own miles (the owner's snap of 20 Nov) -------
+   *
+   * "failing to route the doordash icon": "2 stops (9.8 mi)", the car beside
+   * the store, DoorDash's map drawing the customer well off to one side, its
+   * label read exactly — and the label's street searched in guessDisc (the
+   * whole job round the store, ten miles) answered ONE door of that name and
+   * number, 2.5 mi the other way: another street of the same name. One
+   * answer is a pin to pickInDisc, so no band was ever asked, and the "≈"
+   * was drawn where the card's miles say the customer cannot be — the job
+   * from the store is nearly all of 9.8 mi.
+   *
+   * The customer is R road miles from the store, R = the job less the road
+   * from the card's fix to the store: dashReach, the reading advice.js
+   * alongRoute makes of the same card (one copy, both ask). So every
+   * candidate the label's search answered inside the disc (guessCands: the
+   * doors of its number, else what of its street came back) is held to R: a
+   * straight line no longer than R + bandMiles first (a road is never shorter
+   * than the crow), then the road from the store, within bandMiles of R. The
+   * one nearest R is the "≈"; one ALONE that does not fit is refused, and
+   * where none fits the label is not drawn at all: the ring of R round the
+   * store is (guessRing on the page), said guessUnplaced — "none ~9.7 mi
+   * from store". Never a wrong place drawn with the label's name.
+   *
+   * Router down or slow, an origin off the road, the walk's road questions
+   * spent, a card no target reads (bandTarget: no figure to hold to), or the
+   * card's miles not reaching the store: null, and the guess is as it was —
+   * the band's rule for what it cannot measure. Distance only, never
+   * minutes. The answer is ≈ drawing as before: never `found`, never a
+   * figure's point, never posted, never the GPS drop, never the hold's end;
+   * the along-route line reads the card's miles and nothing of this.
+   *
+   * THE CACHE (NbxSearch's and server.js nbxCache) keeps each question's
+   * raw answer, keyed by its text and the disc's box; the choice is made
+   * again on every walk, so a wrong door cached for the label's street is
+   * held to the card's miles each time it is read and cannot come back as
+   * the answer. A route the router did not give is not kept (NbxSearch.ask).
+   *
+   * dashReach(cardMi, approachMi, slackMi): { miles: R, slack, lo, hi } or
+   * null — `slack` bandMiles(R) unless given (alongRoute gives its own). */
+  function dashReach(cardMi, approachMi, slackMi) {
+    var n = function (v) { return typeof v === 'number' && isFinite(v) ? v : null; };
+    var card = n(cardMi), to = n(approachMi);
+    if (card === null || to === null || !(card > 0) || to < 0) return null;
+    var reach = card - to;
+    var slack = slackMi === undefined || slackMi === null ? bandMiles(Math.max(0, reach))
+      : n(slackMi);
+    if (slack === null || slack < 0 || reach + slack < 0) return null;
+    return { miles: reach, slack: slack, lo: Math.max(0, reach - slack),
+             hi: Math.max(0, reach + slack) };
+  }
+
+  // The label search's candidates inside its disc: the doors with the
+  // label's number where any came back, else every point of it (a street
+  // answered without the door), else its rough area alone. At most 50.
+  function guessCands(res, disc, plan) {
+    if (!res || !disc || !plan) return [];
+    var hits = res.seen && Array.isArray(res.seen.hits) ? pointsAmong(res.seen.hits) : [];
+    var inside = hits.filter(function (h) { return inDisc(disc, h); });
+    if (plan.door) {
+      var doors = inside.filter(function (h) { return hasDoor(h, plan.house); });
+      if (doors.length) inside = doors;
+    }
+    if (!inside.length && res.area && isFinite(res.area.lat) && isFinite(res.area.lon)) {
+      inside = [res.area];
+    }
+    return inside.slice(0, 50).map(function (h) {
+      return { lat: h.lat, lon: h.lon, name: h.name || '' };
+    });
+  }
+
+  /* The choice: `cands` and their road miles from the store (`roads`, NaN
+     for none asked or no road), held to `reach` (dashReach). The candidate
+     nearest R inside its slack as an approximate point, or { none } with
+     how many were refused. */
+  function guessFit(cands, roads, reach) {
+    if (!Array.isArray(cands) || !cands.length || !reach) return null;
+    var best = -1, off = Infinity, kept = 0;
+    cands.forEach(function (c, i) {
+      var r = roads[i];
+      if (typeof r !== 'number' || !isFinite(r) || Math.abs(r - reach.miles) > reach.slack) return;
+      kept++;
+      if (Math.abs(r - reach.miles) < off) { off = Math.abs(r - reach.miles); best = i; }
+    });
+    if (best < 0) return { none: true, reach: reach, n: cands.length };
+    var c = cands[best];
+    return { at: { lat: c.lat, lon: c.lon, name: c.name || '', approx: true, guess: true },
+             reach: reach, road: roads[best], kept: kept, n: cands.length };
+  }
+
+  // The words for a label no candidate of fits, after the caption ("trip: ").
+  function guessUnplaced(reach) {
+    return '≈ label not placed: none ~'
+      + (Math.round(reach.miles * 10) / 10).toFixed(1) + ' mi from store';
   }
 
   /* --- DoorDash's stores, every one a pickup (the owner's snaps, 31 Oct) ---
@@ -4910,17 +5005,7 @@
         if (!(budget.left >= asks)) return null;
         budget.left -= asks;
       }
-      // Road miles a to b; NaN for no road or a candidate moved far to
-      // reach one (not kept); a throw for anything that makes it no band.
-      function mi(a, b) {
-        return me.road([a, b]).then(function (r) {
-          if (r.why === 'noroute') return NaN;
-          if (r.why || !Array.isArray(r.snaps) || r.snaps.length !== 2
-              || !(typeof r.metres === 'number' && isFinite(r.metres))) throw r;
-          if (!(r.snaps[0] / METRES_PER_MILE <= SNAP_MI)) throw r;
-          return r.snaps[1] / METRES_PER_MILE <= SNAP_MI ? r.metres / METRES_PER_MILE : NaN;
-        });
-      }
+      function mi(a, b) { return bandRoadMi(me, a, b); }
       return (spec.less ? mi(spec.less, from) : Promise.resolve(0)).then(function (before) {
         var target = spec.miles - before;
         if (!isFinite(before) || !(target > 0)) return null;
@@ -4929,6 +5014,12 @@
         });
       });
     }).catch(function () { return null; });
+    return bandWaited(budget, wait, began, work);
+  };
+
+  /* A band's answer, or null once `wait` is spent, the time it took kept on
+     the walk's `budget` (band above; guessHold below waits the same way). */
+  function bandWaited(budget, wait, began, work) {
     return new Promise(function (resolve) {
       var done = false;
       // `atLeast`: a band given up on has spent ALL of its wait. Node's timer
@@ -4953,6 +5044,65 @@
         resolve(a);
       });
     });
+  }
+
+  /* Road miles a to b for a band: NaN for no road or a candidate moved far
+     to reach one (not kept); a throw for anything that makes it no band
+     (the router down or refusing, the origin moved past SNAP_MI). */
+  function bandRoadMi(me, a, b) {
+    return me.road([a, b]).then(function (r) {
+      if (r.why === 'noroute') return NaN;
+      if (r.why || !Array.isArray(r.snaps) || r.snaps.length !== 2
+          || !(typeof r.metres === 'number' && isFinite(r.metres))) throw r;
+      if (!(r.snaps[0] / METRES_PER_MILE <= SNAP_MI)) throw r;
+      return r.snaps[1] / METRES_PER_MILE <= SNAP_MI ? r.metres / METRES_PER_MILE : NaN;
+    });
+  }
+
+  /* DoorDash's map label held to the card's miles (dashReach, guessCands,
+     guessFit above): `q` the label, `res` its search's answer in `disc`
+     (guessDisc), `spec` bandTarget(card, 'dropoff'), `pick` the placed store
+     (from which R is measured), `budget` the walk's road questions and wait,
+     shared with the bands. Resolves guessFit's answer — { at } or { none } —
+     or null where it cannot measure (above), NEVER rejects, and never waits
+     past what is left of BAND_WAIT_MS. */
+  NbxSearch.prototype.guessHold = function (q, res, disc, spec, pick, budget) {
+    var plan = searchPlan(q);
+    var ok = function (p) { return !!p && isFinite(p.lat) && isFinite(p.lon); };
+    if (!res || !disc || !spec || !ok(spec.less) || spec.from !== 'pickup' || !ok(pick)
+        || !plan || plan.kind !== 'street') return Promise.resolve(null);
+    var cands = guessCands(res, disc, plan);
+    if (!cands.length) return Promise.resolve(null);
+    var wait = typeof this.bandWait === 'number' ? this.bandWait : BAND_WAIT_MS;
+    if (budget) {
+      wait -= budget.waited > 0 ? budget.waited : 0;
+      if (!(wait > 0)) return Promise.resolve(null);
+    }
+    // ...one road question for R, then one a candidate near enough.
+    if (budget) {
+      if (!(budget.left >= 1)) return Promise.resolve(null);
+      budget.left -= 1;
+    }
+    var began = Date.now();
+    var me = this;
+    var work = bandRoadMi(me, spec.less, pick).then(function (before) {
+      var reach = dashReach(spec.miles, before);
+      if (!reach || !(reach.miles > 0)) return null;
+      // ...a straight line past R and its slack is refused unasked.
+      var near = cands.map(function (c, i) { return crowMiles(pick, c) <= reach.hi ? i : -1; })
+        .filter(function (i) { return i >= 0; }).slice(0, BAND_ASKS_MAX);
+      if (budget) {
+        if (!(budget.left >= near.length)) return null;
+        budget.left -= near.length;
+      }
+      return Promise.all(near.map(function (i) { return bandRoadMi(me, pick, cands[i]); }))
+        .then(function (got) {
+          var roads = cands.map(function () { return NaN; });
+          near.forEach(function (i, k) { roads[i] = got[k]; });
+          return guessFit(cands, roads, reach);
+        });
+    }).catch(function () { return null; });
+    return bandWaited(budget, wait, began, work);
   };
 
   /* A door plan's street as points along it inside the disc (bandSamples),
@@ -5989,6 +6139,8 @@
            bandCands: bandCands, bandSamples: bandSamples, tripLeg: tripLeg,
            // ...and DoorDash's map label as the trip's end (27 Oct).
            GUESS_FROM: GUESS_FROM, guessDisc: guessDisc, guessOf: guessOf,
+           dashReach: dashReach, guessCands: guessCands, guessFit: guessFit,
+           guessUnplaced: guessUnplaced,
            // ...and DoorDash's stores, every one a pickup (31 Oct).
            cardStores: cardStores, heldStores: heldStores, storesSkipped: storesSkipped,
            guessShare: guessShare,
