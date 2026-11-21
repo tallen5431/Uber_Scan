@@ -874,6 +874,56 @@ function PASSED_PART(s) {
     + fold('s-passed-tops', 'At the other rulers (top 10, 20, 30 and 50%)', strategyTable(topCols, p.tops || []));
 }
 
+/* Rush against quiet hours (strategy.js section 8; the owner, Nov 2026,
+ * asking whether $/mi would serve better "when traffic dies down"): placed
+ * straight after the $/mi curve it reads against, worked out there and only
+ * drawn here. The plain lines, then the split hour by hour, each half's
+ * lines in and out of sample, and card against real by the same split. No
+ * colour on any row: the verdict is words, with its interval beside it. */
+function QUIET_PART(s) {
+  var q = s.quiet;
+  if (!q) return '';
+  function ul(xs) { return '<ul class="lines">' + xs.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>'; }
+  function clock(h) { return h === 0 ? '12am' : h < 12 ? h + 'am' : h === 12 ? '12pm' : (h - 12) + 'pm'; }
+  var says = { mile: '$/mi line ahead, beyond chance', hour: '$/hr line ahead, beyond chance', even: 'neither, beyond chance',
+               thin: 'not enough yet' };
+  function held(p, k) { return p.heldOut ? p.heldOut[k] : null; }
+  var partCols = [['name', ''], ['days', 'shift days'], ['freeHours', 'hours free', 'h'], ['offers', 'offers seen free'],
+    ['timed', 'timed orders'], [function (p) { return p.bestHour ? p.bestHour.T : null; }, 'best $/hr line', '$'],
+    [function (p) { return p.bestHour ? p.bestHour.value : null; }, '…its $/hr', '$'],
+    [function (p) { return p.bestMile ? p.bestMile.T : null; }, 'best $/mi line', '$'],
+    [function (p) { return p.bestMile ? p.bestMile.value : null; }, '…its $/hr', '$'],
+    [function (p) { return held(p, 'hr'); }, '$/hr line held out', '$'], [function (p) { return held(p, 'hrCi'); }, '95%', '$ci'],
+    [function (p) { return held(p, 'mi'); }, '$/mi line held out', '$'], [function (p) { return held(p, 'miCi'); }, '95%', '$ci'],
+    [function (p) { return held(p, 'diff'); }, '$/mi less $/hr', '$'], [function (p) { return held(p, 'diffCi'); }, '95%', '$ci'],
+    [function (p) { return says[p.verdict]; }, 'verdict']];
+  var hourCols = [[function (h) { return clock(h.hour); }, 'clock hour'], ['freeHours', 'hours free', 'h'],
+                  ['offers', 'offers seen free'], ['perFreeHour', 'per hour free', 'r'], ['part', 'half']];
+  var cv = q.cardVsReal;
+  var cvCols = [['name', ''], ['timed', 'timed'], ['ratio', 'real ÷ card min', 'x'], ['ratioMedian', 'typical order', 'x']];
+  var basis = q.parts.length && q.parts[0].basis === 'net' ? 'net of the running cost the rows carry' : 'gross (the rows carry no running cost)';
+  return '<h3 id="s-quiet">Rush vs quiet hours: $/hr line against $/mi line</h3>'
+    + '<p class="note"><b>Reading only.</b> Your own record replayed in two halves of the clock. <b>Quiet</b> is the clock '
+    + 'hours with the fewest offers per free hour that together hold ' + Math.round(q.floors.share * 100) + '% of your free '
+    + 'time, <b>busy</b> the rest: read off the record, not chosen. In each half the accept-threshold curve above, once '
+    + 'on $/hr and once on $/mi, its time the card\'s minutes × the half\'s own measured real ÷ card ratio, ' + basis + '. '
+    + 'The best line of each kind in sample flatters both, so each is also <b>held out</b>: picked on the other shift days '
+    + 'and scored on the one left out, every day in turn, the days resampled for a 95% interval. A verdict needs '
+    + q.floors.days + ' shift days and ' + q.floors.timed + ' timed orders in the half. Nothing on the rig reads this, and '
+    + 'no verdict, target or panel line moves; a $/mi accept rule and a line tuned to the hour stay refused (AUDITS.md, '
+    + 'Settled) unless you revisit them with this evidence.</p>'
+    + ul(q.lines)
+    + (q.parts.length ? strategyTable(partCols, q.parts, function (p) { return p.verdict === 'thin'; }) : '')
+    + fold('s-quiet-hours', 'The split, hour by hour', strategyTable(hourCols, q.split.byHour))
+    + fold('s-quiet-card', 'Card minutes against real, by the split',
+           (q.parts.length ? strategyTable(cvCols, q.parts.map(function (p) { return p.actual; }), function (a) { return a.ratio === null; })
+             : '<p class="note">None.</p>')
+           + '<p class="note">Below 1.00× the card overstated the trip. Quiet less busy'
+           + (cv && cv.diffCi ? ': ' + cv.diff.toFixed(2) + ' (95% ' + cv.diffCi[0].toFixed(2) + ' to ' + cv.diffCi[1].toFixed(2)
+              + ', shift days resampled).' : ': no interval yet (each half needs ' + q.floors.ratio + ' timed orders on '
+              + q.floors.days + ' shift days).') + '</p>');
+}
+
 function STRATEGY_SECTION(r) {
   var s = r.strategy, cv = s.curve, f = s.floors, c = s.counts;
   function ul(xs) { return '<ul class="lines">' + xs.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>'; }
@@ -952,6 +1002,7 @@ function STRATEGY_SECTION(r) {
     + fold('s-mile', 'The curve on $/mi — for reading only',
            '<p class="note">The same arithmetic with the line on pay ÷ card miles. Not an accept rule: printed because it was asked for.</p>'
            + strategyTable(mileCols, s.curveMile.points, isThin))
+    + QUIET_PART(s)
     + '<h3 id="s-seen">What offers look like</h3>'
     + '<p class="note">Every offer seen that the rig stands behind (' + c.offers + ', once per offer; ' + c.untrusted
     + ' untrusted and ' + c.unrated + ' with no rate left out). $/hr is the panel\'s; $/mi is pay over the card\'s miles, '
