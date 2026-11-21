@@ -5,6 +5,7 @@
    "name": "shop and deliver, verbatim from a real offer",
    "text": "Shop & Deliver Exclusive $7.09 Guaranteed (incl. tip) 6 items (6 units) 34 min (3.6 mi) total Dollar General (925 Merlah Rd Nw) Hidden Forest Ct, Harrowen Accept",
    "expect": {
+    "product": null,
     "pay": 7.09,
     "minutes": 34,
     "miles": 3.6,
@@ -185,6 +186,7 @@
    "name": "nor is a rating with the star read as an S",
    "text": "UberX Exclusive S 4S Verified 20 min (7.3 mi) trip",
    "expect": {
+    "product": "UberX",
     "pay": null,
     "minutes": 20,
     "miles": 7.3,
@@ -195,6 +197,7 @@
    "name": "a real payout with the dollar sign lost still reads, cents and all",
    "text": "UberX Exclusive S16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip",
    "expect": {
+    "product": "UberX",
     "pay": 16.05,
     "minutes": 23,
     "miles": 8.4,
@@ -205,6 +208,7 @@
    "name": "uberx two-leg card, verbatim from a real offer",
    "text": "UberX Exclusive $16.05 4.95 Verified 3 min (1.1 mi) away E 61 St & S Rhodes Ave, IL 20 min (7.3 mi) trip S Cottage Grove Ave & 62nd St, IL Accept",
    "expect": {
+    "product": "UberX",
     "pay": 16.05,
     "minutes": 23,
     "miles": 8.4,
@@ -541,6 +545,7 @@
    "name": "doordash, deadline instead of a duration",
    "text": "Decline High paying offer! Your Platinum status gave you priority for this offer. $41.11 Guaranteed (incl. tips) 9.8 mi Deliver by 7:15 PM Pickup Papa John's Store 3317 (2 orders) Customer dropoff Customer dropoff Accept 27",
    "expect": {
+    "product": null,
     "pay": 41.11,
     "minutes": null,
     "miles": 9.8,
@@ -575,6 +580,7 @@
    "name": "uber dark mode, two legs with addresses",
    "text": "UberX Exclusive $10.30 5.00 19 min (8.5 mi) Ada Fell Rd & Tiggons Dr, Wennamocket 12 mins (6.6 mi) Camp Harlan Pkwy, Wennamocket 4 mi from fast charger Accept",
    "expect": {
+    "product": "UberX",
     "pay": 10.3,
     "minutes": 31,
     "miles": 15.1,
@@ -2699,6 +2705,7 @@
    "_why": "\"23min\" on the map above the card read as a leg of its own beside \"+18 min (+ 5.1 mi) total\", which had no distance to make it the total: 41 minutes for an 18-minute add-on, 24 of the journal's texts. With the plus taken the card's leg is its total, and the bubble is not added. Invented.",
    "text": "0 23min ee Lon\nXL\nAdd a delivery Exclusive x\n+ $4.01\nGuaranteed (incl. tip)\n\u00a9 +18 min (+ 5.1 mi) total\nI Fable Gas #12\nWren Way & Brindle Ln, Marrowick",
    "expect": {
+    "product": null,
     "pay": 4.01,
     "minutes": 18.0,
     "miles": 5.1,
@@ -2852,6 +2859,84 @@
    "expect": {
     "pay": 16.8,
     "boost": null
+   }
+  },
+  {
+   "name": "ride product: UberXL read with a space, before the payout",
+   "text": "Uber XL $24.60 4.92 Verified 6 min (2.0 mi) away Quarry Ln & Fable Ct, Harrowen 31 min (14.2 mi) trip",
+   "expect": {
+    "pay": 24.6,
+    "product": "UberXL"
+   }
+  },
+  {
+   "name": "ride product: Comfort with the Exclusive tag between it and the payout",
+   "text": "Comfort Exclusive $19.75 4.97 7 min (2.3 mi) away Oak Ln, Harrowen 22 min (9.1 mi) trip",
+   "expect": {
+    "pay": 19.75,
+    "product": "Comfort"
+   }
+  },
+  {
+   "name": "ride product: UberX Share, lower case as the reader sometimes gives it",
+   "text": "uberx share $9.40 4 min (1.2 mi) away Maple Grill (12 Fable Ct) 18 min (5.0 mi) trip",
+   "expect": {
+    "pay": 9.4,
+    "product": "UberX Share"
+   }
+  },
+  {
+   "name": "ride product: Black SUV is one name, not Black",
+   "text": "Black SUV $41.20 9 min (3.4 mi) away Tellmoor Pkwy NW, Tellmoor 35 min (16.8 mi) trip",
+   "expect": {
+    "pay": 41.2,
+    "product": "Black SUV"
+   }
+  },
+  {
+   "name": "ride product: the top line alone names it when the payout did not read",
+   "text": "Uberx Exclusive S 4S Verified 6 min (1.9 mi) away 21 min (7.0 mi) trip",
+   "expect": {
+    "product": "UberX"
+   }
+  },
+  {
+   "name": "ride product: a Comfort Inn pickup is no Comfort ride",
+   "text": "UberX $13.10 5 min (1.4 mi) away Comfort Inn (40 Quarry Ln) 24 min (9.3 mi) trip",
+   "expect": {
+    "pay": 13.1,
+    "product": "UberX"
+   }
+  },
+  {
+   "name": "ride product: Green St and Black Rd in the places name no product",
+   "text": "$11.25 5 min (1.6 mi) away Green St & Black Rd, Harrowen 19 min (6.4 mi) trip",
+   "expect": {
+    "pay": 11.25,
+    "product": null
+   }
+  },
+  {
+   "name": "ride product: a map POI before the payout is not the top line",
+   "text": "Comfort Inn & Suites $11.25 5 min (1.6 mi) away Oak Ln, Harrowen 19 min (6.4 mi) trip",
+   "expect": {
+    "pay": 11.25,
+    "product": null
+   }
+  },
+  {
+   "name": "ride product: the priority chip under a delivery headline is no Priority ride",
+   "text": "Delivery $9.09 Guaranteed (incl. tip) +$1.08 included for priority 20 min (1.5 mi) total Maple Grill (12 Fable Ct) Oak Ln, Harrowen",
+   "expect": {
+    "pay": 9.09,
+    "product": null
+   }
+  },
+  {
+   "name": "ride product: never on a DoorDash card",
+   "text": "Decline Comfort $8.50 Guaranteed (incl. tips) 3.1 mi Deliver by 7:15 PM Maple Grill Accept",
+   "expect": {
+    "product": null
    }
   }
  ],

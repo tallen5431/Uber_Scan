@@ -4907,6 +4907,63 @@ def exclusive_tag(text):
     return True if EXCLUSIVE_TAG.search(text) else None
 
 
+# Uber's ride product as the ride card prints it over its payout, "UberX
+# Exclusive $16.05" or "Comfort $12.40", in one short name: a LABEL (the owner,
+# Nov 2026: "can the offers page have an option to select uber rides
+# specifically? Usually marked as uber x"). The names are the ones the
+# earnings screen prints (earnings.js RIDE), so a card and the trip it paid
+# file under one word. None where the card printed none — never "UberX" by
+# default: a delivery card, a DoorDash card and a ride whose top line sat
+# above the crop all say nothing, and nothing is guessed for them.
+#
+# Anchored, because half the names are ordinary words a map or a card's
+# places print too ("Comfort Inn", "Green St", "Black Rd", "+$1.08 included
+# for priority"). The name counts in two places only: directly before the
+# payout the reader chose (the Exclusive or Early look tag and an add-on's
+# plus may sit between), or opening the text with the tag after it — the
+# card's top line, as exclusive_tag reads it, when the payout did not read.
+# X, XL and XXL only with "Uber" in front: a lone "XL" on the map above an
+# add-on card is on the corpus. Feeds no pay, minutes, miles, verdict or
+# rate. The JavaScript twin is rideProduct.
+PRODUCT_NAME = (r'(?<![A-Za-z])(uber ?x ?x ?l|uber ?x ?l|uber ?x ?share|uber ?x|uber ?pool'
+                r'|(?:uber ?)?(?:black ?suv|black|comfort ?electric|comfort|share|pet'
+                r'|green|wav|connect|assist|premier|select|reserve|priority|electric))')
+PRODUCT_TAG = r'(?:(?:e?xclusive|early [lt]ook)\b ?[x×]? ?)?'
+PRODUCT_BEFORE_PAY = re.compile(PRODUCT_NAME + r' ?' + PRODUCT_TAG + r'\+? ?$',
+                                re.IGNORECASE)
+PRODUCT_TOP = re.compile(r'^[^A-Za-z0-9]{0,3}' + PRODUCT_NAME
+                         + r' (?:e?xclusive|early [lt]ook)\b', re.IGNORECASE)
+PRODUCTS = {
+    'uberxxl': 'UberXXL', 'uberxl': 'UberXL', 'uberxshare': 'UberX Share',
+    'uberx': 'UberX', 'uberpool': 'UberX Share', 'share': 'UberX Share',
+    'blacksuv': 'Black SUV', 'black': 'Black', 'comfortelectric': 'Comfort Electric',
+    'comfort': 'Comfort', 'pet': 'Pet', 'green': 'Green', 'wav': 'WAV',
+    'connect': 'Connect', 'assist': 'Assist', 'premier': 'Premier',
+    'select': 'Select', 'reserve': 'Reserve', 'priority': 'Priority',
+    'electric': 'Electric',
+}
+
+
+def product_name(said):
+    """The short name for a product as matched by PRODUCT_NAME."""
+    key = re.sub(r'[^a-z]', '', said.lower())
+    if key not in PRODUCTS and key.startswith('uber'):
+        key = key[4:]
+    return PRODUCTS.get(key)
+
+
+def ride_product(text, pay, where):
+    """The ride product a card's text prints, or None: see PRODUCT_NAME.
+    `where` is find_pay's (amount, position) list; the payout is the first
+    of its amount, as one_card takes it."""
+    if SCREEN_DD_OFFER.search(text):
+        return None
+    at = next((pos for v, pos in where if v == pay), None) if pay is not None else None
+    m = PRODUCT_BEFORE_PAY.search(text[max(0, at - 48):at]) if at is not None else None
+    m = m or PRODUCT_TOP.search(text)
+    return product_name(m.group(1)) if m else None
+
+
 # How much of the payout the card says is Uber's Boost+ or DoorDash's Peak
 # Pay, for the panel to say "incl. $2.93 Boost" under the pay (the owner, Nov
 # 2026, from the evening's snaps). A LABEL, like the Exclusive tag above: it
@@ -6941,6 +6998,9 @@ def parse(raw_text):
         'addon': is_addon(mine, pay, _where),
         # ...and Uber's Exclusive tag, a label only. See exclusive_tag.
         'exclusive': exclusive_tag(text),
+        # ...and Uber's ride product, UberX, Comfort..., a label only. See
+        # ride_product.
+        'product': ride_product(text, pay, _where),
         # ...and the Boost+ or Peak Pay part of the payout, a label only. See
         # boost_of.
         'boost': boost_of(mine, pay),
