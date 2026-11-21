@@ -3145,7 +3145,7 @@
     if (!drawnAs(el.stack, JSON.stringify([lo, hi, s.heldCount, s.minMinutes, s.maxMinutes,
                                            s.sure, s.uncosted, s.ends, s.vsFirst,
                                            s.sameStore, s.sameStoreN, s.onTime, s.lateMin,
-                                           s.offWayMi, waySearch, compact]))) return;
+                                           s.offWayMi, s.along, waySearch, compact]))) return;
     // Built from parts rather than one string, because the parts have different
     // priorities when the row runs out of room. See .stackline in styles.css:
     // this is the half that gives way, and it can because the same figures are
@@ -3356,10 +3356,27 @@
     if ((s.onTime === 'late1' || s.onTime === 'late2') && s.lateMin > 0) {
       return circled(s.onTime === 'late1' ? 1 : 2) + ' late ~' + s.lateMin + ' min';
     }
+    // A DoorDash card that printed its store and not its customer (server.js
+    // alongHint, Advice.alongRoute): the road the store adds, exact, and the
+    // range the card's miles allow the customer, "≈" because it is an area
+    // and not a door. Said whole where the card's way line says the store's
+    // figure too: this is the only place the customer's range is said.
+    var al = alongSaid(s.along);
+    if (al) return al;
     if (typeof s.offWayMi === 'number' && waySearch !== true) {
       return '+' + s.offWayMi.toFixed(1) + ' mi out of the way';
     }
     return null;
+  }
+
+  function alongSaid(a) {
+    if (!a || typeof a.pickMi !== 'number' || typeof a.dropLo !== 'number'
+        || typeof a.dropHi !== 'number') return null;
+    if (a.along) return 'along your route (\u2248)';
+    var tenth = function (v) { return v === 0 ? '0' : v.toFixed(1); };
+    return 'pickup adds ' + a.pickMi.toFixed(1) + ' mi \u00b7 drop adds '
+      + (a.dropLo === a.dropHi ? tenth(a.dropHi) : tenth(a.dropLo) + '\u2013' + tenth(a.dropHi))
+      + ' mi (\u2248)';
   }
 
   // ...and the same question handed to a map, which answers it in driving

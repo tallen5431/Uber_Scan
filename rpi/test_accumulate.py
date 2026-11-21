@@ -1756,6 +1756,53 @@ try:
 finally:
     _AC.time = _was_time
 
+# --- a payout read with its point and without it --------------------------------
+# The owner's snap of 20 Nov, in invented words: one DoorDash card read with its
+# payout's point lost on most frames and kept on one (accumulate.point_lost).
+_lost = '$710 incl. tips\n2 stops (5.2 mi) - 20 min\nQuillby Noodles\n41 Fenwick Road, Ivyhame\nCustomer dropoff'
+_kept = '$7.10 incl. tips\n2 stops (5.2 mi) - 20 min\nQuillby Noodles\n41 Fenwick Road, Ivyhame\nCustomer dropoff'
+eq('the premise: the parser says which read kept the point',
+   (P.parse(_lost)['payPoint'], P.parse(_kept)['payPoint']), (False, True))
+eq('...and the lost-point figure alone is impossible (CHECK THE PAY)',
+   P.rate(P.parse(_lost))['doubt'], 'pay')
+_w = OfferAccumulator()
+for _i in range(5):
+    _m = _w.add(P.parse(_lost), now=500.0 + _i)
+eq('$710 x5 alone is still $710, still doubted: nothing is folded without a frame '
+   'that read the point', (_m['pay'], P.rate(_m).get('doubt')), (710.0, 'pay'))
+_ep = _m['episode']
+_m = _w.add(P.parse(_kept), now=505.5)
+eq('$710 x5 then $7.10 x1: the clean decimal read outvotes them, in the same window',
+   (_m['pay'], _m['episode'], _m['mergedFrom']), (7.1, _ep, 6))
+eq('...and it is priced, not doubted', P.rate(_m).get('doubt'), None)
+_m = _w.add(P.parse(_lost), now=506.0)
+eq('...and a later frame that lost the point again stays $7.10', (_m['pay'], _m['episode']),
+   (7.1, _ep))
+_w = OfferAccumulator()
+_w.add(P.parse(_kept), now=600.0)
+_m = _w.add(P.parse(_lost), now=601.0)
+eq('$7.10 first, then $710: one window at $7.10', (_m['pay'], _m['mergedFrom']), (7.1, 2))
+# Only where the figure without its point cannot be true: a $25 whole-dollar
+# card beside a stray "$0.25" is two figures, and a $15 card over an hour
+# beside "$0.15" too.
+_w = OfferAccumulator()
+_m25 = _w.add(P.parse('$25 incl. tips\n2 stops (5.2 mi) - 20 min'), now=700.0)
+_m = _w.add(P.parse('$0.25 incl. tips\n2 stops (5.2 mi) - 20 min'), now=701.0)
+ok_('a possible whole-dollar payout is never folded down to a hundredth of it',
+    _m['pay'] == 0.25 and _m['episode'] != _m25['episode'])
+_w = OfferAccumulator()
+_w.add(P.parse('$1.50 incl. tips\n2 stops (5.2 mi) - 60 min'), now=800.0)
+_m = _w.add(P.parse('$150 incl. tips\n2 stops (5.2 mi) - 60 min'), now=801.0)
+eq('...nor a lost-point figure OP.doubt allows ($150 over an hour)', _m['pay'], 150.0)
+_w = OfferAccumulator()
+_w.add(P.parse(_kept), now=900.0)
+_m = _w.add(P.parse('$711 incl. tips\n2 stops (5.2 mi) - 20 min'), now=901.0)
+eq('...nor other digits ($711 against $7.10)', _m['pay'], 711.0)
+_w = OfferAccumulator()
+_w.add(P.parse(_lost), now=1000.0)
+_m = _w.add(P.parse(_kept), now=1000.0 + 13.0)
+eq('...and a window already closed is not reopened by it', _m['mergedFrom'], 1)
+
 # --- a card read 10,000 times ---------------------------------------------------
 # A card can sit on the phone for as long as the driver leaves it, and every
 # vote here was a list that grew by one a frame and was walked on every add —

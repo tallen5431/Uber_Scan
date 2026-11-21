@@ -156,6 +156,18 @@ var GRILL = [place(81, 33.9700, -44.5300, 'amenity', 'restaurant', 'Example Gril
                    'Example Grill, 250, Example Road, Harrowen, Vosk County, Georgia, '
                    + '90660, United States')];
 
+/* Two DoorDash stores' doors for the along-route figures (server.js
+   alongHint, the owner's snap of 20 Nov): "120 Marrowby Lane" on the
+   straight line from the Square to the held end the suites pin at 1106
+   Brindlewood Way, half way, and "77 Thistledown Road" 2.8 mi south-west of
+   the Square, the other way from it. Invented. */
+var MARROWBY = [place(84, 33.9588, -44.54495, 'amenity', 'restaurant', 'Example Noodles',
+                      'Example Noodles, 120, Marrowby Lane, Harrowen, Vosk County, Georgia, '
+                      + '90660, United States')];
+var THISTLEDOWN = [place(85, 33.9300, -44.5900, 'amenity', 'restaurant', 'Example Curry',
+                         'Example Curry, 77, Thistledown Road, Harrowen, Vosk County, Georgia, '
+                         + '90660, United States')];
+
 /* ...and one 87 m from the door at 1985 Vosk Parkway (street=1975 Vosk
    Parkway): a restaurant next to a customer's door, which the GPS drop's
    restaurant guard exists for. Invented. */
@@ -452,6 +464,8 @@ function search(q) {
     else if (/^4821 kestrel (dr|drive)/.test(term)) all = KESTREL;
     else if (/^church st/.test(term)) all = CHURCH;
     else if (/^250 example (rd|road)/.test(term)) all = GRILL;
+    else if (/^120 marrowby (ln|lane)/.test(term)) all = MARROWBY;
+    else if (/^77 thistledown (rd|road)/.test(term)) all = THISTLEDOWN;
     else if (/^1975 vosk (pkwy|parkway)/.test(term)) all = DINER;
     else if (/^1981 vosk (pkwy|parkway)/.test(term)) all = TAQUERIA;
     else if (term === '1830 tansy creek sw') all = TANSY_1830;

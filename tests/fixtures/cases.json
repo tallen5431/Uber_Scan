@@ -1083,6 +1083,41 @@
    }
   },
   {
+   "name": "payPoint: a payout read with its point and cents is pointed",
+   "_why": "The owner's snap of 20 Nov: one DoorDash card read \"$710 incl. tips\" on five frames and \"$7.10 incl. tips\" on one. Both are printed over the label, so payLabelled cannot choose; the point can (accumulate.point_lost folds the lost-point frames into the pointed one).",
+   "text": "$7.10 incl. tips\n2 stops (5.2 mi) - 20 min\nQuillby Noodles\n41 Fenwick Road, Ivyhame\nCustomer dropoff",
+   "expect": {
+    "pay": 7.1,
+    "payPoint": true,
+    "payLabelled": true
+   }
+  },
+  {
+   "name": "payPoint: ...the same card with its point lost is not",
+   "text": "$710 incl. tips\n2 stops (5.2 mi) - 20 min\nQuillby Noodles\n41 Fenwick Road, Ivyhame\nCustomer dropoff",
+   "expect": {
+    "pay": 710,
+    "payPoint": false,
+    "payLabelled": true
+   }
+  },
+  {
+   "name": "payPoint: ...a point read as a comma is a point",
+   "text": "$7,10 incl. tips\n2 stops (5.2 mi) - 20 min",
+   "expect": {
+    "pay": 7.1,
+    "payPoint": true
+   }
+  },
+  {
+   "name": "payPoint: ...cents put back from a space are not read with the point",
+   "_why": "PAY_CENTS_SPLIT joins \"$12 6 8\" to $12.68: a join of two pieces, not a figure that kept its point.",
+   "text": "$12 6 8\nGuaranteed (incl. tip)\n20 min (1.5 mi) total\nOak Ln, Harrowen",
+   "expect": {
+    "payPoint": false
+   }
+  },
+  {
    "name": "payLabelled: the payout over the card's label is labelled (what lets a later read correct the first)",
    "_why": "journal.py OfferLog._corrects moves an offer's payout only to a labelled figure; scan_pi.pay_disagrees says CHECK THE PAY over a read of the same card whose payout is not.",
    "text": "$9.09\nGuaranteed (incl. tip)\n$1.68 Boost+ included\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Harrowen",

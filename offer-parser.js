@@ -346,8 +346,13 @@
    * chosen is printed the way a card prints its headline — to the cent, or
    * followed at once by its label or the rider's star. The same test `where`
    * applies to the figures NOT chosen, asked of the one that is. Only
-   * payIsPrinted asks it. */
-  function findPay(text, where, printed, labelled) {
+   * payIsPrinted asks it.
+   *
+   * `pointed`, when given an array, has one flag pushed: whether the payout
+   * chosen was READ with its decimal point and both cents in its own figure
+   * ("$7.10", never a join of two pieces), parse()'s `payPoint`. See the
+   * Python twin. */
+  function findPay(text, where, printed, labelled, pointed) {
     var chips = collect(text, PAY_CHIP).concat(collectSpans(text, PAY_PART));
     var units = collectSpans(text, PAY_IS_A_DURATION)
       .concat(collectSpans(text, PAY_IS_PER_ORDER));
@@ -445,6 +450,9 @@
                      // it. See CENTS_LOST.
                      lost: !all[i].halves && !/[.,]/.test(all[i].value)
                        && CENTS_LOST.test(text.slice(all[i].index + all[i].match.length)),
+                     // ...and one read with its point and cents in the
+                     // figure itself. See `pointed` above.
+                     point: !all[i].halves && CENTS.test(all[i].value),
                      anchored: !!all[i].split || (!all[i].halves
                        && HEADLINE_AFTER.test(text.slice(all[i].index + all[i].match.length))) });
         if (best === null || v > best) best = v;
@@ -478,6 +486,9 @@
     // the rider's star: `payLabelled`. See the Python twin.
     if (labelled && best !== null) {
       labelled.push(found.some(function (f) { return f.value === best && f.anchored; }));
+    }
+    if (pointed && best !== null) {
+      pointed.push(found.some(function (f) { return f.value === best && f.point; }));
     }
     if (printed && best !== null) {
       // The FIRST figure of the chosen value by position, ties to the one
@@ -4123,8 +4134,8 @@
     // the amount, and they must be the same answer — two calls would be two
     // chances to disagree about which figure is the headline, which is the
     // whole thing this boundary rests on.
-    var payWhere = [], payLabelled = [];
-    var pay = findPay(text, payWhere, null, payLabelled);
+    var payWhere = [], payLabelled = [], payPointed = [];
+    var pay = findPay(text, payWhere, null, payLabelled, payPointed);
     // cardSpan asks aCardAbove what oneCard asks, of the same legs — oneCard's
     // answer has the upper card's leg cut.
     var foundLegs = legs;
@@ -4292,6 +4303,9 @@
       // Whether that payout is the figure the card prints over its label (or
       // before the rider's star): see findPay's `labelled`.
       payLabelled: pay !== null && payLabelled.length > 0 && payLabelled[0],
+      // ...and whether it was read with its decimal point and cents in the
+      // figure itself: see findPay's `pointed` (accumulate.point_lost).
+      payPoint: pay !== null && payPointed.length > 0 && payPointed[0],
       minutes: minutes,
       miles: miles,
       // Minutes since midnight, not a duration: converting one to the other

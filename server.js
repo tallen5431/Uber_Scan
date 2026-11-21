@@ -7623,6 +7623,15 @@ function withStack(read, now) {
     } else if (ot && typeof ot.offWayMi === 'number') {
       read.stack.offWayMi = ot.offWayMi;
     }
+    // ...and, for a DoorDash card that printed its store and not its
+    // customer, the road miles the store adds and the range the card's
+    // miles allow the customer (alongHint, Advice.alongRoute): asked here,
+    // said on a later reading of the same card, as the hint is.
+    var al = alongHint(scanner.offer, now);
+    if (al) {
+      read.stack.along = { pickMi: al.pickMi, dropLo: al.dropLo, dropHi: al.dropHi,
+                           along: al.along };
+    }
   }
   if (carryingTwo(now)) {
     read.orders = ordersForPanel(now);
@@ -8564,6 +8573,99 @@ function onTimeHint(offer, now, waiter) {
   });
   // The waiter is called only when the answer is not returned here.
   if (on.hint === undefined && waiter) on.waiters.push(waiter);
+  return on.hint;
+}
+
+/* ---------- along the route: a DoorDash card with no dropoff ---------------
+ *
+ * The owner's snap of 20 Nov: an Uber order in the car, its door pinned, and
+ * a DoorDash card up that printed its store's door and "Customer dropoff".
+ * "I just need to see and know it is along the current route I am working to
+ * not add too much time." The on-time hint needs both of the offer's ends;
+ * this card has one, so the pair line said nothing about the route.
+ *
+ * The figures are Advice.alongRoute's (the geometry and why each bound
+ * holds); this asks the roads they are worked from, of the NucBox's router,
+ * from the pins the on-time hint already has (onTimeInputs: the card's fix,
+ * the held order's pickup ahead and its door-level end, the offer's store
+ * searched at door level in its card's disc by offerPin, through the search
+ * plans and nbxCache):
+ *
+ *   base     car (-> held pickup) -> held end
+ *   runs     the same with the store put in, either side of the held pickup;
+ *            the shorter is the pickup's figure, and the road left from the
+ *            store to the held end on it is `afterMi`
+ *   to       car -> store, the road the card's miles start with
+ *
+ * Only for: a DoorDash card whose store's door is printed (`pickupLine`) and
+ * whose customer is not (no `dropoff`; a card that names it is the on-time
+ * hint's), whose miles MV.bandTarget reads as the whole job from the car (a
+ * stops card, vouched for, not doubted, not an early look), with ONE order in
+ * the car whose run onTimeInputs can measure. Anything else, a NucBox down or
+ * a road it would not give: nothing, and the pair line is as it was. Never
+ * under lite, whose NucBox bases are empty. Distances only, said beside the
+ * pair line; nothing here reaches the verdict, the state, the range, the rate
+ * or the pair row (AUDITS.md, Settled). */
+function alongInputs(offer, now) {
+  if (!offer || offer.app !== 'doordash' || typeof offer.pickupLine !== 'string'
+      || !offer.pickupLine || offer.dropoff) return { none: true };
+  var target = MV.bandTarget(offerCard(offer, now), 'dropoff');
+  if (!target || !target.less) return { none: true };
+  var inp = onTimeInputs(offer, now);
+  if (inp.none || inp.pending) return inp;
+  if (!inp.bPick) return { none: true };
+  return { car: inp.car, aPick: inp.aPick, aDrop: inp.aDrop, bPick: inp.bPick,
+           cardMi: target.miles };
+}
+
+function alongWork(inp, done) {
+  var down = false;
+  var base = [inp.car].concat(inp.aPick ? [inp.aPick] : [], [inp.aDrop]);
+  var runs = inp.aPick
+    ? [[inp.car, inp.bPick, inp.aPick, inp.aDrop], [inp.car, inp.aPick, inp.bPick, inp.aDrop]]
+    : [[inp.car, inp.bPick, inp.aDrop]];
+  var asks = [base, [inp.car, inp.bPick]].concat(runs);
+  var got = [], left = asks.length;
+  var mi = function (metres) { return sumOf(metres) / 1609.344; };
+  asks.forEach(function (pts, i) {
+    roadLegs(pts, function (r, failed) {
+      if (failed) down = true;
+      got[i] = r;
+      if (--left) return;
+      if (got.some(function (g) { return !g; })) return done(null, down);
+      var best = null;
+      runs.forEach(function (pts2, k) {
+        var g = got[k + 2], total = mi(g.metres);
+        if (best === null || total < best.total) {
+          best = { total: total, after: mi(g.metres.slice(pts2.indexOf(inp.bPick))) };
+        }
+      });
+      var pick = best.total - mi(got[0].metres);
+      if (pick < -ONTIME_NEG_MI) return done(null, down);
+      done(Advice.alongRoute({ pickMi: pick, approachMi: mi(got[1].metres),
+                               cardMi: inp.cardMi, afterMi: best.after,
+                               slackMi: MV.bandMiles(inp.cardMi) }), down);
+    });
+  });
+}
+
+/* The along-route figures for this offer now, null for none, undefined while
+ * asked. Kept beside the on-time hint's answers (onTimes), so a NucBox that
+ * comes back asks them again with it (nbxReaskOffer). */
+function alongHint(offer, now) {
+  if (!NBX.route || !NBX.search || LITE) return null;
+  var inp = alongInputs(offer, now);
+  if (inp.none) return null;
+  if (inp.pending) return undefined;
+  var key = offer.id + '\nalong\n' + JSON.stringify(inp);
+  var on = onTimes[key];
+  if (on) return on.hint;
+  on = { hint: undefined, waiters: [] };
+  onTimeKeep(onTimes, key, on);
+  alongWork(inp, function (hint, down) {
+    on.hint = hint;
+    on.down = !!down;
+  });
   return on.hint;
 }
 

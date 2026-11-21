@@ -554,6 +554,22 @@ all:
   geocoder's one answer has no list behind it, so with no NucBox answering
   only the discs are drawn.
 
+**On the pair line, a DoorDash card with its store and no customer.** With
+one order in the car and its door pinned, a DoorDash card that prints its
+store's door and "Customer dropoff" gets — with no press, of the NucBox
+alone, as the card's own search is asked — the road the store adds and the
+range the card's miles allow the customer, in the words that give way:
+"pickup adds 0.4 mi · drop adds 0–3.8 mi (≈)", or "along your route (≈)"
+when the most both can add is under 1.5 mi. The store's figure is exact
+(its printed door on the NucBox, car → store → the order's end against car
+→ the end, by road). DoorDash's "2 stops (5.2 mi)" is the whole job from
+the car, so the customer is that less the road to the store, by road, from
+the store: the range is the least and the most a customer anywhere that far
+can add to the route (advice.js `alongRoute`), never a guessed door, and
+DoorDash's map label plays no part. No NucBox, no pin, no held run, or the
+card names its customer (the on-time hint's): nothing, as before. Road
+miles only; it decides nothing. Off in lite, which has no NucBox.
+
 `map.html` and the offers page still use the public geocoder: they place a
 whole window of offers rather than one card's disc, and choosing among
 candidates there is a different question that has not been answered. What

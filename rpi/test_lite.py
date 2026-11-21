@@ -523,6 +523,69 @@ try:
     finally:
         stop(_fp)
 
+    # The along-route figures for a DoorDash card with its store and no
+    # customer (server.js alongHint, the owner's snap of 20 Nov): an order in
+    # the car, its door pinned, the card's store on the fake. The full rig
+    # asks the NucBox and says them on the pair line; lite asks nothing and
+    # says nothing, the pair line otherwise the same. Invented doors.
+    _al_scanner = os.path.join(_work, 'along.py')
+    with open(_al_scanner, 'w') as _fh:
+        _fh.write(
+            'import json, time\n'
+            'fix = {"lat": 33.9526, "lon": -44.5499, "gpsOk": True, "gpsMode": 3, "gpsAge": 1,\n'
+            '       "gpsErr": 5}\n'
+            'o = dict(fix, id="lite-dd", pay=7.10, minutes=20, billedMinutes=20, miles=2.0,\n'
+            '         cost=0.7, perHour=19.2, state="no", app="doordash", screen="dd.offer",\n'
+            '         pickup="Example Noodles", pickupLine="120 Marrowby Lane, Harrowen",\n'
+            '         dropoff=None, stops=2, whole=True, hasTotal=False, legs=1)\n'
+            'r = {"ready": True, "locked": True, "whole": True, "state": "no", "perHour": 19.2,\n'
+            '     "grossPerHour": 21.3, "billedMinutes": 20, "pay": 7.10, "minutes": 20,\n'
+            '     "cardMinutes": 20, "miles": 2.0, "cost": 0.7, "costPerMile": 0.35,\n'
+            '     "target": 25, "band": 15, "app": "doordash"}\n'
+            'print(json.dumps(r), flush=True)\n'
+            'print(json.dumps({"offer": o}), flush=True)\n'
+            'while True:\n'
+            '    r["at"] = int(time.time() * 1000)\n'
+            '    print(json.dumps(r), flush=True)\n'
+            '    time.sleep(0.3)\n')
+    _al_seen = {}
+    for _mode in ('1', '0'):
+        _aj = os.path.join(_work, 'along-%s' % _mode, 'offers.jsonl')
+        os.makedirs(os.path.dirname(_aj))
+        open(_aj, 'w').close()
+        _now = int(time.time() * 1000)
+        with open(os.path.join(os.path.dirname(_aj), 'holding.json'), 'w') as _fh:
+            json.dump({'v': 2, 'orders': [{
+                'id': 'lite-a', 'acceptedAt': _now - 60000, 'pay': 9.48, 'minutes': 40.0,
+                'miles': 5.0, 'cost': 1.5, 'app': 'uber',
+                'dropoff': '1106 Brindlewood Way, Harrowen, GA 90660',
+                'card': {'lat': 33.9526, 'lon': -44.5499, 'gpsOk': True, 'gpsMode': 3,
+                         'gpsAge': 1, 'gpsErr': 5, 'miles': 6.0},
+                'endPin': {'dropoff': '1106 Brindlewood Way, Harrowen, GA 90660',
+                           'lat': 33.9650, 'lon': -44.5400, 'doorLevel': True,
+                           'pinnedAt': _now, 'by': 'server'}}]}, _fh)
+        _before = len(asked())
+        _ap, _ab = start(dict(NBX_ENV, LITE=_mode, SCANNER_ARGS=_al_scanner,
+                              HOLD_GRACE_MS='600000'), _aj)
+        try:
+            _st = None
+            for _ in range(50):
+                _st = (as_json(raw(_ab, '/api/status')[1]) or {}).get('last') or {}
+                if (_st.get('stack') or {}).get('along'):
+                    break
+                time.sleep(0.1)
+            _al_seen[_mode] = {'stack': bool(_st.get('stack')),
+                               'along': (_st.get('stack') or {}).get('along'),
+                               'asked': len(asked()[_before:])}
+        finally:
+            stop(_ap)
+    eq('[lite] a DoorDash card with its store and no customer, an order in the car: the pair '
+       'line, and no along-route figures, not one question asked',
+       _al_seen.get('1'), {'stack': True, 'along': None, 'asked': 0})
+    ok_('[full] ...where the full rig asks and says them (%r)' % (_al_seen.get('0'),),
+        (_al_seen.get('0') or {}).get('along') is not None
+        and (_al_seen.get('0') or {}).get('asked', 0) >= 1)
+
     # The NucBox out of reach (server.js nbxOff, the panel's red NO NUCBOX on
     # live.html): a lite rig has no NucBox to miss, so the warning must never
     # come up there, even with an environment that names a NucBox nobody

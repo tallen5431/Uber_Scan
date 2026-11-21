@@ -11535,6 +11535,88 @@ _otnt = _ontime('ontime-untimed', (_NOWMIN + 40) % 1440, minutes=None)
 eq('[on time] an offer with no deadline and no minutes: no call, the miles instead',
    _otnt['stack'], {'onTime': None, 'lateMin': None, 'offWayMi': 1.6})
 
+# --- along the route: a DoorDash card with its store and no customer -----------
+#
+# The owner's snap of 20 Nov: an Uber order in the car, its door pinned, and a
+# DoorDash card that printed its store's door and "Customer dropoff". The road
+# the store adds (exact, from the printed door) and the range of road miles
+# the card's miles allow the customer (Advice.alongRoute), on the reading's
+# stack as `along`; distances only, the verdict and the pair row untouched.
+# The fake's roads are a quarter longer than the line; its stores "120
+# Marrowby Lane" (half way from the Square to the held end) and "77
+# Thistledown Road" (2.8 mi the other way) are invented.
+
+
+def _along(name, door, miles, held=True, router=True, doubt=None, dropoff=None):
+    nf = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    nb = 'http://127.0.0.1:%d' % json.loads(nf.stdout.readline())['port']
+    # A NucBox that is not there: a port nothing listens on.
+    dead = 'http://127.0.0.1:9'
+    env = {'NUCBOX_SEARCH': nb if router else dead, 'NUCBOX_ROUTER': nb if router else dead}
+    sp, sb, sj, _sh = _cserver(name, hold=_othold(None) if held else None, **env)
+    try:
+        read = _ssread(7.10, miles)
+        fix = dict(_OTFIX, miles=miles)
+        card = _card('al-b', 7.10, minutes=20.0, app='doordash', screen='dd.offer',
+                     pickup='Example Noodles', pickupLine=door, dropoff=dropoff, stops=2,
+                     whole=True, hasTotal=False, doubt=doubt, **fix)
+        _say(read)
+        _say(card)
+        _say(read)
+        out = None
+        for _ in range(30):
+            time.sleep(0.2)
+            _say(read)
+            last = get(sb, '/api/status').get('last') or {}
+            out = last
+            if (last.get('stack') or {}).get('along'):
+                break
+        st = (out or {}).get('stack')
+        rows = [r for r in _rows(sj, 'pair') if r.get('id') == 'al-b']
+        return {'stack': st is not None, 'along': (st or {}).get('along'),
+                'state': (out or {}).get('state'),
+                'rowAlong': [k for k in (rows[0] if rows else {}) if 'along' in k.lower()]}
+    finally:
+        stop(sp)
+        nf.kill()
+
+
+# The store half way along the run to the held end: the run through it is the
+# run itself, so it adds nothing; 2.0 mi printed, 0.64 of them to the store by
+# road, so the customer is 1.36 ± 0.4 from it with 0.64 of road left to the
+# held end: 0.32 → 0.3 at the least, 1.76 + 0.64 → 2.4 at the most.
+_alon = _along('along-on', '120 Marrowby Lane, Harrowen', 2.0)
+eq('[along] a DoorDash store on the run, its customer unprinted: the store adds nothing and '
+   'the card\'s miles leave the customer a small range, on the stack; the verdict the '
+   'reading\'s own and nothing on the pair row',
+   (_alon['along'], _alon['state'], _alon['rowAlong']),
+   ({'pickMi': 0.0, 'dropLo': 0.3, 'dropHi': 2.4, 'along': False}, 'go', []))
+# The store 2.8 mi the other way: car → store → held end is 3.47 + 4.68 road
+# mi against 1.28, +6.9; 6.0 printed leave the customer 2.53 ± 0.9 from it,
+# and the held end is 4.68 away, so anywhere from nothing to 3.43 x 2.
+_aloff = _along('along-off', '77 Thistledown Road, Harrowen', 6.0)
+eq('[along] ...a store far off the run: a large figure for it and a large range for the '
+   'customer', _aloff['along'], {'pickMi': 6.9, 'dropLo': 0.0, 'dropHi': 6.9, 'along': False})
+# The card's miles barely past the store's road: the customer is within the
+# slack of it, and the most the two can add is under ALONG_MI.
+_alhug = _along('along-hug', '120 Marrowby Lane, Harrowen', 0.7)
+eq('[along] ...the customer\'s whole possible area hugging the run: "along your route"',
+   _alhug['along'], {'pickMi': 0.0, 'dropLo': 0.0, 'dropHi': 1.0, 'along': True})
+_alnone = _along('along-noheld', '120 Marrowby Lane, Harrowen', 2.0, held=False)
+eq('[along] no order in the car: no pair line, nothing', (_alnone['stack'], _alnone['along']),
+   (False, None))
+_aldown = _along('along-down', '120 Marrowby Lane, Harrowen', 2.0, router=False)
+eq('[along] the NucBox not answering: the pair line as it was, nothing said',
+   (_aldown['stack'], _aldown['along']), (True, None))
+_alnoaddr = _along('along-nodoor', None, 2.0)
+eq('[along] a card with no printed store door: nothing new',
+   (_alnoaddr['stack'], _alnoaddr['along']), (True, None))
+_alcust = _along('along-customer', '120 Marrowby Lane, Harrowen', 2.0,
+                 dropoff='1106 Pelarons Lane, Harrowen, GA 90664')
+eq('[along] a card that prints its customer is the on-time hint\'s, not this',
+   _alcust['along'], None)
+
 # --- put down by the delivery app's own screen --------------------------------
 #
 # The owner, 22 Oct: make it more hands-free. The app's screen from AFTER a
