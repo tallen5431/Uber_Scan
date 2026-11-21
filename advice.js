@@ -1202,6 +1202,77 @@
     return out;
   }
 
+  /* --- along the route: a DoorDash card with its pickup and no dropoff ------
+   *
+   * The owner's snap of 20 Nov, an Uber order in the car and its door pinned:
+   * "would it be possible for the doordash card scanning to give a best match
+   * given the address and my own location so it returns something on the
+   * route? I just need to see and know it is along the current route I am
+   * working to not add too much time." The card printed its store's door and
+   * "Customer dropoff": no end to search, so no detour past the pickup, and
+   * the pair line said nothing about the route at all.
+   *
+   * What the card's figures can honestly support, in road miles only:
+   *
+   *   pickup  exact: the road the NucBox's router gives for car -> pickup ->
+   *           the held route's end, less car -> that end (server.js's
+   *           detour, the on-time hint's fallback, from the printed door).
+   *   drop    a bound, never a point. DoorDash's "2 stops (5.2 mi)" is the
+   *           whole job from the car, car -> store -> customer (MV.bandTarget
+   *           reads it so; DoorDash's own map draws that route above the
+   *           card), so the customer is R = the card's miles less the road
+   *           from the car to the store, by road, from the store. Where the
+   *           route leaves the store with L road miles still to its end:
+   *             least  max(0, R - L): the route from the store must reach a
+   *                    customer R away, whichever side of the held end it is
+   *                    put (a road is no shorter than R, and road(P, D) <=
+   *                    road(P, A) + road(A, D) for the leg after the end);
+   *             most   R + min(R, L): the worse of the two better orders, the
+   *                    customer straight after the store and back (2R), or
+   *                    after the held end (L + R).
+   *           Both widened by `slackMi`, the card's figure against the
+   *           router's road (MV.bandMiles: the card rounds to a tenth, the
+   *           app's road is not OSRM's, the fix is seconds off).
+   *   along   the most it can add, pickup and drop together, under ALONG_MI.
+   *
+   * It is the area the card's miles allow, not a guess at the customer:
+   * DoorDash's map label is drawing only and never a figure (AUDITS.md,
+   * Settled), and nothing here reads it. Distances only — no minutes from
+   * distance, no pace, and nothing into the verdict, the state, the range or
+   * the rate: it is said beside the pair line and decides nothing.
+   *
+   * `f` is { pickMi, approachMi, cardMi, afterMi, slackMi }, road miles all.
+   * Returns { pickMi, dropLo, dropHi, reachMi, along }, rounded outward to a
+   * tenth (the low end down, the high end up, so it stays a bound), or null
+   * where a figure is missing or the card's miles do not even reach the
+   * store (a wrong pin, or miles counted from somewhere else). */
+  // Three of the half-mile cuts the panel already calls "on your way"
+  // (MV.ON_WAY_MI): one for the pickup, two for the drop, whose worst is an
+  // out-and-back. CHOSEN, NOT MEASURED.
+  var ALONG_MI = 1.5;
+
+  function alongRoute(f) {
+    var n = function (v) { return typeof v === 'number' && isFinite(v) ? v : null; };
+    if (!f) return null;
+    var pick = n(f.pickMi), to = n(f.approachMi), card = n(f.cardMi), after = n(f.afterMi);
+    var slack = n(f.slackMi) || 0;
+    if (pick === null || to === null || card === null || after === null
+        || !(card > 0) || to < 0 || after < 0 || slack < 0) return null;
+    var reach = card - to;
+    if (reach + slack < 0) return null;
+    var lo = Math.max(0, reach - slack), hi = Math.max(0, reach + slack);
+    var down = function (v) { return Math.floor(v * 10 + 1e-9) / 10; };
+    var up = function (v) { return Math.ceil(v * 10 - 1e-9) / 10; };
+    var out = {
+      pickMi: Math.round(Math.max(0, pick) * 10) / 10,
+      dropLo: down(Math.max(0, lo - after)),
+      dropHi: up(hi + Math.min(hi, after)),
+      reachMi: up(hi)
+    };
+    out.along = Math.max(0, pick) + out.dropHi <= ALONG_MI;
+    return out;
+  }
+
   /* `ends` with every order in the car against the offer: sameArea for each,
    * then the expensive mistake ruled out first. One 'elsewhere' is enough —
    * the car goes to that order's door whatever the other says — and a same-*
@@ -2575,6 +2646,9 @@
            busy: busy, freeAgain: freeAgain,
            bestAt: bestAt, trustworthy: trustworthy, grossRate: grossRate,
            unexplained: unexplained, stack: stack, stackMany: stackMany,
+           // The pair line's road miles for a DoorDash card with no dropoff:
+           // a reading, not a rule.
+           alongRoute: alongRoute, ALONG_MI: ALONG_MI,
            sameArea: sameArea, area: area,
            // The offer log's chart and the map's time filter ask one question
            // and must not each keep their own eight edges.

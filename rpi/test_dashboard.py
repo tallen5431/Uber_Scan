@@ -7650,6 +7650,18 @@ const framed = (page) => page.waitForFunction(
                               ['late1', { onTime: 'late1', lateMin: 12 }],
                               ['noMin', { onTime: 'late2', lateMin: null }],
                               ['miles', { offWayMi: 1.24 }],
+                              // ...and a DoorDash card with its store and no
+                              // customer (server.js alongHint): the store's
+                              // road, the customer's range, "along your route".
+                              ['along', { along: { pickMi: 0.4, dropLo: 0, dropHi: 3.8,
+                                                   along: false } }],
+                              ['alongOne', { along: { pickMi: 0, dropLo: 1.2, dropHi: 1.2,
+                                                      along: false } }],
+                              ['alongYes', { along: { pickMi: 0.1, dropLo: 0, dropHi: 0.9,
+                                                      along: true } }],
+                              ['alongMiles', { offWayMi: 1.24,
+                                               along: { pickMi: 1.2, dropLo: 0.5, dropHi: 4.1,
+                                                        along: false } }],
                               ['none', {}]]) {
       await push(Object.assign({}, READINGS.deducted, { holding: A, orders: [A], unowned: 0,
         stack: Object.assign({}, oneStack, extra) }));
@@ -9288,6 +9300,18 @@ try:
            'deadline and no NucBox search, the road miles the new pickup adds',
            [(_ot.get(k) or {}).get('ontime') for k in ('late1', 'noMin', 'miles')],
            ['① late ~12 min ·', None, '+1.2 mi out of the way ·'])
+        eq('[along] a DoorDash card with its store and no customer: the road the store adds and '
+           'the customer\'s range, "≈"; "along your route" where the whole area hugs it; in '
+           'place of the road miles, which it says',
+           [(_ot.get(k) or {}).get('ontime') for k in ('along', 'alongOne', 'alongYes',
+                                                        'alongMiles')],
+           ['pickup adds 0.4 mi · drop adds 0–3.8 mi (≈) ·',
+            'pickup adds 0.0 mi · drop adds 1.2 mi (≈) ·',
+            'along your route (≈) ·',
+            'pickup adds 1.2 mi · drop adds 0.5–4.1 mi (≈) ·'])
+        eq('[along] ...and nothing else on the card moves',
+           [((_ot.get('along') or {}).get(f) == (_ot.get('none') or {}).get(f), f)
+            for f in ('verdict', 'ends')], [(True, 'verdict'), (True, 'ends')])
         eq('[in car list] with two in the car a tap on ②\'s line opens the offers page too',
            ct.get('line2Tap'), ['journal.html#incar'])
         eq('...first in the pair line\'s words, and nothing else on the card moves: the '

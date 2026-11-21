@@ -2659,6 +2659,38 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
      [0, 0, false, false, 0, 0].join());
 })();
 
+// --- along the route: a DoorDash card with its store and no customer ----------
+// Advice.alongRoute, road miles in, road miles out (server.js alongHint asks the
+// roads). Invented figures.
+(function () {
+  var J = function (v) { return JSON.stringify(v); };
+  var f = function (o) {
+    return A.alongRoute(Object.assign({ pickMi: 0, approachMi: 0.6, cardMi: 2.0, afterMi: 0.6,
+                                        slackMi: 0.4 }, o));
+  };
+  // R = 2.0 - 0.6 = 1.4, ±0.4: the least 1.0 - 0.6, the most 1.8 + min(1.8, 0.6).
+  eq('the store on the run: it adds its own road, and the customer from R - L to R + min(R, L)',
+     J(f({})), J({ pickMi: 0, dropLo: 0.4, dropHi: 2.4, reachMi: 1.8, along: false }));
+  eq('...a held end further than the customer can be: the least is nothing',
+     f({ afterMi: 5 }).dropLo, 0);
+  eq('...and the most is the out-and-back, 2R, not R + L',
+     f({ afterMi: 5 }).dropHi, 3.6);
+  eq('...a customer further than the held end: the least is the difference',
+     f({ cardMi: 6.6, afterMi: 1.0 }).dropLo, 4.6);
+  eq('the store far off the run: its road, and a range as wide as the card allows',
+     J(f({ pickMi: 6.87, approachMi: 3.47, cardMi: 6.0, afterMi: 4.68, slackMi: 0.9 })),
+     J({ pickMi: 6.9, dropLo: 0, dropHi: 6.9, reachMi: 3.5, along: false }));
+  eq('the customer\'s whole area within the slack of the store, on the run: along your route',
+     f({ cardMi: 0.7 }).along, true);
+  eq('...not with a store that adds a mile', f({ cardMi: 0.7, pickMi: 1.0 }).along, false);
+  eq('rounded outward: the low end down and the high end up, so it stays a bound',
+     J([f({ cardMi: 2.07 }).dropLo, f({ cardMi: 2.07 }).dropHi]), J([0.4, 2.5]));
+  eq('the card\'s miles do not reach the store (a wrong pin, or miles from elsewhere): nothing',
+     f({ approachMi: 3.0 }), null);
+  eq('...a figure missing: nothing', f({ afterMi: null }), null);
+  eq('a store the road puts a hair off: never a negative figure', f({ pickMi: -0.03 }).pickMi, 0);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
                  : '\nAll ' + pass + ' target-advice checks passed');
 process.exit(fail ? 1 : 0);
