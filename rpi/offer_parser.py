@@ -1210,7 +1210,8 @@ PAY_IS_PER_ORDER = re.compile(
     re.IGNORECASE | ASCII)
 
 
-def find_pay(text, where=None, printed=None, figures=None, labelled=None):
+def find_pay(text, where=None, printed=None, figures=None, labelled=None,
+             pointed=None):
     """The offer's headline payout, and — if asked — where every headline was.
 
     `figures`, when given a list, is filled with the position of EVERY figure
@@ -1225,6 +1226,12 @@ def find_pay(text, where=None, printed=None, figures=None, labelled=None):
     parse() for `payLabelled`, which is what lets a later read of the same card
     correct the first (journal.OfferLog.consider) and what says two reads that
     disagree are a doubt rather than a choice (scan_pi.pay_disagrees).
+
+    `pointed`, when given a list, has one flag appended: whether the payout
+    chosen was READ with its decimal point and both cents in its own figure
+    ("$7.10", never a join of two pieces), parse()'s `payPoint`. The
+    accumulator asks it of two reads of one card that disagree by a factor of
+    a hundred: see accumulate.point_lost.
 
     `printed`, when given a list, has one flag appended: whether the payout
     chosen is printed the way a card prints its headline — to the cent, or
@@ -1290,6 +1297,9 @@ def find_pay(text, where=None, printed=None, figures=None, labelled=None):
     # Which of `found` are figures whose cents did not read, by index: the
     # joins below start at the same `$` as the figure they mend. See CENTS_LOST.
     lost = set()
+    # ...and which read their point and cents in the figure itself. See
+    # `pointed` above.
+    point = set()
     for m in matches:
         if in_chip(m):
             continue
@@ -1329,6 +1339,8 @@ def find_pay(text, where=None, printed=None, figures=None, labelled=None):
             # CENTS_LOST: it competes, and if it wins there is no payout.
             if not re.search(r'[.,]', m.group(1)) and CENTS_LOST.match(text, m.end()):
                 lost.add(len(found) - 1)
+            if CENTS.search(m.group(1)):
+                point.add(len(found) - 1)
             if best is None or v > best:
                 best = v
 
@@ -1392,6 +1404,7 @@ def find_pay(text, where=None, printed=None, figures=None, labelled=None):
         # it, the $9.09 above had no journey and never locked, and only the
         # reads with the boost alone reached the journal.
         lost = set(n for n, i in enumerate(keep) if i in lost)
+        point = set(n for n, i in enumerate(keep) if i in point)
         found = [found[i] for i in keep]
         best = max((one[0] for one in found), default=None)
     # The largest figure is one whose cents the reader lost, and nothing of the
@@ -1401,6 +1414,8 @@ def find_pay(text, where=None, printed=None, figures=None, labelled=None):
         best = None
     if labelled is not None and best is not None:
         labelled.append(any(one[0] == best and one[1] in anchored_at for one in found))
+    if pointed is not None and best is not None:
+        pointed.append(any(one[0] == best and i in point for i, one in enumerate(found)))
     if printed is not None and best is not None:
         printed.append(min((one for one in found if one[0] == best),
                            key=lambda one: one[1])[2])
@@ -6562,7 +6577,8 @@ def parse(raw_text):
     # be two chances for them to disagree about which figure is the
     # headline, which is the whole thing this boundary rests on.
     _labelled = []
-    pay = find_pay(text, _where, labelled=_labelled)
+    _pointed = []
+    pay = find_pay(text, _where, labelled=_labelled, pointed=_pointed)
     # card_span asks a_card_above the question one_card asks, and it has to be
     # asked of the same legs — one_card's answer has the upper card's leg cut.
     found_legs = legs
@@ -6753,6 +6769,11 @@ def parse(raw_text):
         # Whether that payout is the figure the card prints over its label (or
         # before the rider's star): see find_pay's `labelled`.
         'payLabelled': bool(pay is not None and _labelled and _labelled[0]),
+        # ...and whether it was read with its decimal point and cents in the
+        # figure itself: see find_pay's `pointed`. A label of the READ, not of
+        # the card: "$7.10" and "$710" are one card read twice, and only this
+        # says which of the two kept the point (accumulate.point_lost).
+        'payPoint': bool(pay is not None and _pointed and _pointed[0]),
         'minutes': minutes,
         'miles': miles,
         # Minutes since midnight, not a duration: converting one to the other

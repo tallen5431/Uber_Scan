@@ -86,6 +86,9 @@ class OfferAccumulator:
         self.shop = None
         self.addon = False
         self.key = None
+        # Whether the payout the window is keyed on was read with its decimal
+        # point (OP's `payPoint`). See point_lost.
+        self.key_point = False
         self.started = 0.0
         self.last_add = 0.0
         self.legs = []          # [{'minutes': [...], 'miles': [...], 'isTotal': bool,
@@ -527,6 +530,23 @@ class OfferAccumulator:
         detail = [l for l in (parsed.get('legDetail') or []) if l.get('minutes') is not None]
 
         key = round(pay, 2)
+        point = bool(parsed.get('payPoint'))
+        # The same card read with its payout's point and without it: one
+        # payout, the one the point was read in. See point_lost. Asked before
+        # the window can close on the difference, and only of a window still
+        # open (`stale` below is the same test).
+        if (self.key is not None and key != self.key and self.last_add
+                and now - self.last_add <= self.window):
+            if point and not self.key_point and point_lost(self.key, key, parsed):
+                # The window was keyed on the lost-point figure: it keeps every
+                # frame it holds, under the figure read with its point.
+                self.key = key
+                self.key_point = True
+            elif not point and self.key_point and point_lost(key, self.key, parsed):
+                # This frame lost the point the window already read.
+                key = self.key
+                parsed = dict(parsed, pay=key, payPoint=True)
+                point = True
         # Asked before the `or` can short-circuit it, and before reset() throws
         # away the leg slots it reads. The answer has to survive the reset, so
         # it is stored after: this is the one signal that separates a
@@ -555,6 +575,7 @@ class OfferAccumulator:
             self.reset()
             self.new_card = different
             self.key = key
+            self.key_point = point
             self.started = now
 
         self.samples += 1
@@ -1181,6 +1202,10 @@ class OfferAccumulator:
                                             merged.get('deliverBy'))
         merged['mergedFrom'] = self.samples
         merged['episode'] = self.episode
+        # The window's payout, which point_lost may have put back under a
+        # frame that lost its point.
+        merged['pay'] = self.key
+        merged['payPoint'] = self.key_point
         # See reset(): true only while this episode was started by a card that
         # replaced another paying the same, which is the case the journal cannot
         # see for itself.
@@ -1201,6 +1226,40 @@ class OfferAccumulator:
         # the whole reason for keeping one.
         merged['grew'] = len(used) > len(parsed.get('legDetail') or [])
         return merged
+
+
+def point_lost(plain, pointed, parsed):
+    """Whether `plain` is `pointed` with its decimal point lost — "$710" for
+    "$7.10", one card read twice — and only that can be the card.
+
+    The owner's snap of 20 Nov: a DoorDash card read "$710 incl. tips" on five
+    frames and "$7.10 incl. tips" on one, every other figure alike. The
+    window is keyed on the payout, so the clean frame opened a window of its
+    own and the next lost-point frame closed it again: the panel showed $7.10
+    for one read and CHECK THE PAY over $710 on the rest. Both figures are
+    printed over the card's label, so neither `payLabelled` nor
+    OP.pay_is_printed can choose; the point can. A frame that read it saw
+    more of the figure than one that did not, which is how every other
+    one-way signal here is unioned (isTotal, labelled, end_refused).
+
+    Only that shape: the same digits, the point read in one (`payPoint`, a
+    figure of its own, never a join) and in no figure of the other, a
+    hundred times apart to the cent. And only where the lost-point figure
+    cannot be true over this frame's minutes and miles (OP.doubt) while the
+    other can: "$25" read beside a stray "$0.25" is not folded, and neither
+    is a figure both could be. So this can only ever lower a payout, to the
+    one the card printed, and never price one OP.doubt refuses: a "$710" no
+    frame read with its point is CHECK THE PAY as before.
+    """
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0
+               for v in (plain, pointed)):
+        return False
+    # Whole dollars on one side, and the same digits in cents on the other.
+    if round(plain * 100) % 100 or round(pointed * 100) != round(plain):
+        return False
+    minutes, miles = parsed.get('minutes'), parsed.get('miles')
+    return (OP.doubt(plain, minutes, miles) is not None
+            and OP.doubt(pointed, minutes, miles) is None)
 
 
 def _voted_end(votes, places, fallback, card_spoke, not_this=None):
