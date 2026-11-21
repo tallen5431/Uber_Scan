@@ -262,6 +262,38 @@
                                  white-space: nowrap; }
   #paidRange th:first-child, #paidRange td:first-child { text-align: left; }
   #paidRange th { font-weight: 600; color: var(--muted); font-size: 12px; }
+  /* Rides against deliveries, what the card said and what was paid (the
+     owner, Nov 2026: "I am curious if driving passengers pays more than the
+     card suggests"): earnings.js ridesVsDeliveries, drawn as #paidRange is.
+     The strip's two marks are told apart by fill, not hue: the card hollow
+     in the muted grey, paid with the tip filled in the text colour, so it
+     reads the same in both themes and with no colour vision at all. */
+  #ridesPaid { border-bottom: 1px solid var(--line); padding: 2px 0 8px; margin: 0 0 6px; }
+  #ridesPaid[hidden] { display: none; }
+  #ridesPaid h3 { margin: 6px 0 2px; font-size: 14px; }
+  #ridesPaid .big { font-size: 15px; color: var(--text); margin: 4px 0; overflow-wrap: anywhere; }
+  #ridesPaid .note b { color: var(--text); }
+  #ridesPaid .fig { white-space: nowrap; }
+  #ridesPaid .kinds { overflow-x: auto; max-width: 100%; }
+  #ridesPaid table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+  #ridesPaid th, #ridesPaid td { padding: 4px 4px; text-align: right; border-top: 1px solid var(--line); }
+  #ridesPaid td { white-space: nowrap; }
+  #ridesPaid th:first-child, #ridesPaid td:first-child { text-align: left; white-space: normal; }
+  #ridesPaid th { font-weight: 600; color: var(--muted); font-size: 12px; }
+  #ridesPaid svg { display: block; width: 100%; height: auto; font: 11px system-ui, sans-serif; margin: 6px 0 2px; }
+  #ridesPaid svg text { fill: var(--muted); font-variant-numeric: tabular-nums; }
+  #ridesPaid svg .lab { fill: var(--text); }
+  #ridesPaid svg .ax { stroke: var(--line); stroke-width: 1; }
+  #ridesPaid svg .grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 4; opacity: .5; }
+  #ridesPaid svg .card { fill: var(--panel); stroke: var(--muted); stroke-width: 1.5; }
+  #ridesPaid svg .paid { fill: var(--text); fill-opacity: .8; }
+  #ridesPaid svg .med { stroke: var(--text); stroke-width: 2; }
+  #ridesPaid svg .medc { stroke: var(--muted); stroke-width: 2; }
+  #ridesPaid .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
+  #ridesPaid .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 5px; margin-right: 5px;
+                         vertical-align: -1px; }
+  #ridesPaid .legend i.card { background: var(--panel); border: 1.5px solid var(--muted); width: 7px; height: 7px; }
+  #ridesPaid .legend i.paid { background: var(--text); }
   .offer.hiddenrow > summary { opacity: .5; }
   /* The way back, always in reach.
      This page is one continuous list — a week of offers is fourteen thousand
@@ -637,6 +669,9 @@
     #paidRange h3 { font-size: 18px; }
     #paidRange .big { font-size: 19px; }
     #paidRange table { max-width: 640px; }
+    #ridesPaid h3, #ridesPaid .big, #ridesPaid table, #ridesPaid th, #ridesPaid .legend { font-size: 15px; }
+    #ridesPaid h3 { font-size: 18px; }
+    #ridesPaid table, #ridesPaid svg { max-width: 640px; }
 
     .block { padding: 6px 0; }
     .block .label { width: 88px; font-size: 16px; }
@@ -1306,6 +1341,13 @@
          this page already has. Shown only with a matched trip in the range;
          descriptive, nothing here reaches the verdict, the target or the rig. -->
     <div id="paidRange" hidden></div>
+    <!-- Rides against deliveries: what the card said and what was paid (the
+         owner, Nov 2026: "I am curious if driving passengers pays more than
+         the card suggests. All are almost under 1 $/mi but tipping can change
+         that quite a lot."). earnings.js ridesVsDeliveries over the same
+         trips and records as the box above, drawn with it and hidden with it:
+         no matched trip in the range, no block. Reading only. -->
+    <div id="ridesPaid" hidden></div>
     <p class="note" id="earningsLead">Screenshots of Uber&rsquo;s Earnings Activity for a day.
       Each trip on them is matched to its order here, and the order&rsquo;s record says what
       it paid against the card. Upload again once tips have settled: a tip that was
@@ -1319,6 +1361,8 @@
     <input type="date" id="earningsDay">
     <input type="file" id="earningsFiles" accept="image/png,image/jpeg,image/webp" multiple>
     <label id="earningsPick" for="earningsFiles">Add earnings screenshots</label>
+    <p class="note" id="earningsMany">Pick all of a day&rsquo;s screenshots at once: select several in the
+      picker (they may overlap; a trip seen twice is filed once).</p>
     <p class="note" id="earningsSays" aria-live="polite" hidden></p>
     <p class="note" id="earningsInstall" hidden></p>
     <div id="earningsNeeds"></div>
@@ -4103,7 +4147,10 @@
                         // ...and the matched trip as Uber says it, beside the
                         // card's columns and never in them (uberCells).
                         'uber_status', 'uber_start', 'uber_finish', 'uber_minutes', 'uber_miles',
-                        'uber_extras', 'time_vs_card', 'miles_vs_card'];
+                        'uber_extras', 'time_vs_card', 'miles_vs_card',
+                        // ...and which kind the matched trip was, ride or
+                        // delivery (tripKindOf), blank with no trip matched.
+                        'trip_kind'];
 
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   // Local 'YYYY-MM-DD HH:MM:SS', the report's _stamp.
@@ -4171,7 +4218,21 @@
             Array.isArray(rec['with']) && rec['with'].length ? 'yes' : 'no',
             // No day's judgement here (too soon, never driven): the report's.
             '', rec.fromEarnings ? 'earnings' : 'record', notes.join('; ')].concat(paidCells(rec)).concat([timedBy])
-      .concat(uberCells(rec));
+      .concat(uberCells(rec)).concat([tripKindOf(rec)]);
+  }
+
+  /* The records CSV's trip_kind: 'ride' or 'delivery' for an order a trip was
+     matched to, blank otherwise. earnings.js tripKind's rule, written here
+     because this list is drawn without that script, and the report's
+     trip_kind, word for word: Uber's ride word; else Uber's delivery word;
+     else a card of two legs or more and no shop chip is a ride. */
+  function tripKindOf(rec) {
+    var e = paidFor(rec);
+    if (!e) return '';
+    if (e.ride === true) return 'ride';
+    if (/deliver|eats|courier/i.test(e.type || '')) return 'delivery';
+    var card = rec.card || {};
+    return typeof card.legs === 'number' && card.legs >= 2 && card.shop !== true ? 'ride' : 'delivery';
   }
 
   function recordsCsv(records) {
@@ -4774,7 +4835,7 @@
       return st === 'matched' || st === 'picked';
     });
     sayMoneyHeld();
-    if (!any) { box.hidden = true; box.innerHTML = ''; return; }
+    if (!any) { box.hidden = true; box.innerHTML = ''; hideRidesPaid(); return; }
     if (window.Earnings && typeof window.Earnings.rangeSummary === 'function') { drawPaidRange(box); return; }
     if (paidRangeLib) return;
     paidRangeLib = true;
@@ -4832,6 +4893,7 @@
   function drawPaidRange(box) {
     var s = window.Earnings.rangeSummary(earningsList, paidRangeRecs, { from: paidRangeFrom() });
     var a = s.all;
+    drawRidesPaid();
     if (!a.matched) { box.hidden = true; box.innerHTML = ''; return; }
     var readsApp = {};
     ((earningsInfo && earningsInfo.apps) || [{ app: 'uber', reads: true }]).forEach(function (x) {
@@ -4920,6 +4982,149 @@
     html += '<p class="note" id="paidRangeSays" aria-live="polite" hidden></p>';
     html += '<p class="note">A record of what was paid, beside the card: nothing here changes what the rig decides '
       + 'or the target.</p>';
+    box.innerHTML = html;
+    box.hidden = false;
+  }
+
+  /* RIDES AGAINST DELIVERIES: WHAT THE CARD SAID AND WHAT WAS PAID (the owner,
+     Nov 2026: "I am curious if driving passengers pays more than the card
+     suggests. All are almost under 1 $/mi but tipping can change that quite a
+     lot."). earnings.js ridesVsDeliveries over the trips and records the box
+     above sums, with the offer rows this page holds for a card never Took'd;
+     its kindWords for the one plain line. Per kind: the counts (pending tips
+     counted and left out, never $0), a table of the figures, which is also
+     the chart's table view, and a strip of each trip's card $/mi against
+     paid-with-tip $/mi. Nothing here reaches the verdict, the target, the
+     panel or any rule. */
+  function hideRidesPaid() {
+    var box = document.getElementById('ridesPaid');
+    if (box) { box.hidden = true; box.innerHTML = ''; }
+  }
+  var KIND_NAMES = { ride: 'Rides', delivery: 'Deliveries' };
+  function isNum(v) { return typeof v === 'number' && isFinite(v); }
+  function perMile(v) { return isNum(v) ? money(v, 2) + '/mi' : '—'; }
+  function signedPerMile(v) { return isNum(v) ? signedMoney(v) + '/mi' : '—'; }
+  function ciWords(ci, f) { return ci ? '95%: ' + f(ci[0]) + ' to ' + f(ci[1]) : 'no interval'; }
+
+  // The strip: two rows per kind (the card, paid with the tip), $/mi across,
+  // each settled trip a dot, the median a tick. Dots past the axis's end are
+  // drawn at it and counted. The card hollow, paid filled: told apart by
+  // fill, so no colour carries it alone.
+  function ridesStrip(r) {
+    var rows = [];
+    ['ride', 'delivery'].forEach(function (k) {
+      var g = r[k];
+      if (!g.settled || g.thin) return;
+      rows.push({ k: k, which: 'card', vals: g.dots.map(function (d) { return d.card; }).filter(isNum),
+                  med: g.cardPerMile.median });
+      rows.push({ k: k, which: 'paid', vals: g.dots.map(function (d) { return d.paid; }).filter(isNum),
+                  med: g.paidPerMile.total });
+    });
+    if (!rows.length) return '';
+    var all = [];
+    rows.forEach(function (x) { all = all.concat(x.vals); });
+    all.sort(function (a, b) { return a - b; });
+    // The axis to the 95th percentile's next half-dollar, at least $1: one
+    // short trip's $6/mi would squash every other dot into the first tenth.
+    var top = Math.max(1, Math.ceil((Advice.quantile(all, 0.95) || 1) * 2) / 2);
+    var W = Math.max(280, Math.min(640, Math.floor((document.getElementById('ridesPaid').clientWidth || 340) - 4)));
+    var L = 92, R = 14, rowH = 22, T = 8, H = T + rows.length * rowH + 22;
+    var x = function (v) { return L + Math.min(v, top) / top * (W - L - R); };
+    var svg = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="'
+      + esc('Each settled trip\'s card $/mi and paid-with-tip $/mi, rides and deliveries; the table above has the figures')
+      + '">';
+    var step = top <= 2 ? 0.5 : 1;
+    for (var t = 0; t <= top + 1e-9; t += step) {
+      svg += '<line class="grid" x1="' + x(t).toFixed(1) + '" x2="' + x(t).toFixed(1) + '" y1="' + T + '" y2="'
+        + (H - 18) + '"/><text x="' + x(t).toFixed(1) + '" y="' + (H - 5) + '" text-anchor="middle">$'
+        + (step < 1 ? t.toFixed(2) : t.toFixed(0)) + '</text>';
+    }
+    rows.forEach(function (row, i) {
+      var cy = T + i * rowH + rowH / 2;
+      svg += '<text' + (row.which === 'card' ? ' class="lab"' : '') + ' x="0" y="' + (cy + 4) + '">'
+        + esc(row.which === 'card' ? KIND_NAMES[row.k] + ' card' : 'paid + tip') + '</text>';
+      svg += '<line class="ax" x1="' + L + '" x2="' + (W - R) + '" y1="' + cy + '" y2="' + cy + '"/>';
+      var past = 0;
+      row.vals.forEach(function (v, j) {
+        if (v > top) past++;
+        // A little spread by order, so a run of equal rates still reads as many.
+        var jy = ((j % 5) - 2) * 1.6;
+        svg += '<circle class="' + row.which + '" cx="' + x(v).toFixed(1) + '" cy="' + (cy + jy).toFixed(1)
+          + '" r="3.2"><title>' + esc((row.which === 'card' ? 'card ' : 'paid with tip ') + money(v, 2) + '/mi')
+          + '</title></circle>';
+      });
+      if (isNum(row.med)) {
+        svg += '<line class="' + (row.which === 'card' ? 'medc' : 'med') + '" x1="' + x(row.med).toFixed(1) + '" x2="'
+          + x(row.med).toFixed(1) + '" y1="' + (cy - 8) + '" y2="' + (cy + 8) + '"><title>median '
+          + esc(money(row.med, 2)) + '/mi</title></line>';
+      }
+      if (past) svg += '<text x="' + (W - R) + '" y="' + (cy - 6) + '" text-anchor="end">' + past + ' past →</text>';
+    });
+    return '<div class="legend"><span><i class="card"></i>card: its pay ÷ its miles</span>'
+      + '<span><i class="paid"></i>paid with the tip ÷ Uber\'s miles</span><span>| median</span></div>'
+      + svg + '</svg>';
+  }
+
+  function drawRidesPaid() {
+    var box = document.getElementById('ridesPaid');
+    if (!box || !window.Earnings || typeof window.Earnings.ridesVsDeliveries !== 'function') return;
+    var r = window.Earnings.ridesVsDeliveries(earningsList, paidRangeRecs,
+      { from: paidRangeFrom(), offers: (lastData && lastData.offers) || [] });
+    if (!r.matched) { hideRidesPaid(); return; }
+    var html = '<h3>Rides vs deliveries: what the card said and what was paid</h3>';
+    html += '<p class="big" id="ridesPaidSays">' + esc(window.Earnings.kindWords(r)) + '</p>';
+    var kinds = ['ride', 'delivery'];
+    html += kinds.map(function (k) {
+      var g = r[k];
+      var bits = [plural(g.matched, 'trip', 'trips') + ' matched', g.settled + ' with the tip settled'
+        + (g.noTipLine ? ' (' + g.noTipLine + ' printed no tip)' : '')];
+      if (g.pending) bits.push(g.pending + ' tip still pending, left out of every paid figure (not counted as $0)');
+      if (g.guessed) bits.push(g.guessed + ' amount read without its decimal point');
+      if (g.noCard) bits.push(g.noCard + ' no pay read off the card');
+      return '<p class="note kindcount" data-kind="' + k + '"><b>' + KIND_NAMES[k] + ':</b> ' + esc(bits.join('; '))
+        + '.' + (g.thin && g.matched ? ' <b>Too few settled ' + (k === 'ride' ? 'rides' : 'deliveries')
+          + ' yet: its figures start at ' + r.min + '.</b>' : '') + '</p>';
+    }).join('');
+    var shown = kinds.filter(function (k) { return !r[k].thin; });
+    if (shown.length) {
+      var row = function (label, f) {
+        return '<tr><th scope="row">' + label + '</th>'
+          + shown.map(function (k) { return '<td>' + f(r[k]) + '</td>'; }).join('') + '</tr>';
+      };
+      var withCi = function (v, ci, f, unit) {
+        return '<span class="fig">' + esc(isNum(v) ? f(v) + (unit || '') : '—') + '</span><br><small>'
+          + esc(ciWords(ci, f)) + '</small>';
+      };
+      html += '<div class="kinds"><table><thead><tr><th scope="col">Medians over the settled trips</th>'
+        + shown.map(function (k) { return '<th scope="col">' + KIND_NAMES[k] + '</th>'; }).join('')
+        + '</tr></thead><tbody>'
+        + row('Card $/mi (its pay ÷ its miles)', function (g) { return esc(perMile(g.cardPerMile.median)); })
+        + row('Paid $/mi before the tip (Uber\'s miles)', function (g) { return esc(perMile(g.paidPerMile.base)); })
+        + row('Paid $/mi with the tip (Uber\'s miles)', function (g) { return esc(perMile(g.paidPerMile.total)); })
+        + row('Paid $/mi with the tip (the card\'s miles)', function (g) { return esc(perMile(g.paidPerCardMile.total)); })
+        + row('The tip\'s share of what was paid', function (g) {
+          return g.tip.share === null ? '—' : Math.round(g.tip.share * 100) + '%';
+        })
+        + row('The tip lifts $/mi by', function (g) { return esc(signedPerMile(g.tip.liftMedian)); })
+        + row('Trips the tip lifts ≥ ' + esc(money(r.tipLift, 2)) + '/mi', function (g) {
+          return g.tip.liftShare === null ? '—'
+            : g.tip.lifted + ' of ' + g.tip.n + ' (' + Math.round(g.tip.liftShare * 100) + '%)';
+        })
+        + row('Paid less card, per trip', function (g) { return withCi(g.diff.median, g.diff.ci, signedMoney); })
+        + row('…as a share of the card', function (g) { return withCi(g.diff.share, g.diff.shareCi, signedShare); })
+        + row('…per card mile', function (g) { return withCi(g.diffPerMile.median, g.diffPerMile.ci, signedMoney, '/mi'); })
+        + row('Real $/hr paid, where the rig timed it', function (g) {
+          return g.perHour.n ? esc(money(g.perHour.paid, 2)) + ' <small>(card ' + esc(g.perHour.card === null ? '—'
+            : money(g.perHour.card, 2)) + '; n=' + g.perHour.n + ')</small>' : '— <small>(none timed)</small>';
+        })
+        + row('Settled trips', function (g) { return String(g.settled); })
+        + '</tbody></table></div>';
+      html += ridesStrip(r);
+      html += '<p class="note">Uber\'s miles are the earnings line\'s; they and the card\'s may count different '
+        + 'stretches (whether a ride\'s drive to the rider is in), so paid less card per mile is over the card\'s own '
+        + 'miles. A ride is Uber\'s word for it, else a card of two legs; the rest are deliveries.</p>';
+    }
+    html += '<p class="note">Reading only: nothing here reaches the verdict, the target, the panel or any rule.</p>';
     box.innerHTML = html;
     box.hidden = false;
   }

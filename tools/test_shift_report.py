@@ -1457,7 +1457,7 @@ with open(_pcsv, encoding='utf-8') as fh:
     _pc = {r['took'][11:16]: r for r in csv.DictReader(fh)}
 _PAID = ('paid_total', 'paid_tip', 'tip_status', 'paid_minus_card')
 eq('[paid] the records CSV gains the four paid columns, before who timed it',
-   SR.RECORD_COLUMNS[-13:-8], _PAID + ('timed_by',))
+   SR.RECORD_COLUMNS[-14:-9], _PAID + ('timed_by',))
 eq('[paid] a trip whose tip settled: its newest row, the total, the tip, paid less the card',
    tuple(_pc['18:00'][k] for k in _PAID), ('15.50', '3.50', 'settled', '3.50'))
 eq('[paid] the driver\'s pick, its tip still processing: the total, no tip yet, said pending',
@@ -1469,6 +1469,19 @@ eq('[paid] a trip still waiting for the driver, and one naming an order at anoth
 eq('[paid] ...paid_cells, the offers page\'s paidCells: the card rounded off as the page rounds it',
    SR.paid_cells({'pay': 7.0, 'paid': {'amount': 25.05, 'tip': 19.54, 'tipStatus': 'settled'}}),
    ('25.05', '19.54', 'settled', '18.05'))
+# Which kind the matched trip was (the Money tab's rides against deliveries):
+# the last column, earnings.js tripKind's rule.
+eq('[paid] the records CSV ends with trip_kind: a matched trip with no ride word and a one-leg card a delivery, '
+   'an order with no trip blank', (SR.RECORD_COLUMNS[-1], _pc['18:00']['trip_kind'], _pc['18:40']['trip_kind']),
+   ('trip_kind', 'delivery', ''))
+eq('[paid] ...trip_kind: Uber\'s ride word; Uber\'s "Delivery" over a two-leg card; a two-leg card where Uber\'s '
+   'line says neither; a shop card; no trip matched',
+   [SR.trip_kind(o) for o in ({'paid': {'ride': True}, 'cardLegs': 1},
+                              {'paid': {'type': 'Delivery'}, 'cardLegs': 2},
+                              {'paid': {'type': 'Ride?'}, 'cardLegs': 2},
+                              {'paid': {}, 'cardLegs': 2, 'cardShop': True},
+                              {'cardLegs': 2})],
+   ['ride', 'delivery', 'ride', 'delivery', ''])
 # An order the rig did not time, timed by Uber (the owner, 12 Nov): R2
 # expired on its own clock, and its trip — 18 min 30 s, 3.4 mi on Uber's
 # screen — is matched to it; R1, timed by the rig at the door, has Uber's

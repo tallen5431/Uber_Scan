@@ -2680,6 +2680,10 @@
            DAY_STARTS_AT: DAY_STARTS_AT, dayKeyOf: dayKeyOf, weekKeyOf: weekKeyOf,
            // ...and the one median and type-7 quantile the reports share.
            median: median, quantile: quantile,
+           // ...and the median's order-statistic 95% interval and its floor,
+           // which earnings.js's rides-against-deliveries reads rather than
+           // carry an interval of its own.
+           medianCI: medianCI, TARGET_CI_MIN: TARGET_CI_MIN,
            costPerMileIn: costPerMileIn, costLadder: costLadder,
            costHolds: costHolds,
            mapSearch: mapSearch, mapRoute: mapRoute, mapQuery: mapQuery,

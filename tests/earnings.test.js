@@ -739,6 +739,102 @@ eq('[range] the driver\'s day across the clocks going back (1 Nov 2026): Monday 
 eq('[range] nothing matched is all zeros and no week', [E.rangeSummary([], RR, {}).all.matched,
    E.rangeSummary([], RR, {}).weeks.length, E.rangeSummary([], RR, {}).apps.uber.takenMatched], [0, 0, 0]);
 
+/* --- rides against deliveries (the owner, Nov 2026: "I am curious if driving
+ * passengers pays more than the card suggests") ------------------------------
+ * Invented, worked by hand. Ten rides settled on a $6.00 card of 8.0 mi
+ * ($0.75/mi), Uber's miles 8.0 too, tipped $2-$6 afterwards; two more rides
+ * whose tip is still processing. Two of the ten are rides by the card's shape
+ * alone (two legs, no word from Uber's line). Nine deliveries on an $8.00
+ * card of 5.0 mi ($1.60/mi), Uber's line "Delivery", tipped little on top of
+ * what the card carried; one has a two-leg card and is still a delivery,
+ * Uber's word winning. A canceled ride, a ride needing the driver and one
+ * with no order are in none of it. */
+function kRec(offer, at, legs) {
+  return { kind: 'order', offer: offer, id: 'ord-' + offer, app: 'uber', how: 'drop', times: { took: at },
+           card: { pay: 1, legs: legs } };
+}
+function kEnt(key, at, card, cardMiles, paid, tip, uberMiles, x) {
+  var e = rEnt(key, at, card, paid, x);
+  e.miles = uberMiles;
+  e.match.cardMiles = cardMiles;
+  if (typeof tip === 'number') { e.tip = tip; e.tipStatus = 'settled'; }
+  else if (tip === 'processing') { e.tip = 'processing'; e.tipStatus = 'pending'; }
+  else e.tipStatus = 'none';
+  return e;
+}
+var KTIPS = [2, 3, 3, 4, 4, 4, 4, 5, 5, 6];
+var KR = [], KE = [];
+KTIPS.forEach(function (t, i) {
+  var at = nov(5, 17, i * 5), key = 'e' + (100 + i);
+  KR.push(kRec('o' + (100 + i), at, 2));
+  var byCard = i >= 8;
+  KE.push(kEnt(key, at, 6, 8, 6 + t, t, 8, byCard ? {} : { ride: true, type: 'UberX' }));
+});
+KE[0].match.rigMinutes = 20;                         // $8.00 over 20 min: $24.00/hr paid
+KE[0].match.cardMinutes = 24;                        // ...the card's $6.00 over 24 min: $15.00/hr
+KE.push(kEnt('e120', nov(5, 19), 7, 6, 7, 'processing', 6, { ride: true }));
+KE.push(kEnt('e121', nov(5, 19, 10), 7, 6, 7, 'processing', 6, { ride: true }));
+KE.push(kEnt('e122', nov(5, 19, 20), 7, 6, 0, null, null, { ride: true, status: 'canceled' }));
+KE.push(kEnt('e123', nov(5, 19, 30), null, null, 9, null, 3, { ride: true, match: { status: 'needs' } }));
+var KD = [0, 0, 0, 0, 0.5, 0.5, 1, 0, 0];
+KD.forEach(function (t, i) {
+  var at = nov(6, 12, i * 5), key = 'e' + (200 + i);
+  KR.push(kRec('o' + (200 + i), at, i === 0 ? 2 : 1));
+  KE.push(kEnt(key, at, 8, 5, 8 + t, t ? t : null, 5, { type: 'Delivery' }));
+});
+var KS = E.ridesVsDeliveries(KE, KR, {});
+eq('[kinds] which kind: Uber\'s ride word; Uber\'s "Delivery" over a two-leg card; the card\'s shape where Uber\'s '
+   + 'line says neither; a one-leg card or a shop card a delivery',
+   [E.tripKind({ ride: true }, { legs: 1 }), E.tripKind({ type: 'Delivery' }, { legs: 2 }), E.tripKind({}, { legs: 2 }),
+    E.tripKind({}, { legs: 1 }), E.tripKind({}, { legs: 2, shop: true }), E.tripKind({}, null)],
+   ['ride', 'delivery', 'ride', 'delivery', 'delivery', 'delivery']);
+eq('[kinds] rides: 12 matched (canceled and needs-you out), 10 settled, 2 pending counted and left out, '
+   + 'none read as a $0 tip', [KS.ride.matched, KS.ride.settled, KS.ride.pending, KS.ride.noTipLine, KS.ride.thin],
+   [12, 10, 2, 0, false]);
+eq('[kinds] ...the two pending are in no paid figure: the tips are $40 of the $100 paid on the ten settled',
+   [KS.ride.card, KS.ride.paid, KS.ride.tips, KS.ride.tip.share], [60, 100, 40, 0.4]);
+eq('[kinds] rides\' $/mi: the card $0.75; paid before the tip $0.75 and with it $1.25 on Uber\'s miles; '
+   + '$1.25 on the card\'s', [KS.ride.cardPerMile, KS.ride.paidPerMile, KS.ride.paidPerCardMile],
+   [{ median: 0.75, n: 10 }, { base: 0.75, total: 1.25, n: 10, miles: 'uber' }, { total: 1.25, n: 10, miles: 'card' }]);
+eq('[kinds] ...the tip lifts a ride a median $0.50/mi, and every one of the ten by $0.25/mi or more',
+   [KS.ride.tip.liftMedian, KS.ride.tip.lifted, KS.ride.tip.liftShare], [0.5, 10, 1]);
+eq('[kinds] ...paid less card: median +$4.00 (95%: $2 to $5, order statistics over 10), +66.67% of the card; '
+   + '+$0.50 per card mile (95%: $0.25 to $0.63)',
+   [KS.ride.diff.median, KS.ride.diff.ci, KS.ride.diff.share, KS.ride.diffPerMile.median, KS.ride.diffPerMile.ci],
+   [4, [2, 5], 0.6667, 0.5, [0.25, 0.63]]);
+eq('[kinds] ...real $/hr only where the rig timed it: one ride, $24.00 paid against the card\'s $15.00',
+   KS.ride.perHour, { paid: 24, card: 15, n: 1 });
+eq('[kinds] deliveries: 9 settled, 6 with no tip line (counted, settled at no tip), little tip: '
+   + '$2 of $74, lifting none by $0.25/mi',
+   [KS.delivery.matched, KS.delivery.settled, KS.delivery.pending, KS.delivery.noTipLine, KS.delivery.tips,
+    KS.delivery.paid, KS.delivery.tip.share, KS.delivery.tip.lifted, KS.delivery.tip.liftShare],
+   [9, 9, 0, 6, 2, 74, 0.027, 0, 0]);
+eq('[kinds] ...deliveries\' card $1.60/mi, paid $1.60 with the tip; paid less card $0 per card mile',
+   [KS.delivery.cardPerMile.median, KS.delivery.paidPerMile.total, KS.delivery.diffPerMile.median,
+    KS.delivery.diffPerMile.ci], [1.6, 1.6, 0, [0, 0.1]]);
+eq('[kinds] the plain words: rides beat their cards, with n and the interval; deliveries beside',
+   E.kindWords(KS), 'Rides paid a median +$0.50/mi more than their cards once tips settled (n=10, 95%: +$0.25 to '
+   + '+$0.63); deliveries $0.00/mi (n=9, 95%: $0.00 to +$0.10). Per mile of the card\'s own miles, so it is the '
+   + 'money alone.');
+eq('[kinds] the dots for the chart: the card\'s and paid $/mi of each settled trip, no place',
+   [KS.ride.dots.length, KS.ride.dots[0], Object.keys(KS.ride.dots[0]).sort()],
+   [10, { card: 0.75, paid: 1 }, ['card', 'paid']]);
+var KT = E.ridesVsDeliveries(KE.slice(0, 3).concat(KE.slice(14)), KR, {});
+eq('[kinds] three settled rides are too few: no ride median and no interval, and the words say so',
+   [KT.ride.settled, KT.ride.thin, KT.ride.diff.median, KT.ride.diff.ci, KT.ride.cardPerMile.median,
+    KT.ride.cardPerMile.n], [3, true, null, null, null, 3]);
+eq('[kinds] ...said in plain words, the deliveries\' figure kept',
+   E.kindWords(KT), 'Too few settled rides yet (3, under ' + E.KIND_MIN + '); deliveries paid a median $0.00/mi the '
+   + 'same as their cards once tips settled (n=9, 95%: $0.00 to +$0.10). Per mile of the card\'s own miles, so it '
+   + 'is the money alone.');
+eq('[kinds] the floor is the shared interval\'s own: 8', [E.KIND_MIN, require('../advice.js').TARGET_CI_MIN], [8, 8]);
+eq('[kinds] no earnings: nothing matched and no words (the page hides the block)',
+   [E.ridesVsDeliveries([], KR, {}).matched, E.kindWords(E.ridesVsDeliveries([], KR, {})),
+    E.ridesVsDeliveries([KE[13]], KR, {}).matched], [0, null, 0]);
+eq('[kinds] the range applies: a range from 6 Nov 4am holds the deliveries alone',
+   [E.ridesVsDeliveries(KE, KR, { from: nov(6, 4) }).ride.matched, E.ridesVsDeliveries(KE, KR, { from: nov(6, 4) }).delivery.matched],
+   [0, 9]);
+
 /* --- Uber's Acceptance rate screen (the owner, 15 Nov 2026) --------------
  * The text tesseract gives of an invented copy (rpi/testearnings.py
  * acceptance_screen), and the faults it is checked against. */

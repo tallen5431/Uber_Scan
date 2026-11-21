@@ -1040,7 +1040,11 @@ const { chromium } = require('playwright');
   const out = { blocks: await vis('blocksHead'), week: await vis('weekHead'), link: await vis('toTrends'),
                 trendsTab: await vis('trendsTab'), bars: await page.evaluate(() => document.querySelectorAll('#blocks .block').length),
                 // The Offers tab's every-offer CSV is made by trends.js, which lite never loads.
-                offersCsv: await page.evaluate(() => { const e = document.getElementById('offersCsvLine'); return !!e && !e.hidden; }) };
+                offersCsv: await page.evaluate(() => { const e = document.getElementById('offersCsvLine'); return !!e && !e.hidden; }),
+                // The Money tab's earnings box, and the rides-against-deliveries
+                // block inside it: lite refuses /api/earnings, so both stay shut.
+                money: await page.evaluate(() => ['earnings', 'paidRange', 'ridesPaid'].map((i) => {
+                  const e = document.getElementById(i); return e ? !e.hidden : null; })) };
   if (out.link) {
     await page.click('#toTrendsGo');
     await page.waitForTimeout(400);
@@ -1088,6 +1092,9 @@ else:
        [_l.get('blocks'), _l.get('week'), _l.get('link'), _l.get('bars', 0) > 0, _l.get('errors')],
        [True, True, False, True, []])
     eq('[lite] ...and the Trends tab is gone from the page', _l.get('trendsTab'), False)
+    eq('[lite] the Money tab\'s earnings box stays shut, and with it what the app paid and rides against deliveries; '
+       'the full program shows the box (empty: no earnings here)', [_l.get('money'), _f.get('money')],
+       [[False, False, False], [True, False, False]])
     eq('[lite] ...and so is the Offers tab\'s every-offer CSV, made by trends.js, which lite never loads; the full '
        'program keeps it', [_l.get('offersCsv'), _f.get('offersCsv')], [False, True])
     eq('[full] the Strategy tab shows "When to drive → Trends" in their place',
