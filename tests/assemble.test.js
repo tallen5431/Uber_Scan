@@ -1859,16 +1859,21 @@ SEQ.forEach(function (seq) {
   run(ht2, tie);
   eq('[batch] a tie in time goes to the dropoff on the card\'s street',
      [ht.dropoff, ht2.dropoff], ['88 Hollin Ct, Harrowen', '517 Pimrow Ridge Dr NW, Harrowen']);
-  // The guard: the card's corner names none of the planner's streets.
+  // The card's corner on none of the planner's streets: the guard this was
+  // (card end elsewhere) is gone by the owner's decision of Nov 2026 — one
+  // Took and a planner of several stops is one route (heldTrip).
   var hx = batchHold('Wexley Pkwy & Brisk Ln, Tellmoor');
   var gx = run(hx, BATCH);
-  eq('[batch] a card whose end is on none of the planner\'s dropoffs batches nothing, '
-     + 'and says why', [hx.dropoff, !!hx.batch, gx.verdict, A.batchWhy(gx.st, hx)],
-     ['Wexley Pkwy & Brisk Ln, Tellmoor', false, 'dropoffs', 'card end elsewhere']);
+  eq('[batch] one Took: a card whose end is on none of the planner\'s dropoffs batches '
+     + 'all the same, the last door its end', [hx.dropoff, !!hx.batch, gx.verdict, A.batchWhy(gx.st, hx)],
+     ['517 Pimrow Ridge Dr NW, Harrowen', true, null, null]);
   var hn = batchHold(null);
   var gn = run(hn, BATCH);
-  eq('[batch] ...nor a card that printed no street at all',
-     [hn.dropoff, !!hn.batch, A.batchWhy(gn.st, hn)], [null, false, 'no card street']);
+  eq('[batch] ...and so does a card that printed no street at all',
+     [hn.dropoff, !!hn.batch, A.batchWhy(gn.st, hn)], ['517 Pimrow Ridge Dr NW, Harrowen', true, null]);
+  // A refusal that stands: the last door read no street.
+  var hx2 = batchHold();
+  var gx2 = run(hx2, BATCH.replace('Address\n517 Pimrow Ridge Dr NW\nHarrowen, GA\n', ''));
   // The list running off the screen: no Waybill under the last stop.
   var hl = batchHold();
   var gl = run(hl, BATCH.replace('\nWaybill', ''));
@@ -1975,8 +1980,8 @@ SEQ.forEach(function (seq) {
   eq('[batch] the sighting that batched says no reason either',
      got.r.why, null);
   eq('[batch] batchWhy is the refusal for THIS hold only',
-     [A.batchWhy(gx.st, hx), A.batchWhy(gx.st, batchHold(undefined, { id: 'b-9' }))],
-     ['card end elsewhere', null]);
+     [A.batchWhy(gx2.st, hx2), A.batchWhy(gx2.st, batchHold(undefined, { id: 'b-9' }))],
+     ['address', null]);
   eq('[batch] a batch\'s reads are not one stop\'s readings: no house tally',
      h.dropoffReads, undefined);
   // The planner line's 'dropoffs' from before the batch goes with it.
@@ -3487,6 +3492,185 @@ SEQ.forEach(function (seq) {
      + 'asked', ends([trip()[1], order('d', 2000, { app: 'doordash',
                                                      dropoff: 'Kestrel Place Blvd, Brookvale' })]),
      [[], false]);
+})();
+
+/* ---- one Took, every planner stop its route; two Tooks, each door by its
+   time (the owner's decision of Nov 2026, after the snap of 20 Nov). Every
+   store, person, street and town invented. ---- */
+(function () {
+  var T = new Date(2026, 10, 20, 18, 0, 0).getTime();   // 18:00 on the clock
+  var M = 18 * 60;                                       // ...as minutes
+  function order(id, took, more) {
+    var o = Object.assign({ id: id, acceptedAt: took - 10000, tookAt: took, minutes: 40,
+                            app: 'uber', pickup: 'Quillon Bao House',
+                            dropoff: 'Larkspur Rd SW & Ombre Cir SW, Dunmore',
+                            dropoffScanned: false, card: { legs: 1, multiOrder: false } },
+                          more || {});
+    o.seenAs = { dropoff: o.dropoff, minutes: o.minutes };
+    A.fieldsOf(o);
+    return o;
+  }
+  function stop(kind, name, by, street, town) {
+    return { kind: kind, orders: 1, name: name, expectedBy: by, street: street || null,
+             city: street ? town || 'Dunmore' : null, state: street ? 'GA' : null, zip: null,
+             line: street ? street + ', ' + (town || 'Dunmore') : null, place: null };
+  }
+  function seen(at, stops, page) {
+    return { at: at, asked: false, whole: false, titled: false, laidOut: false, framed: false,
+             footed: false, app: 'uber', screen: 'uber.planner',
+             page: Object.assign({ top: false, bottom: false }, page || {}),
+             stops: stops, orderCount: null, keep: true };
+  }
+  var P1 = stop('pickup', 'Quillon Bao House', M + 10, '40 Tamsin Way', 'Pyrnel');
+  var P2 = stop('pickup', 'Hollin Wing Shack', M + 14, '12 Pellow Ave', 'Pyrnel');
+  P2.orders = 2;
+  var D1 = stop('dropoff', 'Vesna R.', M + 26, '88 Brackenfold Way');
+  var D2 = stop('dropoff', 'Corvin D.', M + 32, '517 Pimrow Ridge Dr SW');
+  var D3 = stop('dropoff', 'Ilsa M.', M + 39, '186 Tarrowby Lake Dr SW');
+  var D4 = stop('dropoff', 'Odo P.', M + 47, '9 Fennick Ct');
+  var LIST = [P1, P2, D1, D2, D3];
+
+  var st = A.fresh();
+  var o = order('t-1', T);
+  A.took(st, o);
+  var none = A.heldTrip([o], LIST, { app: 'uber', at: T + 9000, st: st });
+  eq('[trip] one Took, two pickups and three dropoffs kept, the foot never seen under the '
+     + 'last: no route yet (the latest so far may not be the last)',
+     [none.d, none.why], [null, 'list foot unseen']);
+  A.sighting(st, o, seen(T + 5000, [D2, D3], { bottom: true }), T + 5000);
+  var got = A.heldTrip([o], LIST, { app: 'uber', at: T + 9000, st: st });
+  eq('[trip] ...the foot read under the last door: every dropoff is the trip\'s, in the '
+     + 'planner\'s order, the last its end',
+     [got.order === o, got.d && got.d.line, got.d && got.d.batch.drops.map(function (d) {
+       return d.line.split(',')[0]; })],
+     [true, '186 Tarrowby Lake Dr SW, Dunmore',
+      ['88 Brackenfold Way', '517 Pimrow Ridge Dr SW', '186 Tarrowby Lake Dr SW']]);
+  var said = A.dropoff(o, got.d, null);
+  A.file(o, got.d, said, st);
+  eq('[trip] ...filed over the card\'s corner, from the planner, the hold a batch of three',
+     [o.dropoff, A.fieldsOf(o).dropoff.from, o.batch, o.drops.length],
+     ['186 Tarrowby Lake Dr SW, Dunmore', 'planner', true, 3]);
+  eq('[trip] ...and asked again with nothing changed, nothing to file',
+     A.heldTrip([o], LIST, { app: 'uber', at: T + 12000, st: st }), { order: null, d: null, why: null });
+  // A stop read on a later page joins the route: its door the new end once
+  // the foot is seen under it.
+  A.sighting(st, o, seen(T + 15000, [D3, D4], { bottom: true }), T + 15000);
+  var grew = A.heldTrip([o], LIST.concat([D4]), { app: 'uber', at: T + 16000, st: st });
+  eq('[trip] a dropoff read on a later page joins the route, the new last its end',
+     [grew.d && grew.d.line, grew.d && grew.d.batch.drops.length],
+     ['9 Fennick Ct, Dunmore', 4]);
+  var stF = A.fresh();
+  var oF = order('t-2', T);
+  A.took(stF, oF);
+  A.sighting(stF, oF, seen(T + 5000, [D1, D2], { bottom: true }), T + 5000);
+  eq('[trip] ...never by a foot read under a stop that is not the latest on the list',
+     A.heldTrip([oF], LIST, { app: 'uber', at: T + 9000, st: stF }).why, 'list foot unseen');
+  var stB = A.fresh();
+  var oB = order('t-3', T);
+  A.took(stB, oB);
+  A.sighting(stB, oB, seen(T + 5000, [D2, D3], { bottom: false }), T + 5000);
+  var footed = seen(T + 6000, [D2, D3]);
+  footed.footed = true;
+  A.sighting(stB, oB, footed, T + 6000);
+  eq('[trip] ...nor by the bar under a block alone (`footed`): only "Waybill" says the foot',
+     A.heldTrip([oB], LIST, { app: 'uber', at: T + 9000, st: stB }).why, 'list foot unseen');
+  var stE = A.fresh();
+  var oE = order('t-4', T);
+  A.took(stE, oE);
+  A.sighting(stE, oE, seen(T - 5000, [D2, D3], { bottom: true }), T - 5000);
+  eq('[trip] ...nor by a foot read before the Took',
+     A.heldTrip([oE], LIST, { app: 'uber', at: T + 9000, st: stE }).why, 'list foot unseen');
+  var oP = order('t-5', T);
+  var stP = A.fresh();
+  A.took(stP, oP);
+  A.sighting(stP, oP, seen(T + 5000, [D2, D3], { bottom: true }), T + 5000);
+  A.file(oP, { line: '517 Pimrow Ridge Dr SW, Dunmore', street: '517 Pimrow Ridge Dr SW',
+               city: 'Dunmore', at: T + 6000 }, { to: 'hold', from: 'press' }, null);
+  eq('[trip] ...never over a press',
+     A.heldTrip([oP], LIST, { app: 'uber', at: T + 9000, st: stP }).why, 'a press');
+  var oA = order('t-6', T, { addOn: true, of: 'x@1' });
+  eq('[trip] ...nor an add-on\'s list',
+     A.heldTrip([oA], LIST, { app: 'uber', at: T + 9000, st: stP }).why, 'an add-on');
+  eq('[trip] ...nor with two Tooks of the app: two offers, whose doors are the cues\'',
+     A.heldTrip([order('t-7', T), order('t-8', T + 60000)], LIST,
+                { app: 'uber', at: T + 90000, st: stP }).why, 'two offers');
+  eq('[trip] ...an order of another app beside it is no second offer',
+     !!A.heldTrip([order('t-9', T, { app: 'doordash' }), order('t-10', T)],
+                  LIST, { app: 'uber', at: T + 9000, st: stP }).d, true);
+
+  // A delivered dropoff the app no longer lists leaves the kept list when a
+  // read shows the top; one the clock says the car cannot have reached yet
+  // (due more than DROP_AHEAD_MIN on) stays, whatever the read's top says.
+  var at1 = T + 40 * 60000;   // 18:40: D1 (18:26) is behind, D2 (18:32) too
+  var kept = A.mergePlanner([D1, D2, D3], [D3], { top: true, bottom: true, at: at1 }, false)
+    .map(function (s) { return s.name; });
+  var early = A.mergePlanner([D1, D2, D3], [D2, D3], { top: true, bottom: false, at: T }, false)
+    .map(function (s) { return s.name; });
+  eq('[trip] a read that shows the list without the doors behind it takes them off the list; '
+     + 'one read at the top while the trip\'s first door is still forty minutes off keeps it',
+     [kept, early], [['Ilsa M.'], ['Vesna R.', 'Corvin D.', 'Ilsa M.']]);
+
+  // Two Tooks: whose door by its time.
+  var a = order('w-a', T, { minutes: 26 });            // due 18:26
+  var b = order('w-b', T + 60000, { minutes: 38 });    // due 18:39
+  var two = [D1, D2, D3];
+  // (A pickup over the first door, as the planner lists one: the list's
+  // head seen above it.)
+  function timed(stT, list, at, page) {
+    A.sighting(stT, [a, b], seen(at, [P2].concat(list), page), at);
+  }
+  var st2 = A.fresh();
+  A.took(st2, [a, b]);
+  timed(st2, [D1, D2, D3], T + 70000);
+  timed(st2, [D1, D2, D3], T + 72000, { bottom: true });
+  var due = A.dueEnds(st2, [a, b], two, { app: 'uber', at: T + 73000 });
+  eq('[due] two Tooks, three dropoffs: each order\'s door is the one due when its card\'s '
+     + 'minutes after the accept say, cue time; the third is nobody\'s',
+     due.files.map(function (f) { return [f.order.id, f.d.line.split(',')[0], f.cue]; }),
+     [['w-a', '88 Brackenfold Way', 'time'], ['w-b', '186 Tarrowby Lake Dr SW', 'time']]);
+  var st3 = A.fresh();
+  A.took(st3, [a, b]);
+  var close = [D1, stop('dropoff', 'Corvin D.', M + 28, '517 Pimrow Ridge Dr SW'), D3];
+  timed(st3, close, T + 70000);
+  timed(st3, close, T + 72000, { bottom: true });
+  var cd = A.dueEnds(st3, [a, b], close, { app: 'uber', at: T + 73000 });
+  eq('[due] ...two doors due within DUE_CLEAR_MIN of each other: neither is filed for the '
+     + 'order due then', cd.notes.map(function (n) { return [n.order.id, n.line, n.why]; })[0],
+     ['w-a', null, 'times too close']);
+  var st4 = A.fresh();
+  A.took(st4, [a, b]);
+  timed(st4, [D1, D2, D3], T + 70000);
+  var once = A.dueEnds(st4, [a, b], two, { app: 'uber', at: T + 71000 });
+  eq('[due] ...one reading of each time decides nothing (DUE_READS_MIN)',
+     [once.files.length, once.notes[0].why], [0, 'no stop on time']);
+  var st5 = A.fresh();
+  A.took(st5, [a, b]);
+  timed(st5, [D1, D2, D3], T + 70000);
+  timed(st5, [D1, D2, D3], T + 72000, { bottom: true });
+  timed(st5, [D1, stop('dropoff', 'Corvin D.', M + 27, '517 Pimrow Ridge Dr SW')], T + 74000);
+  var bad = A.dueEnds(st5, [a, b], two, { app: 'uber', at: T + 75000 });
+  eq('[due] ...a rival\'s one bad time stops the cue for that order, never decides it',
+     bad.files.map(function (f) { return f.order.id; }), ['w-b']);
+  var st6 = A.fresh();
+  var c = order('w-c', T + 60000, { addOn: true, of: 'w-a@1' });
+  A.took(st6, [a, c]);
+  A.sighting(st6, [a, c], seen(T + 70000, [P2].concat(two)), T + 70000);
+  A.sighting(st6, [a, c], seen(T + 72000, [P2].concat(two), { bottom: true }), T + 72000);
+  eq('[due] ...never beside an order of the app with no due time to ask (an add-on)',
+     A.dueEnds(st6, [a, c], two, { app: 'uber', at: T + 73000 }).notes[0].why,
+     'another order with no due time');
+  var st7 = A.fresh();
+  A.took(st7, [a, b]);
+  timed(st7, [D1, D2, D3], T + 70000);
+  timed(st7, [D1, D2, D3], T + 72000, { bottom: true });
+  var late = A.dueEnds(st7, [a, b], two, { app: 'uber', at: T + 73000 });
+  eq('[due] ...and an order already given a door by the screen is not asked',
+     (function () {
+       A.file(a, { line: '517 Pimrow Ridge Dr SW, Dunmore', street: '517 Pimrow Ridge Dr SW',
+                   city: 'Dunmore', at: T + 72500 }, { to: 'hold', from: 'press' }, null);
+       var again = A.dueEnds(st7, [a, b], two, { app: 'uber', at: T + 73000 });
+       return [late.files.length, again.files.map(function (f) { return f.order.id; })];
+     }()), [2, ['w-b']]);
 })();
 
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'

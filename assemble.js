@@ -1262,12 +1262,14 @@
    *   - that last one has its street and town read ('address' otherwise: the
    *     order waits, a later read may have them); an earlier one without is
    *     left off `drops` and does not stop the batch;
-   *   - the CARD's end is one of them (cardEndOk): its corner or door names
-   *     the street of at least one dropoff on the list. One it names none of
-   *     is 'card end elsewhere' — the list may hold an order the driver took
-   *     on the phone with no ✓ Took, and its door would become this order's
-   *     end. A card that printed no street ("Customer dropoff", a town) is no
-   *     witness either way: 'no card street', and nothing is batched.
+   * It used to ask one thing more: that the CARD's end name the street of
+   * one dropoff on the list ('card end elsewhere'; a card that printed none,
+   * 'no card street'), lest the list hold an order taken on the phone with
+   * no ✓ Took. The owner's decision of Nov 2026 (heldTrip, below: "Uber can
+   * have multiple points and one or many restaurants for a single route")
+   * ends that refusal: one Took and a planner of several stops is one route.
+   * The snap of 20 Nov was such a trip, its card's corner on none of its
+   * three streets, and the refusal left the order with no end at all.
    * `why` is the refusal, said on /api/status as `batchWhy`. */
   var BATCH_STREET_WORDS = /^(st|street|rd|road|dr|drive|ln|lane|ave|av|avenue|blvd|bivd|boulevard|ct|court|way|pkwy|pky|parkway|cir|circle|pl|place|trl|trail|ter|terrace|hwy|highway|sq|square|loop|run|path|pass|row|xing|crossing|pt|point|walk|trce|trace|cv|cove|n|s|e|w|ne|nw|se|sw|north|south|east|west|northeast|northwest|southeast|southwest)$/;
 
@@ -1434,8 +1436,6 @@
       last = mine.length === 1 ? mine[0] : tied[tied.length - 1];
     }
     if (!(last.street && last.city)) { out.why = 'address'; return out; }
-    if (!streets.length) { out.why = 'no card street'; return out; }
-    if (!drops.some(onCard)) { out.why = 'card end elsewhere'; return out; }
     out.end = addressOf(last);
     out.endStop = last;
     out.drops = drops.filter(function (s) { return s.street && s.city; }).map(function (s) {
@@ -2341,13 +2341,37 @@
       if (firstNew === -1) firstNew = k;
       lastNew = k;
     });
+    // ...except a kept DROPOFF the read's clock says the car cannot have
+    // delivered yet (stillAhead): the owner's snap of 20 Nov, a whole-screen
+    // read whose title had a stop header straight under it (the title stays
+    // put while the list scrolls under it) was taken for the list's top, and
+    // the trip's first dropoff, due forty minutes on, left the list the hold
+    // keeps — and the route — though the car had not been near it.
     return list.filter(function (e, k) {
       if (e.fromNew) return true;
-      if (whole || headerOnly(e.s)) return false;
-      if (page && page.top && firstNew !== -1 && k < firstNew) return false;
+      if (headerOnly(e.s)) return false;
+      if (whole) return stillAhead(e.s, page);
+      if (page && page.top && firstNew !== -1 && k < firstNew) return stillAhead(e.s, page);
       if (page && page.bottom && lastNew !== -1 && k > lastNew) return false;
       return true;
     }).map(function (e) { return e.fromNew ? e.s : Object.assign({}, e.s); });
+  }
+
+  /* Whether a kept stop is a dropoff due more than DROP_AHEAD_MIN after the
+   * read (`page.at`) by its own "Expected by": not delivered, whatever a read
+   * that does not show it says about the top of the list. A stop delivered
+   * that early is rare; one scrolled out of a read is not. CHOSEN, not
+   * measured: no planner read of a stop just delivered is on file to fit it
+   * to. A stop with no time, a pickup, or a page with no clock is trimmed as
+   * it always was. */
+  var DROP_AHEAD_MIN = 20;
+  function stillAhead(s, page) {
+    if (!s || s.kind !== 'dropoff' || typeof s.expectedBy !== 'number' || !isFinite(s.expectedBy)
+        || !page || typeof page.at !== 'number') return false;
+    var d = (s.expectedBy - minuteOf(page.at)) % 1440;
+    if (d > 720) d -= 1440;
+    if (d < -720) d += 1440;
+    return d > DROP_AHEAD_MIN;
   }
 
   /* `upper` and `lower` as one list, lower's first stop at upper's `k`. Each
@@ -2416,7 +2440,7 @@
    * and the unprompted candidates already decided for this hold. */
   function fresh() {
     return { pages: [], epoch: {}, holdId: null, said: {}, refused: [], verdicts: [],
-             views: [], unowned: [] };
+             views: [], unowned: [], times: [], feet: [] };
   }
 
   function holdIdOf(h) {
@@ -2451,6 +2475,8 @@
       var since = Math.min.apply(null, held.map(function (o) { return o.acceptedAt; }));
       st.holdId = ids;
       st.said = {};
+      st.times = [];
+      st.feet = [];
       st.pages = st.pages.filter(function (p) {
         if (p.at >= since) return true;
         if (p.pending) refuse(st, p, 'before the Took');
@@ -2462,6 +2488,8 @@
     if (id === st.holdId) return;
     st.holdId = id;
     st.said = {};
+    st.times = [];
+    st.feet = [];
     st.pages = st.pages.filter(function (p) {
       if (held && p.at >= held.acceptedAt) return true;
       if (p.pending) refuse(st, p, held ? 'before the Took' : 'the hold ended');
@@ -2497,10 +2525,20 @@
    * delivery from being filed every ten seconds, and the planner's address
    * no longer passes through it. */
   function sighting(st, held, s, now) {
+    var out = sightingOf(st, held, s, now);
+    // ...and every "Expected by" the read gave a dropoff, kept for the time
+    // cue (noteTimes, dueEnds), after the read is decided: the hold the read
+    // is about is the one took() just set.
+    noteTimes(st, held, s, now);
+    noteFoot(st, held, s, now);
+    return out;
+  }
+
+  function sightingOf(st, held, s, now) {
     // The orders in the car as a list: one is decided exactly as below, two
     // by sightingMany.
     if (Array.isArray(held)) {
-      if (held.length < 2) return sighting(st, held[0] || null, s, now);
+      if (held.length < 2) return sightingOf(st, held[0] || null, s, now);
       // Orders of two apps in the car (the owner's snaps of 31 Oct): a
       // screen that names its app is about that app's order alone, so with
       // ONE order of it held it is decided exactly as with that order alone
@@ -2862,7 +2900,7 @@
   function pageOf(st, at) {
     for (var i = st.pages.length - 1; i >= 0; i--) {
       var p = st.pages[i];
-      if (p.at === at) return { top: p.top, bottom: p.bottom, app: p.app };
+      if (p.at === at) return { top: p.top, bottom: p.bottom, app: p.app, at: p.at };
     }
     return null;
   }
@@ -3578,6 +3616,419 @@
     return typeof s.line === 'string' && s.line ? s.line.split(',')[0] : null;
   }
 
+  /* ---------- one Took, every stop on its planner: one route (Nov 2026) -----
+   *
+   * The owner, after the snap of 20 Nov: "If it sees a drop off point it
+   * should route it, Uber can have multiple points and one or many
+   * restaurants for a single route." That snap: ONE ✓ Took on an Uber card
+   * of about an hour, its end a corner ("<A> Rd SW & <B> Cir SW, <Town>"),
+   * one store printed, legs 1, no "orders" word read; the Trip Planner then
+   * listed two pickups (one of "2 orders") and three dropoffs, every one
+   * read with its door within twenty seconds of the Took. batchPlan refused
+   * it, 'card end elsewhere' (the corner names none of the three streets),
+   * and the list was never seen whole on one page or a stitch, so nothing
+   * batched; the panel said "3 dropoffs: end not guessed", two ⌖ presses
+   * found nothing (a press answers one dropoff), and the end was filed 46 s
+   * after the Took, `only`, off a read that happened to show the last stop
+   * alone. The stops were never the offer's rivals: they were its route.
+   *
+   * So with ONE offer of the planner's app held (one Took; an order of
+   * another app beside it is not on this list), the planner the hold KEEPS —
+   * every page merged (mergePlanner), so a stop read on a later page joins
+   * it, and a delivered stop the app no longer lists leaves it when a read
+   * shows the list's top or foot past it — is that order's trip whenever it
+   * lists two dropoffs or more: batchPlan's end (the latest "Expected by",
+   * Uber's own route order; a tie to the card's street, else the last
+   * listed) and every door on `drops`, in the planner's order, the pickups
+   * searched as they already are (armHeldPickups). Map view then draws the
+   * car, the pickups, every earlier door and the end (MV.heldDrops), and the
+   * panel says "3 drops". Asked by server.js after every planner line merges
+   * into the hold; filed again only when the end or the doors changed. Never
+   * over a press (the driver's own word for the end), never an add-on's
+   * (`addOn`, `of`: batchPlan's 'an add-on'), never off a read older than the
+   * Took, never a pickup of the order as its end. Two Tooks are two offers,
+   * and their doors are attribute()'s and dueEnds' to give.
+   *
+   * Returns {order, d, why}: `d` a batch candidate for server.js to file
+   * through the one road (dropoffArrived, forced, cue 'route'), or null with
+   * `why` (batchPlan's word, 'a press', 'two offers', 'a pickup', or null
+   * for nothing changed). Read only. */
+  // The stop a read showed last with "Waybill" under it (`page.bottom`,
+  // offer_parser.planner_ends), since a held order's Took: the trip's last
+  // stop by the screen's own word. Not `footed` alone — the bar under a
+  // block — which on that snap was also read under a stop with another
+  // header cut straight below it. Kept for heldTrip; took() empties it.
+  var FEET_MAX = 20;
+  function noteFoot(st, held, s, now) {
+    var orders = (Array.isArray(held) ? held : [held]).filter(Boolean);
+    if (!orders.length || !s || s.screen !== 'uber.planner' || !Array.isArray(s.stops)
+        || !(s.page && s.page.bottom === true)) return;
+    var at = typeof s.at === 'number' ? s.at : now;
+    if (!orders.some(function (o) { var t = tookOf(o); return t !== null && at >= t; })) return;
+    var x = s.stops[s.stops.length - 1];
+    if (!x || typeof x !== 'object' || (x.kind && x.kind !== 'dropoff')) return;
+    var door = stopDoor(x);
+    if (!named(x) && !door) return;
+    st.feet = st.feet || [];
+    st.feet.push({ at: at, name: x.name || null, door: door });
+    while (st.feet.length > FEET_MAX) st.feet.shift();
+  }
+
+  function heldTrip(orders, stops, ctx) {
+    var out = { order: null, d: null, why: null };
+    var app = ctx && typeof ctx.app === 'string' ? ctx.app : null;
+    var at = ctx && typeof ctx.at === 'number' ? ctx.at : null;
+    var mine = (orders || []).filter(function (o) {
+      return o && (!app || !o.app || o.app === app);
+    });
+    if (mine.length !== 1) {
+      out.why = mine.length ? 'two offers' : null;
+      return out;
+    }
+    var o = mine[0];
+    var plan = batchPlan(o, stops);
+    if (!plan.end) {
+      out.why = plan.why;
+      return out;
+    }
+    var t0 = tookOf(o);
+    if (at === null || t0 === null || at < t0) return out;
+    // ...and the end seen with the list's foot under it since the Took: a
+    // stop that is the latest on the list kept SO FAR may not be the trip's
+    // last (on that snap the first planner line held two of the three
+    // dropoffs), and the end is what the GPS drop puts the order down at.
+    var st = ctx && ctx.st;
+    var feet = st && Array.isArray(st.feet) ? st.feet : [];
+    if (!feet.some(function (r) { return r.at >= t0 && readingOf(plan.endStop, r); })) {
+      out.why = 'list foot unseen';
+      return out;
+    }
+    var f = o.fields && o.fields.dropoff;
+    if (f && f.from === 'press') {
+      out.why = 'a press';
+      return out;
+    }
+    var lines = function (ds) {
+      return (Array.isArray(ds) ? ds : []).map(function (x) { return streetKey(x.line); }).join('\n');
+    };
+    if (o.batch === true && sameStreet(o.dropoff, plan.end.line)
+        && lines(o.drops) === lines(plan.drops)) return out;
+    var d = candidate(plan.end, plan.endStop, { at: at }, false, false);
+    d.app = app;
+    d.batch = { drops: plan.drops };
+    if (aPickupOfAny(mine, d)) {
+      out.why = 'a pickup';
+      return out;
+    }
+    out.order = o;
+    out.d = d;
+    return out;
+  }
+
+  /* ---------- two Tooks on one planner: whose door by its time (Nov 2026) ----
+   *
+   * With ONE Took the planner's stops are that offer's route, every one
+   * (heldTrip, below: the owner's decision of Nov 2026). With two or more
+   * offers of the planner's app held — two ✓ Tooks, one merged list — the
+   * question is still whose door is whose, and the cues above (the store,
+   * the deadline, growth, elimination, the card's street) are joined by the
+   * order's TIME: an Uber order is due about its card's minutes after the
+   * accept, and the planner prints each stop's "Expected by".
+   *
+   * dueEnds asks it of the planner the hold keeps, after every planner line
+   * merges into it (server.js heldPlanFiled), for each order of the app whose
+   * end the screen has NOT filed (filedEnd: the card's end, or none).
+   *
+   * THE DUE INTERVAL: the card's own "Deliver by" where it printed one, else
+   * its minutes after the accept — which happened between the card reaching
+   * the slot (acceptedAt) and the driver's ✓ Took (tookAt), so [acceptedAt,
+   * tookAt] plus the minutes. A Took more than DUE_NEAR_MIN after its card
+   * says too little about when the clock started, and is no due at all; an
+   * Uber add-on's minutes are what it adds to a trip, not when it is due:
+   * none either.
+   *
+   * THE READINGS: every dropoff's "Expected by" each planner read gave
+   * (noteTimes: pressed or not, card box or whole), for DUE_READ_MS after
+   * the order's Took only, matched to the kept stop by its street
+   * (streetCore) or its customer's name (readingOf). A stop is the order's
+   * when all of:
+   *   - every dropoff on the list has a reading (a stop with no time could be
+   *     the one), and the stop has DUE_READS_MIN readings within DUE_NEAR_MIN
+   *     of the interval, the median of all its readings inside it too: one
+   *     bad OCR time neither puts a stop on time nor keeps one from it;
+   *   - every OTHER dropoff's every reading is at least DUE_CLEAR_MIN further
+   *     off than the stop's median: a rival's bad reading can only stop the
+   *     cue, never decide it;
+   *   - Uber lists the stops in time order, so a dropoff the rig has not seen
+   *     is above the first seen or below the last: the stop has a seen rival
+   *     later than it or was read with the list's foot under it (`foot`), and
+   *     one earlier or was read with a pickup or the list's top over it
+   *     (`head`) — an unseen stop is then further off than a seen rival;
+   *   - the stop read its street and town (on the kept list, else on one of
+   *     its readings).
+   * DUE_NEAR_MIN and DUE_CLEAR_MIN come off the owner's snap of 20 Nov: the
+   * planner's time for the trip's last door was within a minute of the card's
+   * minutes after the Took; its three dropoffs were six and seven minutes
+   * apart; and the same stops' times moved by four to six minutes over the
+   * next twelve as the run slipped, which is why only DUE_READ_MS of readings
+   * count — about two minutes of slip at that rate, inside DUE_NEAR_MIN. Four
+   * and four is room for the slip and the card's rounding, and still refuses
+   * two stops as close as that snap's.
+   *
+   * WHOSE (dueGuard). Never a door another held order could have: another
+   * order's filed end, a street another order's card names (cardHas), a door
+   * in another town than this order's card printed (townClash), any held
+   * order's pickup (aPickupOfAny), or a door attribute() — the two-order
+   * cues, elimination among them — gives another order or cannot settle
+   * ('cues disagree'). And never while another order of the app is held with
+   * no filed end whose due interval is within DUE_NEAR_MIN of the door, or
+   * that has none to ask (an add-on). Never over a screen-filed end, a press
+   * above all: an order with one is not asked, and a later press outranks a
+   * door filed here as it outranks any planner read. Settled stands: no cue
+   * means no filing — a door no cue gives anyone is filed onto nobody (it is
+   * still on the planner the hold keeps, and on the panel's stops).
+   *
+   * Returns {files: [{order, d, cue: 'time'}], notes: [{order, line, why}],
+   * settled}: `files` for server.js to file through the one road
+   * (dropoffArrived, forced); `settled` whether every order of the app has a
+   * screen-filed end now. Read only. */
+  var DUE_NEAR_MIN = 4;
+  var DUE_CLEAR_MIN = 4;
+  var DUE_READ_MS = 4 * 60000;
+  var DUE_READS_MIN = 2;
+  // How many readings are kept at once. At a read a second showing three
+  // dropoffs for DUE_READ_MS that is 720; most reads show two.
+  var TIMES_MAX = 600;
+
+  function tookOf(o) {
+    return o && typeof o.tookAt === 'number' ? o.tookAt
+      : o && typeof o.acceptedAt === 'number' ? o.acceptedAt : null;
+  }
+
+  // Minutes past the clock's midnight for a moment (ms), seconds kept.
+  function minuteOf(ms) {
+    var d = new Date(ms);
+    return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
+  }
+
+  function dueOf(o) {
+    if (!o || o.addOn || o.of) return null;
+    if (typeof o.deliverBy === 'number' && isFinite(o.deliverBy)) {
+      return { lo: o.deliverBy, hi: o.deliverBy };
+    }
+    var m = typeof o.minutes === 'number' ? o.minutes
+      : o.seenAs && typeof o.seenAs.minutes === 'number' ? o.seenAs.minutes : null;
+    var took = tookOf(o);
+    var seen = typeof o.acceptedAt === 'number' ? o.acceptedAt : took;
+    if (took === null || !(m > 0) || !isFinite(m)) return null;
+    var from = Math.min(seen, took), span = Math.abs(took - seen) / 60000;
+    if (span > DUE_NEAR_MIN) return null;
+    var lo = minuteOf(from + m * 60000);
+    return { lo: lo, hi: lo + span };
+  }
+
+  // A clock time against the due interval, in minutes: negative before it,
+  // positive after it, nought inside; midnight wrapped.
+  function dueSide(due, t) {
+    var d = (t - due.lo) % 1440;
+    if (d > 720) d -= 1440;
+    if (d < -720) d += 1440;
+    var span = due.hi - due.lo;
+    return d < 0 ? d : d > span ? d - span : 0;
+  }
+
+  function median(xs) {
+    var s = xs.slice().sort(function (a, b) { return a - b; });
+    var k = Math.floor(s.length / 2);
+    return s.length % 2 ? s[k] : (s[k - 1] + s[k]) / 2;
+  }
+
+  /* Every dropoff's "Expected by" a planner read gave, kept on the
+   * assembler's state for DUE_READ_MS after a held order's Took (took()
+   * empties it when the hold changes). Pressed reads count: a press is the
+   * driver's question, and the time it read is read as well as any. A
+   * stop with no time, or with neither a name nor a door to know it by
+   * again, says nothing here. `foot`: the stop is the last on a read that
+   * shows the list's foot under it; `head`: a pickup, or the list's top,
+   * straight over it on the read. */
+  function noteTimes(st, held, s, now) {
+    var orders = (Array.isArray(held) ? held : [held]).filter(Boolean);
+    if (!orders.length || !s || s.screen !== 'uber.planner' || !Array.isArray(s.stops)) return;
+    var at = typeof s.at === 'number' ? s.at : now;
+    if (!orders.some(function (o) {
+      var t = tookOf(o);
+      return t !== null && at >= t && at <= t + DUE_READ_MS;
+    })) return;
+    var stops = s.stops.filter(function (x) { return !!x && typeof x === 'object'; });
+    var page = s.page || {};
+    st.times = st.times || [];
+    stops.forEach(function (x, i) {
+      if (x.kind !== 'dropoff' || x.partial === 'header') return;
+      if (typeof x.expectedBy !== 'number' || !isFinite(x.expectedBy)) return;
+      var door = stopDoor(x);
+      if (!named(x) && !door) return;
+      var prev = i > 0 ? stops[i - 1] : null;
+      st.times.push({
+        at: at, name: x.name || null, expectedBy: x.expectedBy, door: door,
+        street: x.street || null, city: x.city || null, state: x.state || null,
+        zip: x.zip || null, line: x.line || null,
+        foot: i === stops.length - 1 && (page.bottom === true || s.footed === true),
+        head: prev ? prev.kind === 'pickup' : page.top === true });
+    });
+    while (st.times.length > TIMES_MAX) st.times.shift();
+  }
+
+  // Whether a reading is of the kept stop `s`: the same street (streetCore:
+  // a house number misread is still the stop), or, a door short, the same
+  // customer (sameName, initials agreeing) — never two names that clash.
+  function readingOf(s, r) {
+    var clash = named(s) && named(r) && !sameName(s, r);
+    if (clash) return false;
+    var ds = stopDoor(s), dr = r.door;
+    if (ds && dr) return streetCore(ds.split(',')[0]) === streetCore(dr.split(',')[0]);
+    if (!named(s) || !named(r)) return false;
+    var ia = initialOf(s.name), ib = initialOf(r.name);
+    return !(ia && ib && ia !== ib);
+  }
+
+  /* The time cue for one order: {stop, addr, minutes, at, why}: the stop,
+   * its door (the kept stop's or a reading's), its time as read, the newest
+   * reading of it; or `why` not. */
+  function dueStop(st, o, drops) {
+    var out = { stop: null, addr: null, minutes: null, at: null, why: null };
+    var due = dueOf(o);
+    if (!due) {
+      out.why = 'no due time';
+      return out;
+    }
+    var t0 = tookOf(o);
+    var per = drops.map(function () { return []; });
+    (st.times || []).forEach(function (r) {
+      if (r.at < t0 || r.at > t0 + DUE_READ_MS) return;
+      var hit = [];
+      drops.forEach(function (s, i) { if (readingOf(s, r)) hit.push(i); });
+      if (hit.length === 1) per[hit[0]].push(r);
+    });
+    var off = per.map(function (p) {
+      return p.map(function (r) { return Math.abs(dueSide(due, r.expectedBy)); });
+    });
+    if (per.some(function (p) { return !p.length; })) {
+      out.why = 'times unread';
+      return out;
+    }
+    var on = [];
+    off.forEach(function (xs, i) {
+      var near = xs.filter(function (x) { return x <= DUE_NEAR_MIN; }).length;
+      if (near >= DUE_READS_MIN && median(xs) <= DUE_NEAR_MIN) on.push(i);
+    });
+    if (!on.length) {
+      out.why = 'no stop on time';
+      return out;
+    }
+    if (on.length > 1) {
+      out.why = 'times too close';
+      return out;
+    }
+    var w = on[0], wd = median(off[w]);
+    var close = off.some(function (xs, i) {
+      return i !== w && Math.min.apply(null, xs) < wd + DUE_CLEAR_MIN;
+    });
+    if (close) {
+      out.why = 'times too close';
+      return out;
+    }
+    var side = per.map(function (p) {
+      return median(p.map(function (r) { return dueSide(due, r.expectedBy); }));
+    });
+    var later = side.some(function (x, i) { return i !== w && x > side[w]; });
+    var earlier = side.some(function (x, i) { return i !== w && x < side[w]; });
+    if (!later && !per[w].some(function (r) { return r.foot; })) {
+      out.why = 'list foot unseen';
+      return out;
+    }
+    if (!earlier && !per[w].some(function (r) { return r.head; })) {
+      out.why = 'list head unseen';
+      return out;
+    }
+    var s = drops[w];
+    var addr = s.street && s.city ? s : per[w].filter(function (r) {
+      return r.street && r.city && r.door;
+    }).pop() || null;
+    if (!addr) {
+      out.why = 'address';
+      return out;
+    }
+    out.stop = s;
+    out.addr = addr;
+    out.minutes = Math.round(median(per[w].map(function (r) { return r.expectedBy; })));
+    out.at = Math.max.apply(null, per[w].map(function (r) { return r.at; }));
+    return out;
+  }
+
+  // A candidate off the kept stop `s` (its door `addr`, the stop's or a
+  // reading's), as heldPlanEnds makes one: rank `planner`, labelled.
+  function dueCandidate(s, addr, at, app, minutes) {
+    var d = candidate(addressOf(addr), s, { at: at }, false, false);
+    if (!d.line) d.line = addr.street + ', ' + addr.city;
+    d.app = app;
+    if (typeof minutes === 'number') {
+      d.expectedBy = minutes;
+      if (d.stop && d.stop.expectedBy === null) d.stop.expectedBy = minutes;
+    }
+    return d;
+  }
+
+  // Why the door `d` may not be order `o`'s by a cue of this section, or
+  // null: see WHOSE above.
+  function dueGuard(st, mine, o, d) {
+    if (aPickupOfAny(mine, d)) return 'a pickup';
+    if (townClash(o, d)) return 'another town';
+    var core = streetCore(d.street || d.line.split(',')[0]);
+    var t = typeof d.expectedBy === 'number' ? d.expectedBy : null;
+    for (var i = 0; i < mine.length; i++) {
+      var x = mine[i];
+      if (x === o) continue;
+      if (sameStreet(filedEnd(x), d.line)) return 'another order\'s door';
+      if (core && cardHas(x, core)) return 'another card\'s street';
+      if (filedEnd(x)) continue;
+      var dx = dueOf(x);
+      if (!dx) return 'another order with no due time';
+      if (t !== null && Math.abs(dueSide(dx, t)) <= DUE_NEAR_MIN) return 'another order due then';
+    }
+    var a = attribute(st, mine, d);
+    if (a.order && a.order !== o) return 'another order\'s by ' + a.cue;
+    if (a.why === 'cues disagree') return 'cues disagree';
+    return null;
+  }
+
+  function dueEnds(st, orders, stops, ctx) {
+    var out = { files: [], notes: [], settled: false };
+    var app = ctx && typeof ctx.app === 'string' ? ctx.app : null;
+    var at = ctx && typeof ctx.at === 'number' ? ctx.at : null;
+    var mine = (orders || []).filter(function (o) {
+      return o && (!app || !o.app || o.app === app);
+    });
+    var drops = headed(stops).filter(function (s) { return s.kind === 'dropoff'; });
+    if (mine.length < 2 || !drops.length || at === null) return out;
+    mine.forEach(function (o) {
+      if (filedEnd(o)) return;
+      var t0 = tookOf(o);
+      if (t0 === null || at < t0) return;
+      var time = dueStop(st, o, drops);
+      var d = time.stop ? dueCandidate(time.stop, time.addr, Math.max(at, time.at || at), app,
+                                       time.minutes) : null;
+      var why = time.why;
+      if (d) {
+        var g = dueGuard(st, mine, o, d);
+        if (g) { why = g; d = null; }
+      }
+      if (d) out.files.push({ order: o, d: d, cue: 'time' });
+      out.notes.push({ order: o, line: d ? d.line : null, why: d ? null : why });
+    });
+    out.settled = mine.every(function (o) { return !!filedEnd(o); });
+    return out;
+  }
+
   /* The planner with two orders held: every dropoff a list seen whole shows,
    * read whole (street and town), as a candidate of its own — with what the
    * cues need: its key and time, the store when the list is ONE pickup and
@@ -3841,5 +4292,9 @@
            retryUnowned: retryUnowned,
            // ...and the held planner's doors by the card's street (31 Oct, 21:46).
            heldPlanEnds: heldPlanEnds,
+           // ...and one Took's planner as its route, and two Tooks' doors by
+           // their times (Nov 2026).
+           heldTrip: heldTrip, dueEnds: dueEnds, dueOf: dueOf,
+           DUE_NEAR_MIN: DUE_NEAR_MIN, DUE_CLEAR_MIN: DUE_CLEAR_MIN, DUE_READ_MS: DUE_READ_MS,
            plannerCandidates: plannerCandidates, reOffer: reOffer };
 }));

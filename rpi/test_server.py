@@ -6726,13 +6726,15 @@ try:
     eq('[batch] ...arriving at the LAST door and leaving does, once, by the GPS',
        ([r.get('by') for r in _drops('b-trip')], _holding(_gb)), (['gps'], None))
 
-    # The guard: the card's corner is on none of the planner's dropoffs.
+    # The card's corner on none of the planner's dropoffs: a batch all the
+    # same since the owner's decision of Nov 2026 (one Took and a planner of
+    # several stops is one route; Assemble.heldTrip).
     _took(_gb, 'b-else', dropoff='Wexley Pkwy & Brisk Ln, Tellmoor')
     _bplanner()
     _bh = _holding(_gb) or {}
-    eq('[batch] a card whose end is on none of the planner\'s dropoffs is no batch, and '
-       '/api/status says why', (_bh.get('dropoff'), _bh.get('batch'), _bh.get('batchWhy')),
-       ('Wexley Pkwy & Brisk Ln, Tellmoor', False, 'card end elsewhere'))
+    eq('[batch] one Took: a card whose end is on none of the planner\'s dropoffs is a batch '
+       'all the same, the last door its end', (_bh.get('dropoff'), _bh.get('batch'), _bh.get('batchWhy')),
+       (_BLAST, True, None))
     post(_gb, '/api/delivered', {})
     # A list whose foot is off the screen. Its customers named afresh: this
     # harness sends no offer line, so every Took here is dated from the same
@@ -10156,6 +10158,167 @@ try:
 finally:
     stop(_ep)
 
+# The owner's decision of Nov 2026, after the snap of 20 Nov ("If it sees a
+# drop off point it should route it, Uber can have multiple points and one or
+# many restaurants for a single route"; names, stores, streets and towns
+# invented): ONE ✓ Took on a card whose end is a corner on none of the
+# planner's streets, then the Trip Planner's two pickups (one of two orders)
+# and three dropoffs, read over pages and never whole. Every dropoff is the
+# trip's (Assemble.heldTrip), the last its end once "Waybill" was read under
+# it, cue 'route'; no ⌖ press. Then a stop read on a later page joins the
+# route, and a door delivered leaves it — never one the car cannot have
+# reached yet.
+_RM = time.localtime().tm_hour * 60 + time.localtime().tm_min
+
+
+def _rstop(kind, name, by, street, town='Dunmore', orders=1):
+    return {'kind': kind, 'orders': orders, 'name': name, 'expectedBy': by % 1440,
+            'street': street, 'city': town if street else None,
+            'state': 'GA' if street else None, 'zip': None,
+            'line': street + ', ' + town if street else None, 'place': None, 'partial': None}
+
+
+def _rread(stops, whole=False, top=False, bottom=False, line=False):
+    at = int(time.time() * 1000)
+    msgs = [{'sighting': {'asked': False, 'whole': whole, 'titled': whole, 'laidOut': False,
+                          'framed': False, 'footed': False, 'app': 'uber',
+                          'screen': 'uber.planner', 'page': {'top': top, 'bottom': bottom},
+                          'stops': stops, 'orderCount': None, 'keep': False, 'at': at}}]
+    if line:
+        msgs.append({'planner': {'stops': [dict((k, v) for k, v in s.items() if k != 'partial')
+                                           for s in stops],
+                                 'asked': False, 'keep': False, 'ms': None, 'at': at}})
+    _say(*msgs)
+    time.sleep(0.2)
+
+
+_RP1 = _rstop('pickup', 'Quillon Bao House', _RM + 8, '40 Tamsin Way', 'Pyrnel')
+_RP2 = _rstop('pickup', 'Hollin Wing Shack', _RM + 14, '12 Pellow Ave', 'Pyrnel', orders=2)
+_RD1 = _rstop('dropoff', 'Vesna R.', _RM + 40, '88 Brackenfold Way')
+_RD2 = _rstop('dropoff', 'Corvin D.', _RM + 46, '517 Pimrow Ridge Dr SW')
+_RD3 = _rstop('dropoff', 'Ilsa M.', _RM + 53, '186 Tarrowby Lake Dr SW')
+_RD4 = _rstop('dropoff', 'Odo P.', _RM + 61, '9 Fennick Ct')
+
+
+def _rstate(base):
+    h = get(base, '/api/status').get('holding') or {}
+    return (h.get('dropoff'), ((h.get('fields') or {}).get('dropoff') or {}).get('from'),
+            [d.get('line') for d in (h.get('drops') or [])],
+            (h.get('planner') or {}).get('unfiled'))
+
+
+def _rcard(oid, minutes=56.0, pickup='Quillon Bao House (40 Tamsin Way)',
+           dropoff='Larkspur Rd SW & Ombre Cir SW, Dunmore'):
+    return _card(oid, 30.0, minutes=minutes, miles=14.0, pickup=pickup, dropoff=dropoff)
+
+
+_rp, _rb, _rj, _rh = _cserver('route-one', CARRY_TWO='0')
+try:
+    _took2(_rb, _rcard('r-1'))
+    _rread([_RP1, _RP2, _RD1, _RD2, _RD3], whole=True, line=True)
+    _r0 = _rstate(_rb)
+    _rread([_RD2, _RD3], bottom=True)
+    _rread([_RD1, _RD2, _RD3], whole=True, line=True)
+    _r1 = _rstate(_rb)
+    eq('[route] one Took, two pickups (one of two orders) and three dropoffs over pages: '
+       'nothing before "Waybill" is read under the last door; then every dropoff is the trip\'s, '
+       'the last its end, from the planner, and "end not guessed" goes',
+       (_r0, _r1),
+       (('Larkspur Rd SW & Ombre Cir SW, Dunmore', 'card', [], 'dropoffs'),
+        ('186 Tarrowby Lake Dr SW, Dunmore', 'planner',
+         ['88 Brackenfold Way, Dunmore', '517 Pimrow Ridge Dr SW, Dunmore',
+          '186 Tarrowby Lake Dr SW, Dunmore'], None)))
+    eq('[route] ...one mark row, cue route, a batch of three, no press',
+       [(r.get('cue'), r.get('batch'), r.get('drops'), r.get('asked'))
+        for r in _rows(_rj, 'mark') if r.get('dropoff')],
+       [('route', True, 3, False)])
+    _rread([_RD3, _RD4], bottom=True)
+    _rread([_RD3, _RD4], whole=True, line=True)
+    eq('[route] a dropoff read on a later page joins the route, the new last its end',
+       _rstate(_rb)[0:3:2],
+       ('9 Fennick Ct, Dunmore', ['88 Brackenfold Way, Dunmore', '517 Pimrow Ridge Dr SW, Dunmore',
+                                  '186 Tarrowby Lake Dr SW, Dunmore', '9 Fennick Ct, Dunmore']))
+finally:
+    stop(_rp)
+
+# ...and the list as the car drives it: a whole read with the first door
+# gone, due minutes ago (delivered), takes it off the route; a read whose top
+# the reader mistook while the first door is still forty minutes off keeps it.
+_rdp, _rdb, _rdj, _rdh = _cserver('route-done', CARRY_TWO='0')
+try:
+    _took2(_rdb, _rcard('r-2'))
+    _done = _rstop('dropoff', 'Vesna R.', _RM - 3, '88 Brackenfold Way')
+    _rread([_RP1, _done, _RD2, _RD3], whole=True, bottom=True, line=True)
+    _rd0 = len(_rstate(_rdb)[2])
+    _rread([_RD2, _RD3], whole=True, top=True, bottom=True, line=True)
+    _rd1 = _rstate(_rdb)
+    eq('[route] a delivered door the planner no longer lists leaves the route; the end stays',
+       (_rd0, _rd1[0], _rd1[2]),
+       (3, '186 Tarrowby Lake Dr SW, Dunmore',
+        ['517 Pimrow Ridge Dr SW, Dunmore', '186 Tarrowby Lake Dr SW, Dunmore']))
+finally:
+    stop(_rdp)
+
+_rkp, _rkb, _rkj, _rkh = _cserver('route-kept', CARRY_TWO='0')
+try:
+    _took2(_rkb, _rcard('r-3'))
+    _rread([_RP1, _RD1, _RD2, _RD3], whole=True, bottom=True, line=True)
+    _rread([_RD2, _RD3], whole=True, top=True, line=True)
+    eq('[route] ...never a door the car cannot have reached yet, whatever a read says of '
+       'the top', len(_rstate(_rkb)[2]), 3)
+finally:
+    stop(_rkp)
+
+# One restaurant, three customers, one Took: the same, off one read with the
+# foot on it; and with the NucBox down the route is filed all the same (the
+# planner is the witness, not a search).
+_rnp, _rnb, _rnj, _rnh = _cserver('route-nbx', CARRY_TWO='0',
+                                  NUCBOX_SEARCH='http://127.0.0.1:9', NUCBOX_TIMEOUT_MS='300')
+try:
+    _took2(_rnb, _rcard('r-4', minutes=48.0))
+    _one = _rstop('pickup', 'Quillon Bao House', _RM + 8, '40 Tamsin Way', 'Pyrnel', orders=3)
+    _rread([_one, _RD1, _RD2, _RD3], whole=True, bottom=True, line=True)
+    eq('[route] one restaurant, three dropoffs, the NucBox down: every door routed, the last '
+       'the end', _rstate(_rnb)[0:3:2],
+       ('186 Tarrowby Lake Dr SW, Dunmore', ['88 Brackenfold Way, Dunmore',
+                                             '517 Pimrow Ridge Dr SW, Dunmore',
+                                             '186 Tarrowby Lake Dr SW, Dunmore']))
+finally:
+    stop(_rnp)
+
+# Lite has no planner flow and no map: the route is not its to file.
+_rlp, _rlb, _rlj, _rlh = _cserver('route-lite', CARRY_TWO='0', LITE='1')
+try:
+    _took2(_rlb, _rcard('r-5'))
+    _rread([_RP1, _RD1, _RD2, _RD3], whole=False, bottom=True)
+    _rread([_RP1, _RD1, _RD2, _RD3], whole=True, line=True)
+    eq('[route] ...and under lite nothing of it: the card\'s end stays',
+       _rstate(_rlb)[0:3], ('Larkspur Rd SW & Ombre Cir SW, Dunmore', 'card', []))
+finally:
+    stop(_rlp)
+
+# TWO Tooks on one planner (carrying two on): each order's door by its time —
+# the card's minutes after the accept against each stop's "Expected by", read
+# twice — cue 'time'; the door neither is due at is nobody's, and waits.
+_rtp, _rtb, _rtj, _rth = _cserver('route-two', CARRY_TWO='1')
+try:
+    # (Times off the clock now, so a slow suite's minutes do not slip them.)
+    _tm = time.localtime().tm_hour * 60 + time.localtime().tm_min
+    _t1 = _rstop('dropoff', 'Vesna R.', _tm + 40, '88 Brackenfold Way')
+    _t2 = _rstop('dropoff', 'Corvin D.', _tm + 47, '517 Pimrow Ridge Dr SW')
+    _t3 = _rstop('dropoff', 'Ilsa M.', _tm + 53, '186 Tarrowby Lake Dr SW')
+    _took2(_rtb, _rcard('r-a', minutes=40.0))
+    _took2(_rtb, _rcard('r-b', minutes=53.0, pickup='Hollin Wing Shack',
+                        dropoff='Wexley Pkwy & Brisk Ln, Dunmore'))
+    _rread([_RP2, _t1, _t2, _t3])
+    _rread([_RP2, _t1, _t2, _t3], whole=True, bottom=True, line=True)
+    eq('[route] two Tooks merged in one planner: each order\'s door is the one due at its '
+       'card\'s minutes after the accept, cue time; the third waits for a cue',
+       [(o.get('dropoff'), o.get('cue')) for o in _orders(_rtb)],
+       [('88 Brackenfold Way, Dunmore', 'time'), ('186 Tarrowby Lake Dr SW, Dunmore', 'time')])
+finally:
+    stop(_rtp)
+
 # ...and with carrying two ON the trip is one order to the cap: an add-on
 # joins past it, and a Took past two TRIPS puts down the trip that ends
 # soonest, every order of it, said by the trip's pay.
@@ -12620,11 +12783,12 @@ def _settle(seconds=0.6):
 # Carrying two on. An Uber card for two customers is taken, and a DoorDash
 # order beside it; the Trip Planner is read whole, unpressed, with the two
 # customers' doors on it. The hard rules leave one order (the app rules the
-# DoorDash order out) and the list has two dropoffs, so `only` would be a guess
-# between that order's two customers — or a customer of no order of ours.
-# assemble.js attribute(): `only` is not allowed there. The same list read just
-# before a second Uber Took lands, so that order is ruled out by the read's own
-# time, is the same shape.
+# DoorDash order out) and the list has two dropoffs. `only` would be a guess
+# between them (assemble.js attribute(): not allowed there); since the owner's
+# decision of Nov 2026 the list is that one Uber Took's ROUTE, its last door the
+# end and both doors on it (heldTrip, batchPlan), and the DoorDash order is
+# given nothing. The same list read just before a second Uber Took lands, so
+# that order is ruled out by the read's own time, is two offers: nothing.
 _PLAN2 = [
     {'kind': 'pickup', 'orders': 2, 'name': 'Wren Street Noodles', 'expectedBy': 1100,
      'line': '1 Mill St, Ruswold', 'street': '1 Mill St', 'city': 'Ruswold',
@@ -12660,9 +12824,10 @@ try:
     _planner2(_q1, int(time.time() * 1000))
     _settle()
     _st1 = _q1.status()
-    eq('Uber planner with two dropoffs and a DoorDash order held: nothing filed',
+    eq('Uber planner with two dropoffs and a DoorDash order held: the Uber Took\'s route, '
+       'its last door the end; the DoorDash order given nothing',
        (_endmarks(_q1), [o.get('dropoff') for o in _st1.get('orders') or []]),
-       ([], [None, None]))
+       ([('U1', '30 Teal Ct, Pyrnel', 'app')], ['30 Teal Ct, Pyrnel', None]))
 finally:
     _q1.stop()
     _q1.gone()
