@@ -307,12 +307,14 @@
      finger keeps (rpi/test_layout.py), and the words wrap rather than run
      off a 320px screen. */
   #toPlaces { margin: 0 0 14px; }
-  /* The full rig's line to Trends on the Strategy tab: a link the size of
+  /* The full rig's line to Trends on the Strategy tab, and its way to the report's
+     rush-vs-quiet part: each a link the size of
      every other control here meant for a finger. */
-  #toTrendsGo { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 52px;
+  #toTrendsGo, #toQuietGo { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 52px;
                 margin: 10px 0 0; color: var(--text); text-decoration: none; font-size: 15px; }
-  #toTrendsGo small { display: block; font-size: 15px; color: var(--muted); }
-  #toTrendsGo > span:last-child { font-size: 24px; color: var(--muted); }
+  #toTrendsGo small, #toQuietGo small { display: block; font-size: 15px; color: var(--muted); }
+  #toTrendsGo > span:last-child, #toQuietGo > span:last-child { font-size: 24px; color: var(--muted); }
+  #toQuiet[hidden] { display: none; }
   #toPlaces[hidden] { display: none; }
   #toPlaces a { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 12px;
                 border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
@@ -1508,6 +1510,23 @@
   <details class="more"><summary>The table</summary>
   <div id="refig"></div>
   </details>
+  </section>
+  <!-- RUSH VS QUIET HOURS (the owner, Nov 2026: whether $/mi "might make
+       more sense ... when traffic dies down", then "some form of analysis to
+       help better understand the trends"). tools/strategy.js section 8: a
+       $/hr line against a $/mi line, replayed in the record's quiet hours
+       and its busy ones, held out by shift day, and the card's minutes
+       against the real ones by the same split. It resamples every shift day
+       hundreds of times, so it is worked out where the places report is
+       built (the NucBox, nightly), never on a load of this page on the Pi:
+       this is the way across, beside the $/mi tables it reads against, shown
+       wherever the report's own link (#toPlaces) is. Reading only: no
+       verdict, target or panel line reads it. Lite refuses /api/placeslink,
+       so it stays hidden there. -->
+  <section class="card" id="toQuiet" hidden>
+  <a href="places/#s-quiet" id="toQuietGo"><span><b>Rush vs quiet hours: $/hr line against $/mi line</b><small>your record
+    replayed in busy and quiet hours, held out by shift day, and card minutes against real: in the places report,
+    for reading only</small></span><span aria-hidden="true">›</span></a>
   </section>
   </div>
 
@@ -7170,6 +7189,13 @@
     var a = box.querySelector('a');
     function show(href, from) {
       a.setAttribute('href', href);
+      // ...and the Strategy tab's way to the report's rush-against-quiet
+      // part, beside the $/mi tables: the same report, its own anchor.
+      var quiet = document.getElementById('toQuiet');
+      if (quiet) {
+        quiet.querySelector('a').setAttribute('href', href.replace(/#strategy$/, '#s-quiet'));
+        quiet.hidden = false;
+      }
       if (from && from !== 'here') {
         document.getElementById('toPlacesSub').textContent =
           'On the NucBox: what $/hr to expect, what holding out paid, where good offers start';

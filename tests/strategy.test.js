@@ -665,6 +665,212 @@ eq('...while a ✓ standing on the row still makes it taken whatever the drop sa
 eq('...and the offers page\'s light answer (/api/gold) works none of it out',
    S.analyse(Object.assign(recP(), { light: true })).passed, undefined);
 
+/* --- 8. rush against quiet hours: a $/hr line against a $/mi line --------
+ *
+ * Invented journals in February 2026 (no clock change), eight shift days
+ * (the 2nd-5th and 9th-12th). Each driver day has a busy stretch, a card
+ * every 3 minutes from 18:00 to 19:57 (40 cards), and a quiet one after
+ * midnight, a card every 10 minutes from 00:00 to 02:50 (18 cards), the same
+ * driver day (before 4am). Timed orders are taken just after each stretch's
+ * last card (19:58, 02:58, a second apart), so their holds cut no card out of
+ * free time and their Took's clock hour is the stretch's own.
+ *
+ *   kind  pay  card min  card mi  card $/hr  $/mi  real min
+ *    A    $20     20       10        60      2.00     80    long, the card 4x optimistic
+ *    B    $12     15        2        48      6.00     15    short, honest
+ *    C     $5     30        5        10      1.00     30
+ *    D    $30     30       15        60      2.00     30    honest
+ *    E     $6     20      1.5        18      4.00     20
+ *    F     $8     30        8        16      1.00     30
+ *    G    $10     30        2        20      5.00     10    the card 3x pessimistic
+ *
+ * The split: hours 0 and 1 hold 6 cards in 1 free hour a day, hour 2 6 in
+ * 58 min (6.21 an hour); 18 and 19 hold 20 and 20 (20.69 an hour). Ranked
+ * from the quietest, 0, 1 and 2 together hold 23.73 of 39.47 free hours by
+ * the time 18 comes, past half, so quiet is 12am-2am and busy 6-7pm. */
+(function () {
+  function atF(day, h, m, s) { return new Date(2026, 1, day, h, m || 0, s || 0).getTime(); }
+  var KINDS = { A: [20, 20, 10, 80], B: [12, 15, 2, 15], C: [5, 30, 5, 30], D: [30, 30, 15, 30],
+                E: [6, 20, 1.5, 20], F: [8, 30, 8, 30], G: [10, 30, 2, 10] };
+  function kindOf(k, slow) {
+    var x = KINDS[k];
+    return { pay: x[0], min: x[1], mi: x[2], act: slow ? x[1] * slow : x[3] };
+  }
+  var DAYS = [2, 3, 4, 5, 9, 10, 11, 12];
+  // o: { quiet, busy: cycles of kinds; quietTimed, busyTimed: kinds timed
+  // each day (or a function of the day's index); quietSlow: every quiet
+  // order's real minutes = card x this, in place of the table's; only: the
+  // day indexes to build }.
+  function journal(o) {
+    var offers = [], orders = [];
+    DAYS.forEach(function (d, di) {
+      var k, i;
+      for (i = 0; i < 40; i++) {
+        k = kindOf(o.busy[i % o.busy.length]);
+        offers.push(card('qb' + d + '-' + i, atF(d, 18, 3 * i), k.pay, k.min, k.mi));
+      }
+      var qpat = typeof o.quiet === 'function' ? o.quiet(di) : o.quiet;
+      for (i = 0; i < 18; i++) {
+        k = kindOf(qpat[i % qpat.length], o.quietSlow);
+        offers.push(card('qq' + d + '-' + i, atF(d + 1, 0, 10 * i), k.pay, k.min, k.mi));
+      }
+      function timedAt(list, when, tag, slow) {
+        (list || []).forEach(function (t, j) {
+          var kk = kindOf(t, slow), took = when + j * 1000;
+          orders.push({ id: tag + d + '-' + j, tookAt: took, endedAt: took + kk.act * 60000, app: 'uber', pay: kk.pay,
+                        cardMinutes: kk.min, cardMiles: kk.mi, actualMinutes: kk.act });
+        });
+      }
+      timedAt(typeof o.busyTimed === 'function' ? o.busyTimed(di) : o.busyTimed, atF(d, 19, 58), 'qbo', null);
+      timedAt(typeof o.quietTimed === 'function' ? o.quietTimed(di) : o.quietTimed, atF(d + 1, 2, 58), 'qqo', o.quietSlow);
+    });
+    return { offers: offers, orders: orders };
+  }
+  var BUSY = ['D', 'E', 'F', 'E'], BUSY_T = ['D', 'E', 'E', 'F'];
+
+  /* 1. Quiet hours genuinely favour a $/mi line. Each quiet night: 6 A, 9 B,
+   * 3 C (A B C B A B, three times); 2 A, 3 B and a C timed, the cards' own
+   * mix. Free H = 2 h 58 min = 2.9667 h a night.
+   *   $/hr line $12-$48: A and B. Pay 6x20 + 9x12 = 228; card 6x20 + 9x15 =
+   *     255 min x the ratio of the A and B timed, (160 + 45) / (40 + 45) =
+   *     2.41, = 615 min. 228 / (2.9667 + 10.25) = $17.25/hr.
+   *   $/mi line $2.25+: B alone (A is $2.00/mi). Pay 108, card 135 min x
+   *     B's ratio 1 = 2.25 h: 108 / 5.2167 = $20.70/hr.
+   *   No $/hr line can keep B without A (B $48/hr, A $60/hr).
+   * Every night is the same, so out of sample is in sample: +$3.45, and the
+   * interval is that one figure. Busy hours, D E F E: the $/hr line at
+   * $20-$60 keeps D alone: 10 x 30 = 300 over 1.9667 + 5 = $43.06/hr; the
+   * best $/mi line ($1.25-$2.00) keeps D and E: 420 / (1.9667 + 11.6667) =
+   * $30.81/hr. So the busy half favours the $/hr line by $12.26. */
+  var j1 = journal({ quiet: ['A', 'B', 'C', 'B', 'A', 'B'], busy: BUSY,
+                     quietTimed: ['A', 'A', 'B', 'B', 'B', 'C'], busyTimed: BUSY_T });
+  var q1 = S.analyse({ offers: j1.offers, orders: j1.orders }).quiet;
+  var Q1 = q1.parts[0], B1 = q1.parts[1];
+  eq('8: the split is read off the record: hours 0-2 quiet, 18-19 busy',
+     [q1.split.ok, q1.split.quiet.hours, q1.split.busy.hours], [true, [0, 1, 2], [18, 19]]);
+  eq('...each clock hour\'s offers per free hour, and its half',
+     q1.split.byHour.map(function (h) { return [h.hour, h.perFreeHour, h.part]; }),
+     [[0, 6, 'quiet'], [1, 6, 'quiet'], [2, 6.21, 'quiet'], [18, 20, 'busy'], [19, 20.69, 'busy']]);
+  eq('...and each half\'s pooled figures', [q1.split.quiet.perFreeHour, q1.split.quiet.freeHours,
+     q1.split.busy.perFreeHour, q1.split.busy.freeHours], [6.07, 23.73, 20.34, 15.73]);
+  eq('quiet: 8 shift days, 144 offers seen free, 48 timed of its own, gross (no running cost on the rows)',
+     [Q1.days, Q1.offers, Q1.timed, Q1.ratioOwn, Q1.basis], [8, 144, 48, true, 'gross']);
+  eq('...the best $/hr line in sample: $12+, 228 / (2.9667 + 10.25) a night', [Q1.bestHour.T, Q1.bestHour.value], [12, 17.25]);
+  eq('...the best $/mi line: $2.25+/mi, B alone, 108 / 5.2167', [Q1.bestMile.T, Q1.bestMile.value], [2.25, 20.7]);
+  eq('...out of sample, day by day, the same lines and figures, and the difference +$3.45',
+     [Q1.heldOut.days, Q1.heldOut.hr, Q1.heldOut.mi, Q1.heldOut.diff, Q1.heldOut.diffCi, Q1.heldOut.linesPicked],
+     [8, 17.25, 20.7, 3.45, [3.45, 3.45], { hr: [12, 12], mi: [2.25, 2.25] }]);
+  eq('...so the quiet half favours the $/mi line', Q1.verdict, 'mile');
+  eq('busy: D alone at $20+ against D and E at $1.25+/mi, $43.06 against $30.81: the $/hr line',
+     [B1.bestHour.T, B1.bestHour.value, B1.bestMile.T, B1.bestMile.value, B1.heldOut.diff, B1.verdict],
+     [20, 43.06, 1.25, 30.81, -12.26, 'hour']);
+  ok('the plain words say quiet hours do favour a $/mi line, by how much and how sure',
+     q1.lines.indexOf('On your record, quiet hours do favour a $/mi line: out of sample it beat the $/hr line by '
+                      + '$3.45/hr, and the 95% interval stays above zero.') >= 0);
+  ok('...name the split\'s hours', /quiet is the clock hours with the fewest offers per free hour that together hold 50% of your free time — 12am, 1am, 2am \(6\.07 offers an hour free/.test(q1.lines[0]));
+  /* Card against real: quiet (160 + 45 + 30) / (40 + 45 + 30) = 2.04, busy 1.00. */
+  eq('card against real by the split: quiet 2.04x, busy 1.00x, the card understating the quiet trips',
+     [q1.cardVsReal.quiet, q1.cardVsReal.busy, q1.cardVsReal.diff, q1.cardVsReal.verdict], [2.04, 1, 1.04, 'longer']);
+  ok('every line ends on reading only, the Settled refusals standing',
+     /^Reading only: nothing on the rig reads this.*stay refused \(AUDITS\.md, Settled\) unless you revisit them with this evidence\.$/
+       .test(q1.lines[q1.lines.length - 1]));
+  ok('...and no line tells anyone what to do', q1.lines.every(function (l) { return !/\byou should\b|\bset your\b|\btake only\b|\bswitch to\b/i.test(l); }));
+  // Net where the rows carry a running cost: the $/mi line's short trips
+  // drive fewer miles, so its lead widens and the figure says net.
+  var q1n = S.analyse({ offers: j1.offers, orders: j1.orders, costPerMile: 0.5 }).quiet;
+  ok('with a running cost the figures are net, and the $/mi line\'s lead grows',
+     q1n.parts[0].basis === 'net' && q1n.parts[0].heldOut.diff > Q1.heldOut.diff && /\(\$[\d.]+\/hr net\)/.test(q1n.lines[1]));
+
+  /* 2. Quiet hours do not favour a $/mi line. Quiet nights carry the busy
+   * mix, D E F E, at 6 an hour, and every quiet order runs 0.8 of its card.
+   * Of a night's 18 cards 5 are D, 9 E and 4 F. $/hr $20+ keeps D: 150 /
+   * (2.9667 + 0.8 x 150 / 60) = $30.20/hr; the best $/mi line keeps D and E:
+   * 204 / (2.9667 + 0.8 x 330 / 60) = $27.69/hr. The $/hr line by $2.51. */
+  var j2 = journal({ quiet: BUSY, busy: BUSY, quietSlow: 0.8, quietTimed: BUSY_T, busyTimed: BUSY_T });
+  var q2 = S.analyse({ offers: j2.offers, orders: j2.orders }).quiet;
+  var Q2 = q2.parts[0];
+  eq('quiet hours with the busy mix: $20+ $30.20 against $1.25+/mi $27.69, out of sample too',
+     [Q2.bestHour.T, Q2.bestHour.value, Q2.bestMile.T, Q2.bestMile.value, Q2.heldOut.diff, Q2.verdict],
+     [20, 30.2, 1.25, 27.69, -2.51, 'hour']);
+  ok('...and the words say quiet hours do not favour a $/mi line',
+     q2.lines.some(function (l) { return /^On your record, quiet hours do not favour a \$\/mi line: out of sample the \$\/hr line beat it by \$2\.51\/hr/.test(l); }));
+  eq('...while the card overstated the quiet trips: 0.80x against 1.00x, beyond chance',
+     [q2.cardVsReal.quiet, q2.cardVsReal.busy, q2.cardVsReal.verdict], [0.8, 1, 'shorter']);
+  ok('...said so', q2.lines.some(function (l) { return /^Card against real: real minutes ran 0\.80x the card's in quiet hours \(32 timed\).*the card overstated the trip time more, beyond chance/.test(l); }));
+
+  /* 3. Too few timed trips: record 1's cards, the quiet orders on one night
+   * only (6, under the floor of 10). No verdict for quiet, said; busy still
+   * has one; card against real gives the ratios but no verdict (quiet timed
+   * on one day of the five needed). */
+  var j3 = journal({ quiet: ['A', 'B', 'C', 'B', 'A', 'B'], busy: BUSY, busyTimed: BUSY_T,
+                     quietTimed: function (i) { return i === 0 ? ['A', 'A', 'B', 'B', 'B', 'C'] : []; } });
+  var q3 = S.analyse({ offers: j3.offers, orders: j3.orders }).quiet;
+  eq('the floor is stated: 5 shift days and 10 timed orders of the half\'s own', [q3.floors.days, q3.floors.timed], [5, 10]);
+  eq('six quiet orders: no verdict, no held-out figure, the reason kept',
+     [q3.parts[0].timed, q3.parts[0].verdict, q3.parts[0].heldOut, q3.parts[0].thin], [6, 'thin', null, ['timed']]);
+  eq('...the busy half still judged', q3.parts[1].verdict, 'hour');
+  ok('...and the words say not enough timed trips yet, with the counts',
+     q3.lines.indexOf('On your record, quiet hours cannot be said to favour either line yet: not enough timed trips yet (6 of 10).') >= 0
+     && q3.lines.some(function (l) { return /^Quiet hours: .*No verdict — not enough timed trips yet: 6 timed in quiet hours, 10 needed\.$/.test(l); }));
+  eq('...card against real: ratios, but a half timed on one night is no verdict', [q3.cardVsReal.quietDays, q3.cardVsReal.verdict,
+     q3.cardVsReal.diffCi], [1, 'thin', null]);
+
+  /* 4. What the held-out figure takes out. Record 2's busy mix in both
+   * halves at the card's word (D E F E, ratio 1), but one quiet night is all
+   * G ($10, 30 card min, really 10: $20/hr on the card) with four G orders
+   * timed. In sample, $20+ keeps 35 D and 18 G: pay 1,230, card 1,590 min x
+   * (7 x 30 + 4 x 10) / (7 x 30 + 4 x 30) = 0.758, so 1,230 / (23.73 +
+   * 20.08) = $28.08/hr, the G night's own minutes flattering its own score.
+   * Held out, that night is scored with the ratio the other seven measured
+   * (1.00): 180 / (2.9667 + 9) = $15.04 for the night; each other night with
+   * the G night in its fit, 0.733: 150 / (2.9667 + 1.8333). Summed, 1,230 /
+   * 45.567 = $26.99/hr: a dollar the in-sample best had and did not earn. */
+  var j4 = journal({ quiet: function (i) { return i === 0 ? ['G'] : BUSY; }, busy: BUSY, busyTimed: BUSY_T,
+                     quietTimed: function (i) { return i === 0 ? ['G', 'G', 'G', 'G'] : BUSY_T; } });
+  var Q4 = S.analyse({ offers: j4.offers, orders: j4.orders }).quiet.parts[0];
+  eq('one lucky night: in sample the $/hr line is $20+ at $28.08', [Q4.bestHour.T, Q4.bestHour.value], [20, 28.08]);
+  eq('...out of sample the same line, scored on each night with the other nights\' ratio: $26.99',
+     [Q4.heldOut.linesPicked.hr, Q4.heldOut.hr], [[20, 20], 26.99]);
+  ok('...so the held-out figure sits under the in-sample best', Q4.heldOut.hr < Q4.bestHour.value - 1);
+  ok('...and its interval is drawn over nights that differ', Q4.heldOut.hrCi[1] - Q4.heldOut.hrCi[0] > 1);
+
+  /* 5. Nights that disagree. Every other quiet night is record 1's (where
+   * the $/mi line wins by $3.45), the rest record 2's mix at the card's word
+   * (where the $/hr line wins). Pooled, the $/hr line is ahead by 82 cents
+   * out of sample, and the nights resampled put the difference anywhere from
+   * -$2.41 to +$1.49: neither beyond chance, and the words say so rather
+   * than crowning the point estimate. */
+  var j5 = journal({ quiet: function (i) { return i % 2 ? ['A', 'B', 'C', 'B', 'A', 'B'] : BUSY; }, busy: BUSY,
+                     busyTimed: BUSY_T, quietTimed: function (i) { return i % 2 ? ['A', 'A', 'B', 'B', 'B', 'C'] : BUSY_T; } });
+  var q5 = S.analyse({ offers: j5.offers, orders: j5.orders }).quiet, Q5 = q5.parts[0];
+  eq('nights that disagree: $/hr ahead by $0.82 out of sample, the interval across zero, no verdict either way',
+     [Q5.heldOut.diff, Q5.heldOut.diffCi, Q5.verdict], [-0.82, [-2.41, 1.49], 'even']);
+  ok('...said as neither, not as the point estimate',
+     q5.lines.some(function (l) { return /^On your record, quiet hours do not clearly favour a \$\/mi line: the difference out of sample could be either way/.test(l); }));
+
+  /* 6. A lead on the point estimate only. Record 1, but on two nights of
+   * eight (the 2nd and the 9th) the quiet cards come A A A C A B: mostly
+   * long A, one B in six, and the timed orders that night A A A B C. On
+   * those nights the $/mi line has one B an hour to wait for and the $/hr
+   * line keeps the A's; on the other six it wins as in record 1. Pooled, the
+   * $/mi line is $2.03 ahead out of sample, but resampled nights put the
+   * difference from -$2.76 to +$4.77: a lead, not one beyond chance. */
+  var j6 = journal({ quiet: function (i) { return i % 4 === 0 ? ['A', 'A', 'A', 'C', 'A', 'B'] : ['A', 'B', 'C', 'B', 'A', 'B']; },
+                     busy: BUSY, busyTimed: BUSY_T,
+                     quietTimed: function (i) { return i % 4 === 0 ? ['A', 'A', 'A', 'B', 'C'] : ['A', 'A', 'B', 'B', 'B', 'C']; } });
+  var Q6 = S.analyse({ offers: j6.offers, orders: j6.orders }).quiet.parts[0];
+  eq('a $/mi lead of $2.03 out of sample whose interval crosses zero is no verdict',
+     [Q6.heldOut.diff, Q6.heldOut.diffCi, Q6.verdict], [2.03, [-2.76, 4.77], 'even']);
+  /* No split: every free minute in one clock hour. */
+  var one = [];
+  for (var i = 0; i < 20; i++) one.push(card('qx' + i, atF(16, 18, 2 * i), 10, 20, 4));
+  var qx = S.analyse({ offers: one, orders: [] }).quiet;
+  eq('free time in one clock hour: no split, said', [qx.split.ok, qx.parts.length,
+     /^Rush against quiet hours: not enough yet — free time in 1 clock hour, and a split needs two\.$/.test(qx.lines[0])], [false, 0, true]);
+  eq('...and the offers page\'s light answer works none of it out',
+     S.analyse({ offers: j1.offers, orders: j1.orders, light: true }).quiet, undefined);
+}());
+
 // Run as a child, it answers one JSON request with the same analysis.
 var cp = require('child_process'), path = require('path');
 var child = cp.spawnSync(process.execPath, [path.join(__dirname, '..', 'tools', 'strategy.js')],

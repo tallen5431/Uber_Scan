@@ -53,6 +53,11 @@
  *      to the next good offer and to the next take. History in the past
  *      tense: "when you let one go, the next good one came after a median N
  *      min", never which card to take or decline.
+ *   8. RUSH AGAINST QUIET HOURS (quietOf): section 3 again on two halves of
+ *      the clock, the quiet hours (fewest offers per free hour, half the
+ *      free time) and the busy ones, a $/hr line against a $/mi line in
+ *      each, held out by shift day, and the card's minutes against the real
+ *      ones by the same split. Read back, never a rule.
  *
  * DESCRIPTIVE, AND NOTHING ELSE. Nothing on the rig requires this file: no
  * verdict, state, target, band or panel line reads it. AUDITS.md's Settled
@@ -71,7 +76,10 @@
  *     entry was settled on is run again on the record in hand: fitted on the
  *     other shift days and scored on the one left out, a line per block
  *     against one line for all hours. The overall curve is the one the
- *     summary leads with.
+ *     summary leads with. Section 8's two halves of the clock are read back
+ *     under the same discipline (lines picked on the other days, scored on
+ *     the one left out), and the line it prints for each half reaches
+ *     nothing.
  *   - no weekday term. Weekday against weekend is a row in a table, with its
  *     shift days counted, and a term in nothing.
  *
@@ -368,7 +376,8 @@ function hourPieces(spans) {
       var next = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours() + 1).getTime();
       if (!(next > t)) next = t + 3600000;
       var to = Math.min(next, s[1]);
-      out.push({ from: t, to: to, block: A.blockOf(t), outing: outingOf(t), week: weekOf(t) });
+      // The clock hour too, for section 8's rush-against-quiet split.
+      out.push({ from: t, to: to, block: A.blockOf(t), outing: outingOf(t), week: weekOf(t), hour: d.getHours() });
       t = to;
     }
   });
@@ -419,6 +428,7 @@ function timedOf(o, offer, area, stats) {
            cardMi: miles, actMi: actMi !== null && miles !== null && miles > 0 ? actMi : null,
            together: num(o.carried) !== null && o.carried >= 2,
            at: num(o.tookAt), block: A.blockOf(o.tookAt), outing: outingOf(o.tookAt),
+           hour: new Date(o.tookAt).getHours(),
            week: weekOf(o.tookAt), area: area,
            // Who timed it: the rig, or Uber's earnings screen for an order the
            // rig did not time (earnings.js uberTimingFor; the caller says so).
@@ -636,6 +646,15 @@ function bootstrap(per, days, grid, opts, seed) {
   };
 }
 
+/* What line k paid on one held-out day by the curve's own arithmetic: its
+ * pay (net of the running cost where `cpm` is given) over the day's free
+ * hours plus the orders' card minutes x `ratio`, the ratio the OTHER days
+ * measured. [pay, hours]. heldOut and section 8 both score with it. */
+function dayScore(per, k, ratio, cpm, mr) {
+  var S = per.S[k];
+  return [cpm !== null ? S.pay - cpm * mr * S.miles : S.pay, per.H + ratio * S.card / 60];
+}
+
 /* The held-out check, AUDITS.md's "Do not tune the acceptance line to the
  * hour" measured again on the record in hand. One shift day out at a time:
  * on the others, the best single line for all hours, and the best line for
@@ -656,10 +675,7 @@ function heldOut(perAll, perBlock, days, grid, opts) {
     var kFlat = flat.best.index;
     // The ratio each line carries is the other days' (no peeking at the day
     // being scored), as is every line chosen.
-    function score(per, k, ratio) {
-      var S = per.S[k];
-      return [S.pay, per.H + ratio * S.card / 60];
-    }
+    function score(per, k, ratio) { return dayScore(per, k, ratio, null, 1); }
     var f = score(keep, kFlat, flat.points[kFlat].ratio);
     tot.flat[0] += f[0]; tot.flat[1] += f[1];
     var n = 0, act = 0, card = 0;
@@ -682,6 +698,294 @@ function heldOut(perAll, perBlock, days, grid, opts) {
   if (!used) return null;
   function rate(x) { return x[1] > 0 ? r2(x[0] / x[1]) : null; }
   return { days: used, flat: rate(tot.flat), perBlock: rate(tot.block), everything: rate(tot.all) };
+}
+
+/* --- 8. Rush against quiet hours: a $/hr line against a $/mi line ---------
+ *
+ * The owner, Nov 2026: "Does the reporting do any statistics to show the
+ * spread of $/mi? It might make more sense to use that when traffic dies
+ * down." The spread was already drawn (section 1, and the offers page's
+ * $/mi tables); a $/mi accept rule and a line tuned to the hour are both
+ * Settled refusals; and the owner then agreed to "some form of analysis to
+ * help better understand the trends". This is that analysis, and it is a
+ * REPLAY READ BACK, NOT A RULE: nothing on the rig, the verdict, the target
+ * or the panel requires it, and its words say the refusals stand unless the
+ * owner revisits them with this evidence.
+ *
+ * WHICH REPLAY. AUDITS.md's Settled numbers ($/hr at $22 $19.80/hr, the best
+ * $/mile rule $16.03) came off advice.js `replay` — the first card that
+ * clears, then busy for its card's minutes — and its $/mile variant was
+ * never kept. Section 3's curve is that walk in renewal form with the time
+ * MEASURED (card minutes x the timed orders' actual ÷ card ratio at each
+ * line, GPS ÷ card miles for the running cost), and it already carries the
+ * $/mi curve beside the $/hr one. So each half here is section 3 itself —
+ * perOuting, curveFrom, bestOf, dayScore — on that half's free hours,
+ * offers and timed orders. No second replay.
+ *
+ * THE SPLIT, read off the record and chosen by nobody. Each clock hour's
+ * offers seen free over its free hours (section 3's λ, pooled over every
+ * shift day); the hours ranked from the fewest offers an hour, and QUIET is
+ * the quietest hours that together hold QUIET_SHARE of the free time, BUSY
+ * the rest. Offers per free hour and not the cards' minutes per mile, the
+ * other proxy for traffic: on the measured week a card's minutes were 23 +
+ * 1.00 x miles (AUDITS.md, "Most of a delivery is not driving"), so an
+ * hour's minutes a mile is mostly how long its trips were, not the roads.
+ * The clock hour and not weekday x hour: 168 cells come off one date apiece
+ * on a few weeks (AUDITS.md's refused weekday term), 24 pool every night.
+ * The split is over the whole record; the lines are chosen out of sample.
+ *
+ * IN EACH HALF: the best $/hr line and the best $/mi line in sample (the
+ * curve's own best, thin points never best), and then the honest figure,
+ * because two best-of-N searches on one record flatter both: one shift day
+ * left out at a time, each kind's best line picked on the OTHER days (their
+ * curve, their ratios) and scored on the day left out with those ratios
+ * (dayScore). Summed over the days: what each kind of line earned out of
+ * sample, real time, per hour of free-plus-order time. Net where the rows
+ * carry a running cost (a $/mi line's one real advantage is the miles it
+ * does not drive, and gross would hide it), gross otherwise, said. The
+ * interval: the held-out days resampled with replacement (QUIET_BOOTS,
+ * seeded), the rates and the $/mi-minus-$/hr difference re-summed each time;
+ * by day, as section 3's, because a night's offers move together.
+ *
+ * THE VERDICT, per half: the $/mi line did better (the difference's 95%
+ * interval above zero), the $/hr line did (below zero), neither beyond
+ * chance, or not enough yet: under QUIET_MIN_DAYS shift days with free time
+ * in the half, or under QUIET_MIN_TIMED timed orders of the half's own. The
+ * second floor is the one that bites: a half's real time is its own timed
+ * orders' or the comparison is of someone else's minutes, and the two lines
+ * keep different cards, whose ratios both have to be measured.
+ *
+ * CARD AGAINST REAL, the owner's own idea underneath: real minutes ÷ card
+ * minutes (sum over sum, section 2's actualsOf) of the timed orders taken in
+ * each half, and quiet minus busy with an interval (shift days resampled).
+ * Below 1 the card overstated the trip.
+ *
+ * Counts, ratios and dollars only; no id, place or position. */
+var QUIET_SHARE = 0.5;
+// Leave-one-out needs days to fit on and a resample needs days to draw:
+// at five, each fold fits on four. Chosen, not measured, above section 3's
+// three (BOOT_MIN_OUTINGS), because here two lines are picked per fold.
+var QUIET_MIN_DAYS = 5;
+// Twice section 2's ratio floor: the $/hr line's cards and the $/mi line's
+// are different cards, and each line's ratio needs RATIO_MIN_N of its own.
+var QUIET_MIN_TIMED = 2 * RATIO_MIN_N;
+var QUIET_BOOTS = 400;
+
+// Each clock hour's free hours and offers seen free, and the split.
+function quietSplit(free, pieces) {
+  var hrs = [];
+  for (var h = 0; h < 24; h++) hrs.push({ hour: h, freeHours: 0, offers: 0 });
+  pieces.forEach(function (p) { hrs[p.hour].freeHours += (p.to - p.from) / 3600000; });
+  free.forEach(function (o) { hrs[o.hour].offers += 1; });
+  var used = hrs.filter(function (x) { return x.freeHours > 0; });
+  used.forEach(function (x) { x.perFreeHour = x.offers / x.freeHours; });
+  used.sort(function (a, b) { return a.perFreeHour - b.perFreeHour || a.hour - b.hour; });
+  var total = sum(used.map(function (x) { return x.freeHours; })), cum = 0;
+  used.forEach(function (x) { x.quiet = cum < QUIET_SHARE * total; cum += x.freeHours; });
+  var quiet = used.filter(function (x) { return x.quiet; }), busy = used.filter(function (x) { return !x.quiet; });
+  function sumOf(l, f) { return sum(l.map(function (x) { return x[f]; })); }
+  function side(l) {
+    var H = sumOf(l, 'freeHours'), N = sumOf(l, 'offers');
+    return { hours: l.map(function (x) { return x.hour; }).sort(function (a, b) { return a - b; }),
+             freeHours: r2(H), offers: N, perFreeHour: H > 0 ? r2(N / H) : null };
+  }
+  return {
+    ok: quiet.length > 0 && busy.length > 0,
+    byHour: used.slice().sort(function (a, b) { return a.hour - b.hour; }).map(function (x) {
+      return { hour: x.hour, freeHours: r2(x.freeHours), offers: x.offers, perFreeHour: r2(x.perFreeHour),
+               part: x.quiet ? 'quiet' : 'busy' };
+    }),
+    quiet: side(quiet), busy: side(busy)
+  };
+}
+
+// 95% of a list, or null under twenty values (section 3's rule).
+function ci95(v) {
+  var s = sorted(v);
+  return s.length >= 20 ? [r2(quantile(s, 0.025)), r2(quantile(s, 0.975))] : null;
+}
+
+/* Leave one shift day out, for both kinds of line: on the other days each
+ * kind's best (by `field`), scored on the day left out. Then the held-out
+ * days resampled. */
+function quietHeldOut(perH, perM, days, opts, field, seed) {
+  if (days.length < QUIET_MIN_DAYS) return null;
+  var cpm = field === 'net' ? opts.cpm : null, mr = opts.mileRatio || 1;
+  var folds = [];
+  days.forEach(function (out) {
+    var rest = days.filter(function (d) { return d !== out; });
+    var ch = curveFrom(perH, rest, GRID, opts), cm = curveFrom(perM, rest, MILE_GRID, opts);
+    var bh = bestOf(ch.points, field), bm = bestOf(cm.points, field);
+    if (!bh || !bm || !perH[out] || !(perH[out].H > 0)) return;
+    folds.push({ hr: dayScore(perH[out], bh.index, ch.points[bh.index].ratio, cpm, mr),
+                 mi: dayScore(perM[out], bm.index, cm.points[bm.index].ratio, cpm, mr), L: bh.T, M: bm.T });
+  });
+  if (folds.length < QUIET_MIN_DAYS) return null;
+  function rates(list) {
+    var h = [0, 0], m = [0, 0];
+    list.forEach(function (f) { h[0] += f.hr[0]; h[1] += f.hr[1]; m[0] += f.mi[0]; m[1] += f.mi[1]; });
+    var hr = h[1] > 0 ? h[0] / h[1] : null, mi = m[1] > 0 ? m[0] / m[1] : null;
+    return { hr: hr, mi: mi, diff: hr !== null && mi !== null ? mi - hr : null };
+  }
+  var all = rates(folds), r = rng(seed), bh = [], bm = [], bd = [];
+  for (var b = 0; b < (opts.boots || QUIET_BOOTS); b++) {
+    var pick = [];
+    for (var i = 0; i < folds.length; i++) pick.push(folds[Math.floor(r() * folds.length)]);
+    var x = rates(pick);
+    if (x.hr !== null) bh.push(x.hr);
+    if (x.mi !== null) bm.push(x.mi);
+    if (x.diff !== null) bd.push(x.diff);
+  }
+  var Ls = folds.map(function (f) { return f.L; }), Ms = folds.map(function (f) { return f.M; });
+  return { days: folds.length, basis: field, hr: r2(all.hr), mi: r2(all.mi), diff: r2(all.diff),
+           hrCi: ci95(bh), miCi: ci95(bm), diffCi: ci95(bd),
+           linesPicked: { hr: [Math.min.apply(null, Ls), Math.max.apply(null, Ls)],
+                          mi: [Math.min.apply(null, Ms), Math.max.apply(null, Ms)] } };
+}
+
+function quietOf(free, pieces, timed, opts, seed) {
+  var split = quietSplit(free, pieces);
+  var res = { floors: { days: QUIET_MIN_DAYS, timed: QUIET_MIN_TIMED, share: QUIET_SHARE, ratio: RATIO_MIN_N },
+              split: split, parts: [], cardVsReal: null };
+  if (!split.ok) { res.lines = quietLines(res); return res; }
+  var field = opts.cpm !== null ? 'net' : 'gross';
+  ['quiet', 'busy'].forEach(function (name, j) {
+    var inH = Object.create(null);
+    split[name].hours.forEach(function (h) { inH[h] = true; });
+    var offs = free.filter(function (o) { return inH[o.hour]; });
+    var pcs = pieces.filter(function (p) { return inH[p.hour]; });
+    var tm = timed.filter(function (t) { return inH[t.hour]; });
+    var own = tm.length >= RATIO_MIN_N;
+    var perH = perOuting(offs, pcs, own ? tm : timed, GRID, 'ph', 'cardPH');
+    var perM = perOuting(offs, pcs, own ? tm : timed, MILE_GRID, 'pm', 'cardPM');
+    var days = Object.keys(perH).filter(function (d) { return perH[d].H > 0; }).sort();
+    var cH = curveFrom(perH, days, GRID, opts), cM = curveFrom(perM, days, MILE_GRID, opts);
+    var bH = bestOf(cH.points, field), bM = bestOf(cM.points, field);
+    var thin = [];
+    if (days.length < QUIET_MIN_DAYS) thin.push('days');
+    if (tm.length < QUIET_MIN_TIMED) thin.push('timed');
+    var held = thin.length ? null : quietHeldOut(perH, perM, days, opts, field, seed + 101 * (j + 1));
+    if (!thin.length && !held) thin.push('lines');
+    var verdict = thin.length ? 'thin'
+      : held.diffCi && held.diffCi[0] > 0 ? 'mile'
+      : held.diffCi && held.diffCi[1] < 0 ? 'hour' : 'even';
+    res.parts.push({
+      name: name, days: days.length, freeHours: r2(cH.H), offers: offs.length, timed: tm.length, ratioOwn: own,
+      basis: field,
+      bestHour: bH ? { T: bH.T, value: bH.value, n: bH.n } : null,
+      bestMile: bM ? { T: bM.T, value: bM.value, n: bM.n } : null,
+      everything: r2(cH.all[field]),
+      heldOut: held, thin: thin, verdict: verdict,
+      actual: actualsOf(name, tm)
+    });
+  });
+  // Card against real, quiet less busy, shift days resampled.
+  var q = res.parts[0], b = res.parts[1];
+  if (q.actual.ratio !== null && b.actual.ratio !== null) {
+    var inQ = Object.create(null);
+    split.quiet.hours.forEach(function (h) { inQ[h] = true; });
+    var byDay = Object.create(null);
+    timed.forEach(function (t) {
+      var e = byDay[t.outing] || (byDay[t.outing] = { q: [0, 0], b: [0, 0] });
+      var side = inQ[t.hour] ? e.q : e.b;
+      side[0] += t.actMin; side[1] += t.cardMin;
+    });
+    var dks = Object.keys(byDay), r = rng(seed + 7), diffs = [];
+    // Resampled by day, a half timed on one evening would come out certain
+    // of that evening: each half's orders must span QUIET_MIN_DAYS days.
+    var qDays = dks.filter(function (d) { return byDay[d].q[1] > 0; }).length;
+    var bDays = dks.filter(function (d) { return byDay[d].b[1] > 0; }).length;
+    var spread = qDays >= QUIET_MIN_DAYS && bDays >= QUIET_MIN_DAYS;
+    for (var k = 0; k < (opts.boots || QUIET_BOOTS) && spread; k++) {
+      var sq = [0, 0], sb = [0, 0];
+      for (var i = 0; i < dks.length; i++) {
+        var e = byDay[dks[Math.floor(r() * dks.length)]];
+        sq[0] += e.q[0]; sq[1] += e.q[1]; sb[0] += e.b[0]; sb[1] += e.b[1];
+      }
+      if (sq[1] > 0 && sb[1] > 0) diffs.push(sq[0] / sq[1] - sb[0] / sb[1]);
+    }
+    var dci = ci95(diffs);
+    res.cardVsReal = { quiet: q.actual.ratio, busy: b.actual.ratio, quietN: q.timed, busyN: b.timed,
+                       diff: r2(q.actual.ratio - b.actual.ratio), diffCi: dci, quietDays: qDays, busyDays: bDays,
+                       verdict: !dci ? 'thin' : dci[1] < 0 ? 'shorter' : dci[0] > 0 ? 'longer' : 'even' };
+  }
+  res.lines = quietLines(res);
+  return res;
+}
+
+function clockHour(h) { return h === 0 ? '12am' : h < 12 ? h + 'am' : h === 12 ? '12pm' : (h - 12) + 'pm'; }
+
+function quietLines(q) {
+  var out = [], s = q.split;
+  var stand = 'Reading only: nothing on the rig reads this, and no verdict, target or panel line moves. A $/mi accept '
+    + 'rule and a line tuned to the hour stay refused (AUDITS.md, Settled) unless you revisit them with this evidence.';
+  if (!s.ok) {
+    out.push('Rush against quiet hours: not enough yet — free time in ' + plural(s.byHour.length, 'clock hour')
+             + ', and a split needs two.');
+    out.push(stand);
+    return out;
+  }
+  out.push('Rush against quiet hours: quiet is the clock hours with the fewest offers per free hour that together hold '
+           + Math.round(q.floors.share * 100) + '% of your free time — ' + s.quiet.hours.map(clockHour).join(', ') + ' ('
+           + s.quiet.perFreeHour + ' offers an hour free, ' + hrs(s.quiet.freeHours) + ') — against busy, '
+           + s.busy.hours.map(clockHour).join(', ') + ' (' + s.busy.perFreeHour + ' an hour, ' + hrs(s.busy.freeHours) + ').');
+  q.parts.forEach(function (p) {
+    var Name = p.name === 'quiet' ? 'Quiet hours' : 'Busy hours', basis = p.basis === 'net' ? ' net' : ' gross';
+    var best = (p.bestHour ? 'the best $/hr line in sample was ' + d0(p.bestHour.T) + '+ (' + d2(p.bestHour.value) + '/hr'
+                + basis + ')' : 'no $/hr line had enough offers') + ', '
+      + (p.bestMile ? 'the best $/mi line ' + d2(p.bestMile.T) + '+/mi (' + d2(p.bestMile.value) + '/hr)'
+         : 'no $/mi line had enough offers');
+    var h = p.heldOut;
+    if (p.verdict === 'thin') {
+      var why = [];
+      if (p.thin.indexOf('timed') >= 0) why.push('not enough timed trips yet: ' + p.timed + ' timed in ' + p.name
+                                               + ' hours, ' + q.floors.timed + ' needed');
+      if (p.thin.indexOf('days') >= 0) why.push(plural(p.days, 'shift day') + ' with free time here, '
+                                              + q.floors.days + ' needed');
+      if (p.thin.indexOf('lines') >= 0) why.push('too few shift days with a line of each kind to pick out of sample');
+      out.push(Name + ': ' + best + '. No verdict — ' + why.join('; ') + '.');
+      return;
+    }
+    var ci = function (c) { return c ? ' (95% ' + d2(c[0]) + '–' + d2(c[1]) + ')' : ''; };
+    var sign = function (v) { return (v < 0 ? '−$' : '+$') + Math.abs(v).toFixed(2); };
+    out.push(Name + ': ' + best + '. Picked on the other shift days and scored on the one left out ('
+             + plural(h.days, 'day') + ' in turn, real time from ' + p.timed + ' timed orders): the $/hr line made '
+             + d2(h.hr) + '/hr' + ci(h.hrCi) + ', the $/mi line ' + d2(h.mi) + '/hr' + ci(h.miCi) + '; $/mi less $/hr '
+             + sign(h.diff) + (h.diffCi ? ' (95% ' + sign(h.diffCi[0]) + ' to ' + sign(h.diffCi[1]) + ', days resampled)' : '')
+             + '.');
+  });
+  var qp = q.parts[0];
+  if (qp.verdict === 'thin') {
+    out.push('On your record, quiet hours cannot be said to favour either line yet: '
+             + (qp.thin.indexOf('timed') >= 0 ? 'not enough timed trips yet (' + qp.timed + ' of ' + q.floors.timed + ').'
+                : qp.thin.indexOf('days') >= 0 ? 'too few shift days (' + qp.days + ' of ' + q.floors.days + ').'
+                : 'too few shift days with a line of each kind to pick out of sample.'));
+  } else if (qp.verdict === 'mile') {
+    out.push('On your record, quiet hours do favour a $/mi line: out of sample it beat the $/hr line by '
+             + d2(qp.heldOut.diff) + '/hr, and the 95% interval stays above zero.');
+  } else if (qp.verdict === 'hour') {
+    out.push('On your record, quiet hours do not favour a $/mi line: out of sample the $/hr line beat it by '
+             + d2(-qp.heldOut.diff) + '/hr, and the 95% interval stays below zero.');
+  } else {
+    out.push('On your record, quiet hours do not clearly favour a $/mi line: the difference out of sample could be '
+             + 'either way (its 95% interval spans zero, or too few days to draw one).');
+  }
+  var cv = q.cardVsReal;
+  if (!cv) {
+    out.push('Card against real by the split: a ratio needs ' + q.floors.ratio + ' timed orders in each half ('
+             + qp.timed + ' quiet, ' + q.parts[1].timed + ' busy).');
+  } else {
+    var span = cv.diffCi ? ' (quiet less busy, 95% ' + cv.diffCi[0].toFixed(2) + ' to ' + cv.diffCi[1].toFixed(2) + ')' : '';
+    out.push('Card against real: real minutes ran ' + cv.quiet.toFixed(2) + 'x the card\'s in quiet hours ('
+             + cv.quietN + ' timed) and ' + cv.busy.toFixed(2) + 'x in busy hours (' + cv.busyN + '); '
+             + (cv.verdict === 'thin' ? 'too few shift days to say whether that differs (timed on ' + cv.quietDays
+                + ' and ' + cv.busyDays + ' days; ' + q.floors.days + ' each needed).'
+                : cv.verdict === 'shorter' ? 'in quiet hours the card overstated the trip time more, beyond chance' + span + '.'
+                : cv.verdict === 'longer' ? 'in quiet hours the card understated the trip time more, beyond chance' + span + '.'
+                : 'no difference beyond chance' + span + '.'));
+  }
+  out.push(stand);
+  return out;
 }
 
 /* --- 6. Uber's acceptance rate, and the line that keeps it ----------------
@@ -1118,6 +1422,7 @@ function analyse(input) {
     if (num(o.pay) === null || mins === null || ph === null) { counts.unrated += 1; return; }
     var area = inp.areaOf ? inp.areaOf(o) || null : null;
     var rec = { id: o.id, at: x.seen, outing: outingOf(x.seen), block: A.blockOf(x.seen), week: weekOf(x.seen),
+                hour: new Date(x.seen).getHours(),
                 app: appOf(o, inp.appOf), area: area, ph: ph, pm: perMileOf(o), pay: o.pay,
                 cardMin: num(o.minutes) !== null && o.minutes > 0 ? o.minutes : mins,
                 miles: num(o.miles) !== null && o.miles > 0 ? o.miles : null,
@@ -1340,6 +1645,10 @@ function analyse(input) {
   });
   var held = light ? null : heldOut(perAll, perBlock, days, GRID, opts);
 
+  // 8. Rush against quiet hours, a $/hr line against a $/mi line: section
+  // 3's own curve on each half (quietOf). Not in `light`.
+  var quiet = light ? null : quietOf(free, pieces, timed, opts, seed + 8);
+
   // 7. The good offers passed on, at the Trends ruler's shares (20% leads,
   // or the caller's `top` where it is one of them). Not in `light`: the
   // offers page's /api/gold, asked on every load, draws none of it.
@@ -1373,6 +1682,7 @@ function analyse(input) {
   };
   if (paid) res.paid = paid;
   if (passed) res.passed = passed;
+  if (quiet) res.quiet = quiet;
   // 6. Uber's acceptance rate and the line that keeps the goal, over Uber's
   // own curve above.
   res.gold = goldOf(dd.list, inp, slices.app.filter(function (x) { return x.name === 'Uber'; })[0] || null, shiftH);
@@ -1732,5 +2042,7 @@ module.exports = {
   acceptedIds: acceptedIds, TAKEN_BACK: TAKEN_BACK,
   goldLines: goldLines, pathAhead: pathAhead, requestKind: requestKind, uberFigures: uberFigures, goalOf: goalOf,
   GOLD_GOAL: GOLD_GOAL, GOLD_WINDOW: GOLD_WINDOW, GOLD_LAST: GOLD_LAST, GOLD_AHEAD: GOLD_AHEAD,
+  quietOf: quietOf, quietSplit: quietSplit, quietLines: quietLines, QUIET_SHARE: QUIET_SHARE,
+  QUIET_MIN_DAYS: QUIET_MIN_DAYS, QUIET_MIN_TIMED: QUIET_MIN_TIMED, QUIET_BOOTS: QUIET_BOOTS,
   PLATEAU: PLATEAU, HOLD_MAX_MIN: HOLD_MAX_MIN, TOO_SOON: TOO_SOON, BANDS: BANDS, RATE_BANDS: RATE_BANDS
 };

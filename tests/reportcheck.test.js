@@ -81,6 +81,20 @@ eq('costs per mile: $0.30 to the 10th, $0.35 from the 12th, each with its dates 
 eq('the pay as marked: 5 re-read, 4 suspect, none unread, re-offered and raised not marked on the record',
    [res.pay.corrected, res.pay.suspect, res.pay.payUnread, res.pay.marked], [5, 4, 0, { reoffered: false, raised: false }]);
 ok('the main computations are timed', res.times.length > 20 && res.times.every(function (x) { return x.ms >= 0; }));
+// Rush against quiet hours (strategy.js section 8), as the Strategy tab has
+// it: every evening runs 6 to 8:50pm, so 8pm (its 50 minutes, less the
+// orders' holds, at 7.15 cards an hour free) is busy and 6pm and 7pm (5.82
+// an hour, 11.51 of 16.27 free hours) are quiet. No order carries card
+// minutes to time, so no verdict either side, the floor said.
+eq('rush vs quiet hours: the split by offers per free hour, each half\'s counts, no verdict with no order timed',
+   [res.quiet.split.quiet.hours, res.quiet.split.busy.hours, res.quiet.parts.map(function (p) {
+     return [p.name, p.days, p.timed, p.verdict, p.thin]; }), res.quiet.floors.timed, res.quiet.cardVsReal],
+   [[18, 19], [20], [['quiet', 6, 0, 'thin', ['timed']], ['busy', 6, 0, 'thin', ['timed']]], 10, null]);
+ok('...and printed as counts and figures, saying it is no rule',
+   /rush vs quiet hours \(\$\/hr line against \$\/mi line; reading only, no rule\):/.test(text)
+   && /  quiet hours 18,19: 5\.82 offers\/h free over 11\.51 h; busy hours 20: 7\.15\/h over 4\.76 h/.test(text)
+   && /  quiet: 6 days, \d+ offers free, 0 timed \(floor 10 timed, 5 days\).*verdict thin \(timed\)/.test(text)
+   && /  real \/ card minutes: too few timed orders in a half/.test(text));
 
 // Never a place, a coordinate, a card's text, an id or a single trip's amount.
 var json = JSON.stringify(res);

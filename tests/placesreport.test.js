@@ -1606,10 +1606,26 @@ function nbx() {
      foldIds.length > 30 && foldIds.every(function (id, i) { return foldIds.indexOf(id) === i; })
      && !/<details class="fold"(?! id="[^"]+" open>)/.test(pageW));
   var stratW = STRATEGY_OF(pageW);
-  // Sixteen tables as before, each a table or, with no rows, "None.", and
-  // the two the good offers passed on added under the curve (eighteen).
-  eq('...not one of the Strategy tab\'s sixteen tables is gone, and the passed-on two are there',
-     (stratW.split('<table>').length - 1) + (stratW.split('<p class="note">None.</p>').length - 1), 18);
+  // Sixteen tables as before, each a table or, with no rows, "None.", the
+  // two the good offers passed on added under the curve, and the three of
+  // rush against quiet hours after the $/mi curve (twenty-one).
+  eq('...not one of the Strategy tab\'s sixteen tables is gone, and the passed-on two and the quiet-hours three are there',
+     (stratW.split('<table>').length - 1) + (stratW.split('<p class="note">None.</p>').length - 1), 21);
+  // Rush against quiet hours (strategy.js section 8): worked there over the
+  // report's offers and takes, only drawn here, straight after the $/mi
+  // curve it reads against, saying it is reading only.
+  var qW = repW.strategy.quiet;
+  eq('rush against quiet hours: strategy.js\'s, over the report\'s offers and takes (one computation)',
+     [qW.split, qW.parts, qW.lines], [sOwn.quiet.split, sOwn.quiet.parts, sOwn.quiet.lines]);
+  ok('...drawn after the $/mi curve and before what offers look like, its lines word for word',
+     /<h3 id="s-quiet">Rush vs quiet hours: \$\/hr line against \$\/mi line<\/h3>/.test(stratW)
+     && stratW.indexOf('id="s-mile"') < stratW.indexOf('id="s-quiet"') && stratW.indexOf('id="s-quiet"') < stratW.indexOf('id="s-seen"')
+     && qW.lines.length > 1 && qW.lines.every(function (l) { return stratW.indexOf(esc0(l)) >= 0; }));
+  ok('...saying it is reading only and that the Settled refusals stand',
+     /<b>Reading only\.<\/b>/.test(stratW) && /stay refused \(AUDITS\.md, Settled\) unless you revisit them with this evidence/.test(stratW));
+  ok('...with the split hour by hour and card against real folded under it',
+     stratW.indexOf('id="s-quiet-hours"') > stratW.indexOf('id="s-quiet"') && stratW.indexOf('id="s-quiet-card"') > 0
+     && qW.split.byHour.every(function (h) { return stratW.indexOf('<td>' + h.part + '</td>') >= 0; }));
   // The good offers passed on (strategy.js section 7): under the curve's
   // points, ahead of Gold and the slices, worked by strategy.js and only
   // drawn here — every block's bar line says its counts as strategy.js has them.

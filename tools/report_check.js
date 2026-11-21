@@ -28,6 +28,9 @@
  *     whether the same-trip pairs agree on miles and minutes;
  *   - whether the journal read was cut, how many pages it took, and how
  *     many days old its newest offer is;
+ *   - rush against quiet hours (strategy.js section 8): each half's clock
+ *     hours, counts, lines in and out of sample, verdict word, and real
+ *     against card minutes by the split;
  *   - how long the main computations took here.
  *
  * NEVER a place, a coordinate, a card's text, an id or one trip's amount:
@@ -152,6 +155,27 @@ function reofferedHow(offers) {
              payUp: pairs.payUp, paySame: pairs.paySame, payDown: pairs.payDown,
              gapMedianMin: gapMedian === null ? null : r2(gapMedian),
              withinAMinute: pairs.close, apart: total - pairs.close }
+  };
+}
+
+/* Rush against quiet hours (strategy.js section 8), as the Strategy tab
+ * draws it, in counts and figures only: the clock hours of each half (an
+ * hour of the day, never a place), the free hours, offers, timed orders,
+ * each kind of line in and out of sample with its interval, the verdict
+ * word, and card against real by the split. Reading only, as there. */
+function quietOf(q) {
+  if (!q) return null;
+  return {
+    split: q.split.ok ? { quiet: q.split.quiet, busy: q.split.busy } : null,
+    floors: q.floors,
+    parts: q.parts.map(function (p) {
+      var h = p.heldOut;
+      return { name: p.name, days: p.days, freeHours: p.freeHours, offers: p.offers, timed: p.timed, basis: p.basis,
+               bestHour: p.bestHour, bestMile: p.bestMile,
+               heldOut: h ? { days: h.days, hr: h.hr, hrCi: h.hrCi, mi: h.mi, miCi: h.miCi, diff: h.diff, diffCi: h.diffCi } : null,
+               verdict: p.verdict, thin: p.thin, ratio: p.actual.ratio };
+    }),
+    cardVsReal: q.cardVsReal
   };
 }
 
@@ -297,9 +321,10 @@ function check(journal, trends, opts) {
     var wk = T.weekKeyOf(lastDay);
     time('weekReview (newest week)', function () { return T.weekReview(rows, runs, wk, { cut: cut, costPerMile: cpm }); });
   }
-  time('strategy.js analyse (the Strategy tab)', function () {
+  var strat = time('strategy.js analyse (the Strategy tab)', function () {
     return S.analyse({ offers: offers, orders: orders, rulers: rr.byTop, boots: opts.boots || undefined });
   });
+  res.quiet = quietOf(strat.quiet);
   time('When & where', function () { return P.whenWhere(offers, P.waitingLine(offers, journal && journal.taken || [], null, null), rr); });
   res.times = times;
   return res;
@@ -374,6 +399,30 @@ function format(res) {
              + '; median gap ' + q.gapMedianMin + ' min');
     out.push('  pairs inside a minute (one card under two ids, not marked since the gap rule) ' + q.withinAMinute
              + ', a minute or more apart (re-offered) ' + q.apart);
+  }
+  out.push('');
+  var qq = res.quiet;
+  out.push('rush vs quiet hours ($/hr line against $/mi line; reading only, no rule):');
+  if (!qq || !qq.split) {
+    out.push('  no split: free time in fewer than two clock hours');
+  } else {
+    var hh = function (l) { return l.join(','); };
+    out.push('  quiet hours ' + hh(qq.split.quiet.hours) + ': ' + qq.split.quiet.perFreeHour + ' offers/h free over '
+             + qq.split.quiet.freeHours + ' h; busy hours ' + hh(qq.split.busy.hours) + ': ' + qq.split.busy.perFreeHour
+             + '/h over ' + qq.split.busy.freeHours + ' h');
+    var ci = function (c) { return c ? ' [' + c[0] + ', ' + c[1] + ']' : ''; };
+    qq.parts.forEach(function (pp) {
+      var x = pp.heldOut;
+      out.push('  ' + pp.name + ': ' + pp.days + ' days, ' + pp.offers + ' offers free, ' + pp.timed + ' timed (floor '
+               + qq.floors.timed + ' timed, ' + qq.floors.days + ' days); in sample $/hr '
+               + (pp.bestHour ? '$' + pp.bestHour.T + '+ $' + pp.bestHour.value : '—') + ', $/mi '
+               + (pp.bestMile ? '$' + pp.bestMile.T + '+ $' + pp.bestMile.value : '—') + ' (' + pp.basis + ')'
+               + (x ? '; held out $/hr $' + x.hr + ci(x.hrCi) + ', $/mi $' + x.mi + ci(x.miCi) + ', mi-hr ' + x.diff + ci(x.diffCi) : '')
+               + '; verdict ' + pp.verdict + (pp.thin.length ? ' (' + pp.thin.join(', ') + ')' : ''));
+    });
+    var cv = qq.cardVsReal;
+    out.push('  real / card minutes: ' + (cv ? 'quiet ' + cv.quiet + ' (' + cv.quietN + '), busy ' + cv.busy + ' (' + cv.busyN
+             + '), quiet-busy ' + cv.diff + ci(cv.diffCi) + ', ' + cv.verdict : 'too few timed orders in a half'));
   }
   out.push('');
   out.push('timings here:');
