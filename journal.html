@@ -488,6 +488,23 @@
   .offer button.took:disabled { opacity: .3; }
   /* The order in the car right now (paintInCar), in the ✓'s own green. */
   .offer .tag.incar { color: var(--go); }
+  /* Rides against deliveries (showRideVs): per kind a label and two bars,
+     $/hr and $/mi, each the middle half of its spread with a tick at the
+     median. Two equal columns that shrink, so it holds at 360px. */
+  .rv { display: grid; grid-template-columns: minmax(64px, auto) 1fr 1fr; gap: 4px 8px;
+        align-items: center; font-size: 13px; }
+  .rv .rvh { font-size: 11px; color: var(--muted); }
+  .rv .rvk small, .rv .rvn { color: var(--muted); font-size: 11px; }
+  .rv .rvk { min-width: 0; overflow-wrap: anywhere; }
+  .rv .rvc { min-width: 0; }
+  .rv .rvt { position: relative; height: 12px; border-radius: 3px; background: var(--line); }
+  .rv .rvq { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: var(--muted); opacity: .55; }
+  .rv .rvm { position: absolute; top: -2px; bottom: -2px; width: 3px; margin-left: -1px; background: var(--text); }
+  .rv .rvp { position: absolute; top: 3px; bottom: 3px; width: 2px; background: var(--muted); }
+  .rv .rvs { grid-column: 1 / -1; font-size: 11px; color: var(--muted); margin: -2px 0 6px; }
+  .rv .rvsec { grid-column: 1 / -1; font-weight: 700; margin-top: 6px; }
+  /* Uber's ride product (offerRow): a name, not a warning. */
+  .offer .tag.ride { color: var(--muted); }
 
   /* A pairing row carries more in its summary than an offer row does — a range,
      two payouts, a span, a verdict chip and where both jobs end — so its places
@@ -681,6 +698,9 @@
        the $/mi tables put one on every panel. */
     table.waits { font-size: 17px; }
     table.waits th, table.waits tr.mine td i { font-size: 15px; }
+    /* ...and the rides-against-deliveries chart's labels and spreads. */
+    .rv { font-size: 17px; }
+    .rv .rvh, .rv .rvs, .rv .rvk small, .rv .rvn { font-size: 15px; }
     #nothing { font-size: 17px; }
     #nothing b { font-size: 20px; }
     #nothing code { font-size: 16px; }
@@ -1258,6 +1278,19 @@
     <button type="button" data-pick="aside" aria-pressed="false">Set aside</button>
     <button type="button" data-pick="busy" aria-pressed="false">During a job</button>
   </div>
+  <!-- Rides or deliveries (the owner, Nov 2026: "can the offers page have an
+       option to select uber rides specifically? Usually marked as uber x").
+       A ride is a card that printed Uber's product (the row's `product`, or
+       its kept text read again by the server: `productFrom`), else one of
+       the ride card's shape — two legs, no shop chip, not DoorDash — which is
+       said under the list. With Rides on, a chip for each product in the
+       range. The list only, like the chips above; kept on this browser. -->
+  <div class="chips" id="kindChips" role="group" aria-label="Rides or deliveries">
+    <button type="button" data-kind="all" aria-pressed="true">All</button>
+    <button type="button" data-kind="rides" aria-pressed="false">Rides</button>
+    <button type="button" data-kind="deliveries" aria-pressed="false">Deliveries</button>
+  </div>
+  <div class="chips" id="productChips" role="group" aria-label="Which ride product" hidden></div>
   <div class="chips sorts" id="sorts" role="group" aria-label="Order">
     <button type="button" data-sort="newest" aria-pressed="true">Newest</button>
     <button type="button" data-sort="perHour" aria-pressed="false">Best $/hr</button>
@@ -1269,6 +1302,7 @@
        said so, and one press to put every day back. -->
   <p class="hint" id="dayNote" hidden><span id="daySays"></span><button type="button" id="dayClear">every day</button></p>
   <p class="hint" id="findNote" hidden></p>
+  <p class="hint" id="kindNote" hidden></p>
   <div id="log"></div>
   <p class="hint" id="more"></p>
   <!-- Every offer in this range as a spreadsheet (the owner, Nov 2026: "the
@@ -1452,6 +1486,23 @@
   <h2 id="kindsHead">Rides and shop orders <em>· median $/hr</em></h2>
   <p class="sum">The middle $/hr of rides and of shop-and-deliver orders.</p>
   <div id="kinds"></div>
+  </section>
+
+  <!-- Rides against deliveries (the owner, Nov 2026: "I am curious how
+       passenger rides differ from food delivery, it seems to often pay more
+       per hour but not as efficient per mile"). The card's $/hr and $/mi side
+       by side for each kind — rides by their product where the card printed
+       one — over the range pressed, and the orders taken and timed the same
+       way off their records. Descriptive only: no $/mi rule, nothing reaches
+       the panel (AUDITS.md, Settled). What the app PAID by kind is the Money
+       tab's, and is linked rather than said twice. -->
+  <section class="card" id="rideVs" hidden>
+  <h2 id="rideVsHead">Rides against deliveries <em>· card $/hr and $/mi</em></h2>
+  <p class="sum" id="rideVsSays"></p>
+  <div id="rideVsChart"></div>
+  <p class="note">Each bar runs from the lower to the upper quarter, the tick at the middle and a faint
+    mark at the top tenth. A ride is a card that printed Uber&rsquo;s product, else a two-leg card with none
+    (ride by card shape). <a href="#money">What the app paid, card against paid → Money</a></p>
   </section>
 
   <section class="card" id="weekCard">
@@ -1876,7 +1927,8 @@
    'sheet', 'sheetHead', 'sheetWhere', 'sheetShut', 'sheetMap', 'sheetFoot',
    'sheetNote', 'sheetOut', 'incar', 'incarList',
    'targets', 'targetsRate', 'targetsAreas', 'targetsAreasHead', 'targetsNotes',
-   'dayNote', 'daySays', 'dayClear'].forEach(function (id) {
+   'dayNote', 'daySays', 'dayClear', 'kindChips', 'productChips', 'kindNote',
+   'rideVs', 'rideVsHead', 'rideVsSays', 'rideVsChart'].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
 
@@ -2353,6 +2405,12 @@
         + ' title="' + (r.accepted ? 'you took this \u2014 press to unmark'
                                    : 'I took this') + '">\u2713</button>'
       + (r.hidden ? '<span class="tag">hidden</span>' : '')
+      // Uber's ride product, as the card printed it: the same tag, which
+      // shrinks before the row runs past the glass (`.offer .tag`).
+      + (rideBy(r) === 'product'
+         ? '<span class="tag ride" title="' + (r.productFrom === 'text'
+             ? 'read again from this older row\'s kept card text' : 'as the card printed it') + '">'
+           + esc(r.product) + '</span>' : '')
       + (aside && !r.hidden
          ? '<span class="tag">' + (r.whole === false ? 'partial' : 'odd') + '</span>' : '')
       // Only ever in the positive case. There is no chip for "you were free",
@@ -2593,6 +2651,61 @@
   // in list order and read by fillOffer when a row opens.
   var listed = [];
 
+  // Rides or deliveries, and which ride product: the second chip row. Kept
+  // on this browser, a per-viewer convenience like the tab (localStorage can
+  // be refused or empty, and the page is All then).
+  var KIND_KEY = 'uberscan.offers.kind.v1';
+  var kindPick = 'all';
+  var productPick = null;
+  try {
+    var kindKept = JSON.parse(localStorage.getItem(KIND_KEY) || 'null');
+    if (kindKept && (kindKept.kind === 'rides' || kindKept.kind === 'deliveries')) kindPick = kindKept.kind;
+    if (kindPick === 'rides' && typeof kindKept.product === 'string') productPick = kindKept.product;
+  } catch (e) { /* not kept: All */ }
+  function keepKind() {
+    try { localStorage.setItem(KIND_KEY, JSON.stringify({ kind: kindPick, product: productPick })); }
+    catch (e) { /* refused: kept until the page closes */ }
+  }
+  // Why a row is a ride: 'product' where the card printed Uber's product
+  // (the row's own or read again from its text by the server), 'shape' for
+  // a card with none that has the ride card's shape — two legs, no shop
+  // chip, not DoorDash, the rule the kinds chart has always split on — and
+  // null for everything else, which the Deliveries chip lists. A single-leg
+  // card that said nothing is filed with deliveries: the ride card prints
+  // the drive to the rider and the trip, two legs, whatever else it lost.
+  function rideBy(r) {
+    if (typeof r.product === 'string' && r.product) return 'product';
+    return !r.shop && r.app !== 'doordash' && r.legs >= 2 ? 'shape' : null;
+  }
+  function kindMatches(r) {
+    if (kindPick === 'all') return true;
+    var ride = rideBy(r) !== null;
+    if (kindPick === 'deliveries') return !ride;
+    return ride && (productPick === null || r.product === productPick);
+  }
+  // The product chips: those the range's rides printed, commonest first,
+  // drawn only while Rides is pressed. A product kept from another range
+  // that this one has none of is still offered, pressed, so the empty list
+  // under it says why.
+  function paintKindChips(kept) {
+    Array.prototype.forEach.call(el.kindChips.querySelectorAll('button'), function (b) {
+      b.setAttribute('aria-pressed', b.getAttribute('data-kind') === kindPick ? 'true' : 'false');
+    });
+    el.productChips.hidden = kindPick !== 'rides';
+    if (el.productChips.hidden) { el.productChips.innerHTML = ''; return; }
+    var n = Object.create(null);
+    kept.forEach(function (r) {
+      if (rideBy(r) === 'product') n[r.product] = (n[r.product] || 0) + 1;
+    });
+    if (productPick !== null && !(productPick in n)) n[productPick] = 0;
+    var names = Object.keys(n).sort(function (a, b) { return n[b] - n[a] || (a < b ? -1 : 1); });
+    el.productChips.innerHTML = ['<button type="button" data-product="" aria-pressed="'
+      + (productPick === null) + '">Every ride</button>'].concat(names.map(function (p) {
+        return '<button type="button" data-product="' + esc(p) + '" aria-pressed="'
+          + (productPick === p) + '">' + esc(p) + ' <small>' + n[p] + '</small></button>';
+      })).join('');
+  }
+
   // Whether one row belongs to the pile a chip names.
   //
   // The three verdict chips read the verdict RECORDED on the row — what the
@@ -2647,7 +2760,8 @@
       });
     }
     if (pick !== 'all') rows = rows.filter(picked);
-    var q = (el.find.value || '').trim().toLowerCase();
+    if (kindPick !== 'all') rows = rows.filter(kindMatches);
+    var q =(el.find.value || '').trim().toLowerCase();
     if (!q) return rows;
     var terms = q.split(/\s*,\s*|\s+and\s+/).filter(Boolean);
     return rows.filter(function (r) {
@@ -3888,6 +4002,108 @@
       if (rs.length) html += row('card ' + b[2], rs);
     });
     el.real.innerHTML = html + '</tbody></table>';
+  }
+
+  /* RIDES AGAINST DELIVERIES (the owner, Nov 2026: "it seems to often pay
+     more per hour but not as efficient per mile"). Two spreads per kind: the
+     card's $/hr (the row's, as every chart here) and its $/mi (payPerMile,
+     the "Best $/mi" figure: pay over the card's miles, nothing taken off),
+     over the counted offers of the range; then the orders taken and timed,
+     off their records' own money (server.js orderMoney: pay over the clock,
+     and over the GPS miles where there are RIDE_VS_GPS_MI of them). Rides
+     split by product where a product has RIDE_VS_MIN offers. A ride is
+     rideBy's. Under RIDE_VS_MIN rides there is no sentence comparing them,
+     only "too few rides yet". Descriptive: nothing here is a rule. */
+  var RIDE_VS_MIN = 5;
+  function spreadOf(values) {
+    var v = values.filter(function (x) { return typeof x === 'number' && isFinite(x); })
+                  .sort(function (a, b) { return a - b; });
+    return { n: v.length, p25: percentile(v, 0.25), p50: percentile(v, 0.5),
+             p75: percentile(v, 0.75), p90: percentile(v, 0.9) };
+  }
+  function showRideVs(offers, records, kept) {
+    var card = { rides: [], deliveries: [], by: Object.create(null) };
+    offers.forEach(function (r) {
+      var ride = rideBy(r);
+      if (!ride) { card.deliveries.push(r); return; }
+      card.rides.push(r);
+      if (ride === 'product') (card.by[r.product] = card.by[r.product] || []).push(r);
+    });
+    if (!card.rides.length && !card.deliveries.length) {
+      el.rideVs.hidden = true;
+      el.rideVsChart.innerHTML = el.rideVsSays.textContent = '';
+      return;
+    }
+    el.rideVs.hidden = false;
+    var byId = Object.create(null);
+    (kept || []).forEach(function (r) { if (r && r.id) byId[r.id] = r; });
+    var real = { rides: [], deliveries: [] };
+    (records || []).forEach(function (rec) {
+      var m = rec && rec.money;
+      var o = rec && byId[rec.offer];
+      if (!m || !o || typeof m.perHour !== 'number') return;
+      real[rideBy(o) ? 'rides' : 'deliveries'].push(m);
+    });
+    function cardRow(label, rs) {
+      return { label: label, hr: spreadOf(rs.map(function (r) { return r.perHour; })),
+               mi: spreadOf(rs.map(payPerMile)) };
+    }
+    function realRow(label, ms) {
+      return { label: label, hr: spreadOf(ms.map(function (m) { return m.perHour; })),
+               mi: spreadOf(ms.map(function (m) { return m.perMile; })) };
+    }
+    var cardRows = [cardRow('Rides', card.rides)];
+    Object.keys(card.by).sort(function (a, b) { return card.by[b].length - card.by[a].length; })
+      .forEach(function (p) {
+        if (card.by[p].length >= RIDE_VS_MIN && card.by[p].length < card.rides.length) {
+          cardRows.push(cardRow('· ' + p, card.by[p]));
+        }
+      });
+    cardRows.push(cardRow('Deliveries', card.deliveries));
+    var realRows = real.rides.length + real.deliveries.length
+      ? [realRow('Rides', real.rides), realRow('Deliveries', real.deliveries)] : [];
+    // One scale per figure across both sections, so a longer bar is more.
+    var all = cardRows.concat(realRows);
+    var top = { hr: 0, mi: 0 };
+    all.forEach(function (k) {
+      ['hr', 'mi'].forEach(function (f) { if (k[f].p90 > top[f]) top[f] = k[f].p90; });
+    });
+    function at(v, f) { return top[f] > 0 ? Math.max(0, Math.min(100, v / top[f] * 100)) : 0; }
+    function cell(s, f) {
+      if (!s.n) return '<span class="rvc rvn">--</span>';
+      return '<span class="rvc"><span class="rvt">'
+        + '<span class="rvq" style="left:' + at(s.p25, f).toFixed(1) + '%;width:'
+          + Math.max(1, at(s.p75, f) - at(s.p25, f)).toFixed(1) + '%"></span>'
+        + '<span class="rvp" style="left:' + at(s.p90, f).toFixed(1) + '%"></span>'
+        + '<span class="rvm" style="left:' + at(s.p50, f).toFixed(1) + '%"></span>'
+        + '</span>' + money(s.p50, f === 'hr' ? 0 : 2) + (f === 'hr' ? '/hr' : '/mi') + '</span>';
+    }
+    function said(s, dp) {
+      return s.n ? money(s.p25, dp) + ' · ' + money(s.p50, dp) + ' · ' + money(s.p75, dp)
+        + ', top tenth ' + money(s.p90, dp) + ' (n=' + s.n + ')' : 'none';
+    }
+    function rows(list) {
+      return list.map(function (k) {
+        return '<span class="rvk">' + esc(k.label) + ' <small>' + Math.max(k.hr.n, k.mi.n) + '</small></span>'
+          + cell(k.hr, 'hr') + cell(k.mi, 'mi')
+          + '<span class="rvs">$/hr ' + said(k.hr, 0) + '; $/mi ' + said(k.mi, 2) + '</span>';
+      }).join('');
+    }
+    el.rideVsChart.innerHTML = '<div class="rv">'
+      + '<span class="rvsec">Offers, as the card put them</span>'
+      + '<span class="rvh"></span><span class="rvh">card $/hr</span><span class="rvh">card $/mi</span>'
+      + rows(cardRows)
+      + (realRows.length ? '<span class="rvsec">Orders taken and timed</span>'
+         + '<span class="rvh"></span><span class="rvh">real $/hr</span><span class="rvh">real $/mi (GPS)</span>'
+         + rows(realRows) : '')
+      + '</div>';
+    var r = cardRows[0], d = cardRows[cardRows.length - 1];
+    el.rideVsSays.textContent = card.rides.length < RIDE_VS_MIN
+      ? 'Too few rides yet: ' + card.rides.length + ' in this range against ' + card.deliveries.length
+        + ' deliveries, and a comparison needs ' + RIDE_VS_MIN + '.'
+      : 'Rides: median ' + money(r.hr.p50, 0) + '/hr against ' + money(d.hr.p50, 0) + ' for deliveries; $/mi '
+        + money(r.mi.p50, 2) + ' against ' + money(d.mi.p50, 2) + ' (n=' + card.rides.length + ' rides, '
+        + card.deliveries.length + ' deliveries).';
   }
 
   /* RESTAURANT WAITS. The stores the GPS has measured a wait at two or more
@@ -5447,12 +5663,20 @@
    * `esc` because this is the only text on the page the driver typed, and it
    * is now going into innerHTML rather than textContent to carry the figures.
    */
+  // The kind chips' part of that sentence: ", rides", ", UberX rides" or
+  // ", deliveries", or nothing under All.
+  function kindWords() {
+    return kindPick === 'deliveries' ? ', deliveries'
+      : kindPick === 'rides' ? ', ' + (productPick === null ? '' : productPick + ' ') + 'rides' : '';
+  }
   function foundNote(found, total, q, target) {
     // How the selection was made, in words: a chip, a search, or both.
     var how = (pick !== 'all' ? ' ' + PICK_WORDS[pick] : '')
-            + (q ? (pick !== 'all' ? ' and' : '') + ' match "' + esc(q) + '"' : '');
+            + (q ? (pick !== 'all' ? ' and' : '') + ' match "' + esc(q) + '"' : '')
+            + kindWords();
     if (!found.length) {
-      if (!q) return PICK_NONE[pick] + '. Try a wider range.';
+      if (!q && pick === 'all') return 'No ' + kindWords().replace(/^, /, '') + ' in this stretch. Try a wider range.';
+      if (!q) return PICK_NONE[pick] + kindWords() + '. Try a wider range.';
       return 'Nothing in this stretch'
            + (pick !== 'all' ? ' ' + PICK_WORDS[pick] : '')
            + ' matches "' + esc(q) + '". Try a wider range, or just the number.';
@@ -5609,6 +5833,7 @@
       // reads as a chart that failed to draw rather than as one there is
       // nothing to draw.
       el.blocksHead.hidden = el.kindsHead.hidden = el.weekHead.hidden = true;
+      el.rideVs.hidden = true;
       el.week.innerHTML = '';
       // Nothing here has a rate, so nothing here can be in the taken chart —
       // including a doubtful row somebody ticked. An empty list is what
@@ -5861,8 +6086,14 @@
     // chip alone gives Rides 109 / Shop 23 ($11.05) / Not stated 1,008: a bar
     // that is what its label says, over a median $1.37 lower than the one the
     // page was printing.
+    //
+    // ...and Uber's product before any of it (the row's `product`, Nov
+    // 2026): a card that printed "UberX" is a ride whatever its legs read,
+    // so a ride whose second leg the reader lost is no longer "Not stated".
+    // The two-leg shape still decides for a row with no product.
     offers.forEach(function (r) {
-      var which = r.shop ? 1
+      var which = typeof r.product === 'string' && r.product ? 0
+        : r.shop ? 1
         : (r.legs >= 2 ? 0                 // two legs is a ride card's shape
            : 2);                           // no chip read: genuinely unstated
       kinds[which].rates.push(r.perHour);
@@ -5877,6 +6108,8 @@
     el.kinds.innerHTML = kinds.map(function (k) {
       return bar(k.name, k.rates, full, target, band);
     }).join('');
+    // ...and the two kinds' $/hr against their $/mi, beside it.
+    showRideVs(offers, data.records, kept);
 
     // --- by day of the week ---------------------------------------------------
     //
@@ -5990,6 +6223,7 @@
     // so the grouping costs one pass per load rather than one per header per
     // keystroke.
     var byDay = view.byDay || (view.byDay = groupByDay(kept));
+    paintKindChips(kept);
     var found = matching(kept);
     var shown = ordered(found);
     var byTime = sortBy === 'newest';
@@ -6094,10 +6328,21 @@
     // Say what the filter did, because an empty list and a list with nothing
     // matching look identical, and one of them means "you have no offers".
     var q = (el.find.value || '').trim();
-    el.findNote.hidden = !q && pick === 'all';
+    el.findNote.hidden = !q && pick === 'all' && kindPick === 'all';
     if (!el.findNote.hidden) {
       el.findNote.innerHTML = foundNote(found, kept.length, q, target);
     }
+    // ...and, under Rides, how many of them are rides by their card's product
+    // and how many only by its shape, which is a weaker claim and said so.
+    var byShape = kindPick === 'rides'
+      ? found.filter(function (r) { return rideBy(r) === 'shape'; }).length : 0;
+    var byText = kindPick === 'rides'
+      ? found.filter(function (r) { return rideBy(r) === 'product' && r.productFrom === 'text'; }).length : 0;
+    el.kindNote.hidden = kindPick !== 'rides' || !found.length;
+    el.kindNote.textContent = el.kindNote.hidden ? ''
+      : (found.length - byShape) + ' by the product the card printed'
+        + (byText ? ' (' + byText + ' of them read again from the kept text of an older row)' : '')
+        + (byShape ? ', ' + byShape + ' ride by card shape: two legs and no product read' : '') + '.';
   }
 
   /* --- Close the shift ---------------------------------------------------
@@ -6359,6 +6604,7 @@
         el.headline.textContent = '';
         el.blocks.innerHTML = el.kinds.innerHTML = el.log.innerHTML = '';
         el.blocksHead.hidden = el.kindsHead.hidden = el.weekHead.hidden = true;
+        el.rideVs.hidden = true;
         el.week.innerHTML = '';
         el.took.innerHTML = '';
         el.tookHead.hidden = true;
@@ -7100,6 +7346,23 @@
     if (!button) return;
     pick = button.getAttribute('data-pick');
     pressOne(el.chips, button);
+    renderList();
+  });
+  el.kindChips.addEventListener('click', function (e) {
+    var button = e.target.closest('button[data-kind]');
+    if (!button) return;
+    kindPick = button.getAttribute('data-kind');
+    productPick = null;
+    keepKind();
+    if (!view) paintKindChips([]);
+    renderList();
+  });
+  el.productChips.addEventListener('click', function (e) {
+    var button = e.target.closest('button[data-product]');
+    if (!button) return;
+    productPick = button.getAttribute('data-product') || null;
+    keepKind();
+    if (!view) paintKindChips([]);
     renderList();
   });
   el.sorts.addEventListener('click', function (e) {

@@ -2684,8 +2684,8 @@ try:
        ('blob', [0xef, 0xbb, 0xbf], 12, ['datetime', 'date', 'time', 'weekday', 'hour', 'driver_day',
                                          'driver_weekday', 'week_start']))
     _eby = {r[_ehead.index('offer_id')]: dict(zip(_ehead, r)) for r in _erows[1:]} if 'offer_id' in _ehead else {}
-    eq('[every offer csv] round B appends special_day and reoffered after offer_id, and takes no row away',
-       (_ehead[-3:], len(_erows) - 1), (['offer_id', 'special_day', 'reoffered'], 12))
+    eq('[every offer csv] round B appends special_day and reoffered after offer_id, then product, and takes no '
+       'row away', (_ehead[-4:], len(_erows) - 1), (['offer_id', 'special_day', 'reoffered', 'product'], 12))
     _e0, _e1, _e2, _e5 = (_eby.get(k, {}) for k in ('r0', 'r1', 'r2', 'r5'))
     _t0 = time.localtime(NOW / 1000.0)
     eq('[every offer csv] the card\'s moment on this clock, and the GPS of a row with a fix: six places, yes, metres',
@@ -5143,6 +5143,232 @@ finally:
     except Exception:
         _tproc.kill()
     _tshutil.rmtree(_twork, ignore_errors=True)
+
+# --- [rides] Rides or deliveries, by Uber's product, and the two set side by side
+# The owner, Nov 2026: "can the offers page have an option to select uber rides
+# specifically? Usually marked as uber x" and "I am curious how passenger rides
+# differ from food delivery, it seems to often pay more per hour but not as
+# efficient per mile". An invented journal through the real server's fold:
+# six UberX rows and two Comfort rows the rig wrote `product` into (the Comfort
+# pair with one leg read, the second lost), an older row with no field whose
+# kept text the server reads again (UberX, productFrom 'text'), a two-leg card
+# with none (a ride by card shape), and seven deliveries — one of them a
+# two-leg DoorDash card, which no ride rule takes. Rides pay $36/hr on $12 over
+# 8 miles ($1.50/mi), deliveries $24/hr on $8 over 2 ($4.00/mi); one of each
+# taken and timed, with its record's own money.
+RIDES_PAGE = r"""
+const { chromium } = require('playwright');
+const base = process.argv[2];
+(async () => {
+  let browser;
+  for (const exe of JSON.parse(process.env.PW_EXES || '[]').concat([null])) {
+    try { browser = await chromium.launch(exe ? { executablePath: exe } : {}); break; } catch (e) {}
+  }
+  if (!browser) { console.log(JSON.stringify({ skip: 'no chromium' })); return; }
+  const out = {};
+  const peek = (page) => page.evaluate(() => {
+    const t = (s) => { const e = document.querySelector(s); return e && !e.hidden ? (e.textContent || '').replace(/\s+/g, ' ').trim() : null; };
+    return {
+      rows: [].slice.call(document.querySelectorAll('#log details.offer')).map((d) => d.getAttribute('data-id')),
+      tags: [].slice.call(document.querySelectorAll('#log details.offer')).map((d) => {
+        const g = d.querySelector('summary .tag.ride');
+        return [d.getAttribute('data-id'), g ? g.textContent.trim() : null, g ? g.getAttribute('title') : null];
+      }),
+      kind: [].slice.call(document.querySelectorAll('#kindChips button[aria-pressed="true"]')).map((b) => b.getAttribute('data-kind')),
+      products: document.getElementById('productChips').hidden ? null
+        : [].slice.call(document.querySelectorAll('#productChips button')).map((b) =>
+            [(b.textContent || '').replace(/\s+/g, ' ').trim(), b.getAttribute('aria-pressed')]),
+      note: t('#findNote'), kindNote: t('#kindNote'),
+      ppm: [].slice.call(document.querySelectorAll('#log details.offer .ppm')).map((b) => b.textContent.trim()),
+      kinds: [].slice.call(document.querySelectorAll('#kinds .block')).map((b) =>
+        [b.querySelector('.label').textContent.trim(), b.querySelector('.n').textContent.trim()]),
+      vsSays: t('#rideVsSays'),
+      vsRows: [].slice.call(document.querySelectorAll('#rideVsChart .rvk')).map((e) => (e.textContent || '').replace(/\s+/g, ' ').trim()),
+      vsSpread: [].slice.call(document.querySelectorAll('#rideVsChart .rvs')).map((e) => (e.textContent || '').replace(/\s+/g, ' ').trim()),
+      vsSecs: [].slice.call(document.querySelectorAll('#rideVsChart .rvsec')).map((e) => e.textContent.trim()),
+      sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      kept: (function () { try { return localStorage.getItem('uberscan.offers.kind.v1'); } catch (e) { return 'refused'; } })(),
+    };
+  });
+  const ctx = await browser.newContext({ viewport: { width: 900, height: 900 } });
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on('pageerror', (e) => errs.push(String(e)));
+  await page.goto(base + '/journal.html#all', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1000);
+  await page.click('#ranges button[data-days="0"]');
+  await page.waitForTimeout(2000);
+  out.all = await peek(page);
+  await page.click('#kindChips button[data-kind="rides"]');
+  await page.waitForTimeout(300);
+  out.rides = await peek(page);
+  await page.click('#productChips button[data-product="UberX"]');
+  await page.waitForTimeout(300);
+  out.uberx = await peek(page);
+  await page.click('#sorts button[data-sort="payPerMile"]');
+  await page.waitForTimeout(300);
+  out.uberxPpm = await peek(page);
+  await page.click('#sorts button[data-sort="newest"]');
+  // Remembered: the page loaded again on this browser (a reload: a goto to
+  // the same address and hash moves nothing), the range pressed again.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1000);
+  await page.click('#ranges button[data-days="0"]');
+  await page.waitForTimeout(2000);
+  out.again = await peek(page);
+  await page.click('#kindChips button[data-kind="deliveries"]');
+  await page.waitForTimeout(300);
+  out.deliveries = await peek(page);
+  await page.click('#kindChips button[data-kind="all"]');
+  await page.waitForTimeout(300);
+  out.back = await peek(page);
+  out.errs = errs;
+  await ctx.close();
+  // A phone at 360px: the chips, the tags and the paired chart fit.
+  const ctx2 = await browser.newContext({ viewport: { width: 360, height: 780 } });
+  const p2 = await ctx2.newPage();
+  await p2.goto(base + '/journal.html#all', { waitUntil: 'domcontentloaded' });
+  await p2.waitForTimeout(1000);
+  await p2.click('#ranges button[data-days="0"]');
+  await p2.waitForTimeout(2000);
+  await p2.click('#kindChips button[data-kind="rides"]');
+  await p2.waitForTimeout(300);
+  out.narrow = await peek(p2);
+  out.narrowChart = await p2.evaluate(() => {
+    const c = document.getElementById('rideVsChart').getBoundingClientRect();
+    return { right: c.right, width: window.innerWidth };
+  });
+  await ctx2.close();
+  await browser.close();
+  console.log(JSON.stringify(out));
+})().catch((e) => { console.log(JSON.stringify({ __crashed: String(e && e.stack || e) })); });
+"""
+
+_rwork = _ttemp.mkdtemp()
+_rj = os.path.join(_rwork, 'journal.jsonl')
+_RNOW = int(_ttime.time() * 1000) - 3600000
+
+
+def _rrow(oid, i, pay, miles, per_hour, legs, **extra):
+    at = _RNOW - i * 600000
+    row = {'v': 3, 'id': oid, 'seq': 1, 'at': at, 'firstAt': at, 'pay': pay, 'minutes': 20.0,
+           'miles': miles, 'perHour': per_hour, 'grossPerHour': per_hour, 'cost': 0.0,
+           'costPerMile': 0, 'billedMinutes': 20.0, 'target': 25, 'band': 15, 'state': 'go',
+           'legs': legs, 'whole': True, 'app': 'uber'}
+    row.update(extra)
+    return row
+
+
+_RT = '5 min (1.2 mi) away Oak Ln, Harrowen 15 min (6.8 mi) trip'
+_rrows = ([_rrow('u%d' % i, i, 12.0, 8.0, 36.0, 2, product='UberX') for i in range(1, 7)]
+          + [_rrow('c%d' % i, 6 + i, 12.0, 8.0, 36.0, 1, product='Comfort') for i in (1, 2)]
+          + [_rrow('old1', 9, 12.0, 8.0, 36.0, 2, text='UberX $12.00 ' + _RT),
+             _rrow('shape1', 10, 12.0, 8.0, 36.0, 2)]
+          + [_rrow('d%d' % i, 10 + i, 8.0, 2.0, 24.0, 1, product=None,
+                   shop=True if i % 2 else None) for i in range(1, 7)]
+          + [_rrow('dd1', 17, 8.0, 2.0, 24.0, 2, app='doordash', product=None)])
+for _oid, _ph, _pm in (('u1', 28.0, 1.4), ('d1', 18.0, 2.5)):
+    _rtook = _RNOW - 30 * 60000 if _oid == 'u1' else _RNOW - 20 * 60000
+    _rrows.append({'v': 1, 'kind': 'order', 'id': '%s@%d' % (_oid, _rtook), 'offer': _oid, 'app': 'uber',
+                   'places': True, 'at': _rtook + 1800000, 'seq': _rtook + 1800000, 'how': 'gps',
+                   'card': {'pay': 12.0, 'minutes': 20, 'miles': 8},
+                   'times': {'offered': _rtook - 30000, 'took': _rtook, 'ended': _rtook + 1500000},
+                   'pickups': [], 'dropoff': {}, 'drive': {'miles': 9.0},
+                   'money': {'pay': 12.0, 'minutes': 25, 'miles': 9.0, 'perHour': _ph, 'perMile': _pm,
+                             'delivery': True}})
+with open(_rj, 'w') as _fh:
+    for _r in _rrows:
+        _fh.write(json.dumps(_r) + '\n')
+_rport = free_port()
+_rproc = subprocess.Popen(['node', os.path.join(ROOT, 'server.js')],
+                          env=dict(os.environ, SCANNER='0', PORT=str(_rport), HTTPS_PORT='0', JOURNAL=_rj),
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+_rbase = 'http://127.0.0.1:%d' % _rport
+try:
+    import urllib.request as _rurl
+    for _ in range(120):
+        try:
+            _rurl.urlopen(_rbase + '/api/status', timeout=1).read()
+            break
+        except Exception:
+            _ttime.sleep(0.1)
+    _rdrv = os.path.join(_rwork, 'rides.js')
+    open(_rdrv, 'w').write(RIDES_PAGE)
+    _rrun = subprocess.run(['node', _rdrv, _rbase],
+                           env=dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS),
+                                    PW_EXES=json.dumps([os.environ.get('CHROMIUM', ''),
+                                                        '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'])),
+                           capture_output=True, text=True, timeout=300)
+    _rline = (_rrun.stdout or '').strip().split('\n')[-1] if _rrun.stdout else ''
+    try:
+        _rd = json.loads(_rline)
+    except Exception:
+        _rd = {'__crashed': (_rrun.stderr or '')[-400:]}
+    if _rd.get('skip'):
+        print('[rides] %s — skipping the rides checks' % _rd['skip'])
+    elif _rd.get('__crashed'):
+        eq('[rides] the rides driver ran', _rd['__crashed'], None)
+    else:
+        _RIDES = ['u1', 'u2', 'u3', 'u4', 'u5', 'u6', 'c1', 'c2', 'old1', 'shape1']
+        _DELIV = ['d1', 'd2', 'd3', 'd4', 'd5', 'd6', 'dd1']
+        eq('[rides] All lists every offer, with All pressed', (sorted(_rd['all']['rows']), _rd['all']['kind']),
+           (sorted(_RIDES + _DELIV), ['all']))
+        eq('[rides] Rides lists the cards that printed a product, the one read again from its text, and the '
+           'two-leg card with none; not the two-leg DoorDash card', sorted(_rd['rides']['rows']), sorted(_RIDES))
+        eq('[rides] ...with a chip for each product in the range, commonest first, its count beside it',
+           _rd['rides']['products'], [['Every ride', 'true'], ['UberX 7', 'false'], ['Comfort 2', 'false']])
+        ok_('[rides] ...and says how many are rides by card shape only (%r)' % _rd['rides']['kindNote'],
+            '9 by the product the card printed (1 of them read again' in (_rd['rides']['kindNote'] or '')
+            and '1 ride by card shape' in (_rd['rides']['kindNote'] or ''))
+        ok_('[rides] ...and the sentence over the list names the selection (%r)' % _rd['rides']['note'],
+            (_rd['rides']['note'] or '').startswith('10 of 17 offers, rides.'))
+        eq('[rides] UberX lists the six the rig wrote and the older row read again from its text',
+           sorted(_rd['uberx']['rows']), ['old1', 'u1', 'u2', 'u3', 'u4', 'u5', 'u6'])
+        _tags = {t[0]: t for t in _rd['rides']['tags']}
+        eq('[rides] each ride row carries its product as a tag, and the shape-only ride none',
+           [_tags[i][1] for i in ('u1', 'c1', 'old1', 'shape1')], ['UberX', 'Comfort', 'UberX', None])
+        ok_('[rides] ...the one read again from its text saying so (%r)' % _tags['old1'][2],
+            'read again' in (_tags['old1'][2] or '') and 'read again' not in (_tags['u1'][2] or ''))
+        eq('[rides] Best $/mi ranks within the UberX selection, each row its $/mi',
+           (sorted(_rd['uberxPpm']['rows']), _rd['uberxPpm']['ppm']),
+           (['old1', 'u1', 'u2', 'u3', 'u4', 'u5', 'u6'], ['$1.50/mi'] * 7))
+        eq('[rides] the choice is kept on this browser: opened again, Rides and UberX are still pressed',
+           (_rd['again']['kind'], [p[0] for p in (_rd['again']['products'] or []) if p[1] == 'true'],
+            sorted(_rd['again']['rows'])),
+           (['rides'], ['UberX 7'], ['old1', 'u1', 'u2', 'u3', 'u4', 'u5', 'u6']))
+        eq('[rides] Deliveries lists the rest, the two-leg DoorDash card among them, and no product chips',
+           (sorted(_rd['deliveries']['rows']), _rd['deliveries']['products']), (sorted(_DELIV), None))
+        eq('[rides] All puts every row back and takes the sentences away',
+           (len(_rd['back']['rows']), _rd['back']['note'], _rd['back']['kindNote']), (17, None, None))
+        # The kinds chart: a card that printed its product is a ride whatever
+        # its legs read — the two Comfort rows lost their second leg, and the
+        # old rule filed them "Not stated".
+        eq('[rides] the kinds chart counts the product: Rides holds all ten rides (the one-leg Comfort pair '
+           'among them), and the DoorDash two-leg card still by its shape',
+           dict((k, int(n)) for k, n in _rd['all']['kinds']), {'Rides': 11, 'Shop': 3, 'Not stated': 3})
+        eq('[rides] rides against deliveries, in plain words over the range',
+           _rd['all']['vsSays'], 'Rides: median $36/hr against $24 for deliveries; $/mi $1.50 against $4.00 '
+           '(n=10 rides, 7 deliveries).')
+        eq('[rides] ...drawn for the offers (rides, UberX with five or more, deliveries) and for the orders '
+           'taken and timed', (_rd['all']['vsSecs'], _rd['all']['vsRows']),
+           (['Offers, as the card put them', 'Orders taken and timed'],
+            ['Rides 10', '· UberX 7', 'Deliveries 7', 'Rides 1', 'Deliveries 1']))
+        ok_('[rides] ...each with its spread, quartiles and top tenth, and the real ones off the records\' money (%r)'
+            % _rd['all']['vsSpread'][3:],
+            _rd['all']['vsSpread'][0] == '$/hr $36 · $36 · $36, top tenth $36 (n=10); '
+                                         '$/mi $1.50 · $1.50 · $1.50, top tenth $1.50 (n=10)'
+            and _rd['all']['vsSpread'][3].startswith('$/hr $28') and '$/mi $1.40' in _rd['all']['vsSpread'][3]
+            and _rd['all']['vsSpread'][4].startswith('$/hr $18') and '$/mi $2.50' in _rd['all']['vsSpread'][4])
+        eq('[rides] at 360px the chips, the tags and the paired chart fit, nothing scrolls sideways',
+           (_rd['narrow']['sideways'], _rd['narrowChart']['right'] <= _rd['narrowChart']['width']), (False, True))
+        eq('[rides] no script error on the way', _rd['errs'], [])
+finally:
+    _rproc.terminate()
+    try:
+        _rproc.wait(timeout=5)
+    except Exception:
+        _rproc.kill()
+    _tshutil.rmtree(_rwork, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d offers-page checks passed' % ok)
