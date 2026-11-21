@@ -3817,8 +3817,18 @@ const framed = (page) => page.waitForFunction(
     await page.waitForTimeout(3000);
     const refused = asked.refused;
     down = false;
+    // The rate is counted from the first picture back, not from the moment
+    // the frames return: up to FRAME_GAP_DOWN (a second) of backoff can stand
+    // before the next ask, and under the gate's pool that second plus a slow
+    // first load ate the window (the gate of 21 Nov: under 8 in two seconds
+    // counted from the switch). How soon it is back is held on its own.
+    const back0 = Date.now();
+    await page.waitForFunction(() => document.getElementById('view').naturalWidth > 0,
+                               null, { timeout: 5000 }).catch(() => {});
+    const backMs = Date.now() - back0;
+    const given0 = asked.given;
     await page.waitForTimeout(2000);
-    out.noFrame = { refused: refused, given: asked.given,
+    out.noFrame = { refused: refused, given: asked.given - given0, backMs: backMs,
                     w: await page.evaluate(() => document.getElementById('view').naturalWidth) };
     await page.close();
     await ctx.close();
@@ -11424,9 +11434,11 @@ try:
     ok_('[no frame] every still a 404 for three seconds: the panel asks again, backing off '
         '(%r asked; at the 30 ms floor it was 50 to 90)' % _nf.get('refused'),
         1 <= (_nf.get('refused') or 0) <= 15)
-    ok_('[no frame] ...and once the rig has a frame again the picture is back at the stills\' '
-        'own rate (%r in two seconds) and on the pane' % _nf.get('given'),
-        (_nf.get('given') or 0) >= 8 and (_nf.get('w') or 0) > 0)
+    ok_('[no frame] ...and once the rig has a frame again the picture is on the pane '
+        'within the backoff\'s second and a load (%rms)' % _nf.get('backMs'),
+        (_nf.get('w') or 0) > 0 and (_nf.get('backMs') or 99999) <= 3000)
+    ok_('[no frame] ...and from then at the stills\' own rate (%r in two seconds)'
+        % _nf.get('given'), (_nf.get('given') or 0) >= 8)
 
     # --- a reading with no verdict, and what it did read -----------------
     #

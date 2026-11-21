@@ -11437,12 +11437,20 @@ eq('on time: both deadlines met by some order of the stops, by the router\'s dri
    (_otb['stack'], _otb['row'], _otb['rows'], _otb['state'], _otb['rowkeys']),
    ({'onTime': 'both', 'lateMin': None, 'offWayMi': None},
     {'onTime': 'both', 'lateMin': None, 'offWayMi': None}, 1, 'go', ['onTime']))
-_otl = _ontime('ontime-late', _NOWMIN)
+# "This minute" read off the clock here, not _NOWMIN: that was taken near the
+# top of a suite that runs a quarter of an hour under the gate's pool, and by
+# this check it was stale by the suite's own minutes (the gate of 21 Nov:
+# lateMin 7 against the bound of 6). And the row is written a moment before
+# /api/status is asked, so the two may straddle a minute: the stack's figure
+# is the row's or one more, never less.
+_SNL = time.localtime()
+_otl = _ontime('ontime-late', _SNL.tm_hour * 60 + _SNL.tm_min)
 ok_('on time: the held order due this minute is late in every order of the stops, said as '
     '①\'s whole minutes late on the stack and the row (got %r)' % (_otl,),
     _otl['stack']['onTime'] == 'late1' and _otl['row']['onTime'] == 'late1'
     and isinstance(_otl['row']['lateMin'], int) and 1 <= _otl['row']['lateMin'] <= 6
-    and _otl['stack']['lateMin'] == _otl['row']['lateMin'] and _otl['state'] == 'go')
+    and _otl['stack']['lateMin'] in (_otl['row']['lateMin'], _otl['row']['lateMin'] + 1)
+    and _otl['state'] == 'go')
 _otd = _ontime('ontime-nodue', None)
 ok_('on time: with no deadline on the held order, the road miles the new pickup adds '
     'instead, no call made (got %r)' % (_otd,),
