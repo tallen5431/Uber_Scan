@@ -989,7 +989,7 @@ function offer(x) {
      xh, ['datetime', 'date', 'time', 'weekday', 'hour', 'driver_day', 'driver_weekday', 'week_start', 'app', 'pay',
           'boost', 'card_minutes', 'card_miles', 'per_hour', 'per_mile', 'panel_said', 'driver_marked', 'during_job',
           'good_top20_of_range', 'counted', 'suspect', 'doubt', 'pay_reread', 'pay_unread', 'lat', 'lon', 'gps_ok',
-          'gps_err_m', 'gps_age_s', 'pickup', 'dropoff', 'offer_id', 'special_day', 'reoffered']);
+          'gps_err_m', 'gps_age_s', 'pickup', 'dropoff', 'offer_id', 'special_day', 'reoffered', 'product']);
   eq('[offers csv] one row per offer id, oldest first, the newest copy of each', [made.rows, xr.slice(1).map(function (r) {
     return col(r, 'offer_id'); }), col(rowOf('x7'), 'per_hour')], [7, ['x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7'], '22']);
   var r1 = rowOf('x1'), r2 = rowOf('x2');
@@ -1199,9 +1199,17 @@ function offer(x) {
   // The CSV carries both marks as columns, never as rows taken away.
   var csvB = T.offersCsv([offer({ id: 'c1', at: hal(31, 21) }), offer({ id: 'c2', at: hal(30, 21), reoffered: true }),
                           offer({ id: 'c3', at: hal(25, 21) })], { marked: ['2026-10-25'] }).text.split('\n');
-  eq('[offers csv] special_day and reoffered, appended last: Halloween, a re-offered card, a day marked by you',
-     [csvB[1].split(',').slice(-2), csvB[2].split(',').slice(-2), csvB[3].split(',').slice(-2), csvB.length - 2],
+  eq('[offers csv] special_day and reoffered, appended: Halloween, a re-offered card, a day marked by you',
+     [csvB[1].split(',').slice(-3, -1), csvB[2].split(',').slice(-3, -1), csvB[3].split(',').slice(-3, -1), csvB.length - 2],
      [['marked by you', 'no'], ['', 'yes'], ['Halloween', 'no'], 3]);
+  // ...and Uber's ride product last, as the fold hands it (the row's own or
+  // its text read again), empty where the card printed none.
+  var csvP = T.offersCsv([offer({ id: 'p1', at: hal(31, 21), product: 'UberX' }),
+                          offer({ id: 'p2', at: hal(30, 21), product: 'Comfort', productFrom: 'text' }),
+                          offer({ id: 'p3', at: hal(29, 21), product: null })]).text.split('\n');
+  eq('[offers csv] product, appended last, oldest first: empty for none, Comfort read again from the text, UberX',
+     [csvP[0].split(',').slice(-1)[0], csvP[1].split(',').slice(-1)[0], csvP[2].split(',').slice(-1)[0],
+      csvP[3].split(',').slice(-1)[0]], ['product', '', 'Comfort', 'UberX']);
   // The overview words history, never advice (Settled: the rig never says
   // take or decline off a time or a place): the page's When and Where and the
   // window names hold none of those words.

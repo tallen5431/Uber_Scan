@@ -2287,7 +2287,11 @@
                        'counted', 'suspect', 'doubt', 'pay_reread', 'pay_unread',
                        'lat', 'lon', 'gps_ok', 'gps_err_m', 'gps_age_s', 'pickup', 'dropoff', 'offer_id',
                        // Round B, appended as every column is (the rule above).
-                       'special_day', 'reoffered'];
+                       'special_day', 'reoffered',
+                       // Uber's ride product as the card printed it (the
+                       // fold's `product`: the row's own, or its kept text
+                       // read again), empty where none was printed.
+                       'product'];
   var SAID = { go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' };
   function fixed(v, places) { return num(v) === null ? null : Number(v.toFixed(places)); }
   function yn(b) { return b ? 'yes' : 'no'; }
@@ -2341,7 +2345,8 @@
           noPlaces || typeof o.pickup !== 'string' ? null : o.pickup,
           noPlaces || typeof o.dropoff !== 'string' ? null : o.dropoff,
           typeof o.id === 'string' ? o.id : null,
-          day ? specialDayOf(day, marked) : null, yn(o.reoffered === true)
+          day ? specialDayOf(day, marked) : null, yn(o.reoffered === true),
+          typeof o.product === 'string' && o.product ? o.product : null
         ]);
       });
     return { text: csvText(lines), rows: lines.length - 1, gps: gps, cut: rule.cut, top: CSV_TOP };

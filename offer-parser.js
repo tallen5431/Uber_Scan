@@ -2668,6 +2668,47 @@
     if (EARLY_LOOK.test(text)) return 'early';
     return EXCLUSIVE_TAG.test(text) ? true : null;
   }
+  /* Uber's ride product as the ride card prints it over its payout, "UberX
+     Exclusive $16.05" or "Comfort $12.40", in one short name (the earnings
+     screen's names, earnings.js RIDE): a label, feeding no pay, verdict or
+     rate. null where the card printed none, never "UberX" by default. Read
+     only directly before the chosen payout or opening the text with the
+     Exclusive tag after it, so "Comfort Inn", "Green St" and a lone "XL" on
+     the map are no product. Why each guard: see PRODUCT_NAME in
+     rpi/offer_parser.py. The Python twin is ride_product. */
+  var PRODUCT_NAME = '(?<![A-Za-z])(uber ?x ?x ?l|uber ?x ?l|uber ?x ?share|uber ?x|uber ?pool'
+    + '|(?:uber ?)?(?:black ?suv|black|comfort ?electric|comfort|share|pet'
+    + '|green|wav|connect|assist|premier|select|reserve|priority|electric))';
+  var PRODUCT_TAG = '(?:(?:e?xclusive|early [lt]ook)\\b ?[x×]? ?)?';
+  var PRODUCT_BEFORE_PAY = new RegExp(PRODUCT_NAME + ' ?' + PRODUCT_TAG + '\\+? ?$', 'i');
+  var PRODUCT_TOP = new RegExp('^[^A-Za-z0-9]{0,3}' + PRODUCT_NAME
+    + ' (?:e?xclusive|early [lt]ook)\\b', 'i');
+  var PRODUCTS = {
+    uberxxl: 'UberXXL', uberxl: 'UberXL', uberxshare: 'UberX Share',
+    uberx: 'UberX', uberpool: 'UberX Share', share: 'UberX Share',
+    blacksuv: 'Black SUV', black: 'Black', comfortelectric: 'Comfort Electric',
+    comfort: 'Comfort', pet: 'Pet', green: 'Green', wav: 'WAV',
+    connect: 'Connect', assist: 'Assist', premier: 'Premier',
+    select: 'Select', reserve: 'Reserve', priority: 'Priority',
+    electric: 'Electric'
+  };
+  function productName(said) {
+    var key = said.toLowerCase().replace(/[^a-z]/g, '');
+    if (!PRODUCTS.hasOwnProperty(key) && key.indexOf('uber') === 0) key = key.slice(4);
+    return PRODUCTS.hasOwnProperty(key) ? PRODUCTS[key] : null;
+  }
+  function rideProduct(text, pay, where) {
+    if (SCREEN_DD_OFFER.test(text)) return null;
+    var at = null, m = null;
+    if (pay !== null) {
+      for (var i = 0; i < where.length; i++) {
+        if (where[i].value === pay) { at = where[i].at; break; }
+      }
+    }
+    if (at !== null) m = PRODUCT_BEFORE_PAY.exec(text.slice(Math.max(0, at - 48), at));
+    m = m || PRODUCT_TOP.exec(text);
+    return m ? productName(m[1]) : null;
+  }
   /* The Boost+ or Peak Pay part of the payout, for the panel's "incl. $2.93
      Boost": a label, feeding no pay, verdict or rate. Its three shapes, the
      cents required, and why: see BOOST_SAID in rpi/offer_parser.py. The
@@ -4435,6 +4476,8 @@
       addon: isAddon(mine, pay, payWhere),
       // ...and Uber's Exclusive tag, a label only. See exclusiveTag.
       exclusive: exclusiveTag(text),
+      // ...and Uber's ride product, a label only. See rideProduct.
+      product: rideProduct(text, pay, payWhere),
       // ...and the Boost+ or Peak Pay part of the payout, a label only. See
       // boostOf.
       boost: boostOf(mine, pay),
@@ -4803,7 +4846,7 @@
            plannerBounded: plannerBounded, plannerEnds: plannerEnds,
            plannerTitled: plannerTitled, plannerLaidOut: plannerLaidOut,
            plannerFramed: plannerFramed, plannerFoot: plannerFoot,
-           screenType: screenType, SCREENS: SCREENS, exclusiveTag: exclusiveTag, deliveredScreen: deliveredScreen,
+           screenType: screenType, SCREENS: SCREENS, exclusiveTag: exclusiveTag, rideProduct: rideProduct, deliveredScreen: deliveredScreen,
            looksLikeAPlace: looksLikeAPlace,
            isComplete: isComplete, isWhole: isWhole, toPickup: toPickup,
            /* Exported so the default can be checked directly. Everything that

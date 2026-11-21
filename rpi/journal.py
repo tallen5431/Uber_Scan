@@ -1708,6 +1708,14 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # the journal (perMileSeen, cardVsReal, refigured) filed every offer
         # under "other", and tools/ worked it out again from the text.
         'app': card_app(parsed),
+        # ...and Uber's ride product as the card printed it (OP.ride_product):
+        # 'UberX', 'Comfort'..., or None. The owner, Nov 2026: "can the offers
+        # page have an option to select uber rides specifically?" — until this
+        # the page guessed a ride from the card's shape. None is "not printed
+        # or not read", never "not a ride"; the rows written before this field
+        # have no key at all, and server.js reads their kept text again with
+        # the same parser (rowProduct) rather than anything here guessing.
+        'product': parsed.get('product') or None,
         # --- what the scanner made of it ------------------------------------
         'perHour': fig['perHour'],
         'grossPerHour': _round(rate.get('grossPerHour'), 2),

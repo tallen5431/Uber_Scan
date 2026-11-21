@@ -68,6 +68,20 @@ acc.reset()
 eq('...and the next card starts as no add-on',
    acc.add(P.parse('$12.45 23 min (8.4 mi) trip'), now=160.0)['addon'], False)
 
+# --- the ride product, kept once any frame read the top line ---------------
+# A frame scrolled a little further loses "UberX" off the top; it is still the
+# UberX card. Invented street.
+acc = OfferAccumulator()
+_pr1 = acc.add(P.parse('UberX $12.45 5 min (1.2 mi) away Oak Ln, Harrowen 23 min (8.4 mi) trip'),
+               now=170.0)
+_pr2 = acc.add(P.parse('$12.45 5 min (1.2 mi) away Oak Ln, Harrowen 23 min (8.4 mi) trip'),
+               now=171.0)
+eq('a product read on one frame stays when the next lost the top line',
+   (_pr1['product'], _pr2['product']), ('UberX', 'UberX'))
+acc.reset()
+eq('...and the next card starts with none',
+   acc.add(P.parse('$12.45 23 min (8.4 mi) trip'), now=180.0)['product'], None)
+
 # --- re-reading the same leg must not double it -----------------------------
 acc = OfferAccumulator()
 for t in range(4):

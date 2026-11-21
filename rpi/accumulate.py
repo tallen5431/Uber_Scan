@@ -85,6 +85,7 @@ class OfferAccumulator:
         self.new_card = False
         self.shop = None
         self.addon = False
+        self.product = None
         self.key = None
         # Whether the payout the window is keyed on was read with its decimal
         # point (OP's `payPoint`). See point_lost.
@@ -1222,6 +1223,12 @@ class OfferAccumulator:
         if parsed.get('addon'):
             self.addon = True
         merged['addon'] = bool(self.addon)
+        # ...and the ride product (OP.ride_product), the first name any frame
+        # read: it sits on the top line, which a frame scrolled a little
+        # further loses, and a frame that lost it says nothing either way.
+        if self.product is None and parsed.get('product'):
+            self.product = parsed.get('product')
+        merged['product'] = self.product
         # True when the window supplied a leg this frame did not see, which is
         # the whole reason for keeping one.
         merged['grew'] = len(used) > len(parsed.get('legDetail') or [])

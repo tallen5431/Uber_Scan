@@ -9851,6 +9851,38 @@ function rowApp(r) {
 // which is what the answer is remembered against (a copy is new each fold).
 function withApp(o, from) {
   o.app = rowApp(from || o);
+  return withProduct(o, from || o);
+}
+
+/* Uber's ride product on the fold's copy (rpi/journal.py `product`, the
+ * parser's ride_product): the row's own where the rig wrote the field, null
+ * included — it asked its reading and found none — and for a row written
+ * before it, the same parser asked of the row's kept text, `productFrom:
+ * 'text'` beside a name found that way so the offers page can tell the two
+ * apart (the owner: "So it should be able to work on previous offer already
+ * read?"). Exactly offer-parser.js parse's `product` of that text, or null:
+ * nothing off the figures' shape, and a typed row (no text) has none. The
+ * cheap test first: a text naming none of the words ride_product can match
+ * cannot give one, so most delivery rows never reach the parser, and a lite
+ * rig, whose rows all carry the field from now on, never loads it for them.
+ * Remembered per row as rowApp's answer is. */
+var PRODUCT_WORDS = /uber|black|comfort|share|pet|green|wav|connect|assist|premier|select|reserve|priority|electric/i;
+var rowProductSeen = new WeakMap();
+function rowProduct(r) {
+  if ('product' in r) return { product: typeof r.product === 'string' ? r.product : null, from: null };
+  if (typeof r.text !== 'string' || !PRODUCT_WORDS.test(r.text)) return { product: null, from: null };
+  var hit = rowProductSeen.get(r);
+  if (hit && hit.text === r.text) return hit.answer;
+  if (!RowParser) RowParser = require('./offer-parser.js');
+  var p = RowParser.parse(r.text).product || null;
+  var answer = { product: p, from: p ? 'text' : null };
+  rowProductSeen.set(r, { text: r.text, answer: answer });
+  return answer;
+}
+function withProduct(o, from) {
+  var got = rowProduct(from);
+  o.product = got.product;
+  if (got.from) o.productFrom = got.from;
   return o;
 }
 
