@@ -2085,13 +2085,13 @@ async function nucbox() {
    * "2 stops (9.8 mi)", the car beside the store, and the label's street
    * answered as ONE door 2.5 mi the wrong way — another street of that name —
    * drawn as the "≈" where a 9.8 mi job cannot end. Invented throughout: the
-   * store a block from the Square, "841 Wrenfold Cir" twice, one 2.5 mi due
+   * store a block from the Square, "317 Wrenfold Cir" twice, one 2.5 mi due
    * west of the store and one about 9 mi north-east; a stub router whose
    * road is 8% over the crow line, so the far door's road fits the card. */
   var hStore = { lat: 33.9540, lon: -44.5480 };
-  var hWest = { lat: 33.9540, lon: -44.5917, name: '841, Wrenfold Circle, Ostley, Vosk County' };
-  var hNorth = { lat: 34.0462, lon: -44.4368, name: '841, Wrenfold Circle, Brookvale, Vosk County' };
-  var hLabel = '841 Wrenfold Cir';
+  var hWest = { lat: 33.9540, lon: -44.5917, name: '317, Wrenfold Circle, Ostley, Vosk County' };
+  var hNorth = { lat: 34.0462, lon: -44.4368, name: '317, Wrenfold Circle, Brookvale, Vosk County' };
+  var hLabel = '317 Wrenfold Cir';
   var hAsked = [];
   function holdNbx(o) {
     var st = { hits: o.hits, router: o.router || 'up' };
