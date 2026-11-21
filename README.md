@@ -759,6 +759,32 @@ So the Pi scanner keeps one line per offer it was confident about, in
   `sudo apt install tesseract-ocr`, then **Read again**. Descriptive, like
   the rest of the page: nothing the rig decides reads what was paid. Only
   Uber's screen can be read for now.
+
+  **Rides vs deliveries: what the card said and what was paid.** Under the
+  range's paid-against-the-card summary, one block holds rides against
+  deliveries, over the matched trips in the range. A trip is a ride where
+  Uber's own line says so (UberX and the rest), a delivery where it says
+  "Delivery", and otherwise by the card's shape: two legs and no shop chip is
+  a ride card, as the Rides and shop orders split reads it. Per kind: the
+  trips matched, those whose tip has settled, and those whose tip is still
+  pending — counted and left out of every paid figure, never read as $0. Then,
+  as medians over the settled trips: the card's $/mi (its pay over its miles);
+  paid before the tip and with it, over **Uber's miles from the earnings line**,
+  and with it over the card's miles; the tip's share of what was paid, how far
+  it lifts $/mi and how many trips it lifts by $0.25/mi or more; paid less card
+  per trip, as a share of the card and per card mile, each with a 95% interval
+  (advice.js's order-statistic one); and real $/hr where the rig timed the
+  trip, the card's $/hr beside it. One line says it plainly — *Rides paid a
+  median +$0.50/mi more than their cards once tips settled (n=10, 95%: +$0.25 to
+  +$0.63); deliveries $0.00/mi* — and a strip draws each trip's card $/mi
+  (hollow) against paid with the tip (filled). The figure per mile is over the
+  card's own miles, because Uber's and the card's may count different
+  stretches. Under 8 settled trips of a kind it says "too few settled rides
+  yet" and prints no median; with no trip matched the block is not shown. The
+  records CSV gains `trip_kind` (ride or delivery) as its last column, in the
+  end-of-shift report's file too. Reading only, like the rest: nothing reaches
+  the verdict, the target, the panel or any rule, and lite, which refuses
+  `/api/earnings`, never shows it.
 * **tick the ones you took.** The scanner cannot see the Accept button and never
   touches it, so it cannot know — but you can tell it, and once you do the page
   shows what you actually worked against what you were offered, per day and
