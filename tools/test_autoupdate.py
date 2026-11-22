@@ -652,6 +652,8 @@ try:
        [value(envtxt, k) for k in ('ROLE', 'ENABLED', 'BRANCH', 'PORT', 'REPO')],
        ['rig', '1', 'main', '8080', '"%s"' % clone])
     eq('[install] ...no RESTART_CMD on the rig: the script\'s own systemctl', value(envtxt, 'RESTART_CMD'), None)
+    eq('[install] ...the settings readable by their own account alone (a restart command may carry '
+       'the manager\'s token)', oct(os.stat(os.path.join(etc, 'autoupdate.env')).st_mode & 0o777), '0o600')
     svc = open(os.path.join(units, 'uberscan-update.service')).read()
     tmr = open(os.path.join(units, 'uberscan-update.timer')).read()
     eq('[install] ...the service runs as root on the rig, the script in the checkout',
@@ -689,6 +691,12 @@ try:
     eq('[install] ...its timer nightly at 04:20, clear of the report at 05:17, no clock gates written',
        (value(tmr, 'OnCalendar'), value(tmr, 'RandomizedDelaySec'), value(envtxt, 'UPDATE_HOURS'),
         value(envtxt, 'DAILY_CAP')), ('*-*-* 04:20:00', '10min', None, None))
+    # A rig the manager starts (no uberscan.service): its button's command kept.
+    got = install('rig', '--restart-cmd', restart_cmd)
+    envtxt = open(os.path.join(etc, 'autoupdate.env')).read()
+    eq('[install] rig with --restart-cmd: kept verbatim, the manager restarts it as its button does',
+       (got.returncode, value(envtxt, 'ROLE'), value(envtxt, 'RESTART_CMD')),
+       (0, 'rig', '"%s"' % restart_cmd))
     got = install('rig', '--hours', '')
     ok_('[install] --hours \'\' on the rig: any hour', got.returncode == 0 and value(
         open(os.path.join(etc, 'autoupdate.env')).read(), 'UPDATE_HOURS') == '""')

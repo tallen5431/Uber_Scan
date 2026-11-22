@@ -1338,6 +1338,12 @@ git checkout main                       # once: it follows the gated branch
 sudo bash tools/install-autoupdate.sh rig
 ```
 
+A rig the HTTP Server Manager starts (Start.sh as one of its programs, with no
+`uberscan.service`) is restarted the way the manager's button does it: give
+the same `--restart-cmd` as on the NucBox below. The settings file it is kept
+in is readable by the update's own account only, since a command that asks the
+manager's API carries its token.
+
 **On the NucBox**, from its checkout, with the command the manager's
 "Restart Uber Scan" button runs (the installer asks for it, and says how to
 find it, when it is not given):

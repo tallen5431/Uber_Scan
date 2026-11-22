@@ -118,13 +118,18 @@ if [ "$ROLE" = rig ]; then
                 | tr ' ' '\n' | sed -n 's/^PORT=\([0-9][0-9]*\)$/\1/p' | head -n 1 || true)"
         PORT="${PORT:-8080}"
     fi
-    if [ ! -f "$UNIT_DIR/uberscan.service" ]; then
-        echo "note: no uberscan.service here yet. The update restarts it, so install it"
-        echo "      first: sudo bash rpi/install-service.sh (or lite/install.sh)."
+    # A rig the HTTP Server Manager starts (Start.sh as one of its programs,
+    # as the owner's rig is: no uberscan.service at all) is restarted the way
+    # its button does it, by --restart-cmd. Without one the script's own:
+    # uberscan.service, and the lite kiosk.
+    if [ -z "$RESTART_CMD" ] && [ ! -f "$UNIT_DIR/uberscan.service" ]; then
+        echo "note: no uberscan.service here, and no --restart-cmd. The update restarts"
+        echo "      one of them: install the service (sudo bash rpi/install-service.sh,"
+        echo "      or lite/install.sh), or give the command your manager's button runs."
         echo
     fi
+    case "$RESTART_CMD" in *$'\n'*) echo "the restart command is one line" >&2; exit 1 ;; esac
     RUN_AS=root
-    RESTART_CMD=""      # the script's own: uberscan.service, and the lite kiosk
 else
     PORT="${PORT:-8082}"
     if [ -z "$RESTART_CMD" ]; then
@@ -188,7 +193,11 @@ mkdir -p "$ENV_DIR"
     [ -n "$LOCK" ] && echo "LOCK=\"$LOCK\""
     [ -n "$RESTART_CMD" ] && echo "RESTART_CMD=\"$RESTART_CMD\""
 } > "$ENV_FILE.tmp"
-chmod 644 "$ENV_FILE.tmp"
+# Readable by the account the update runs as and nobody else: a restart
+# command that asks the manager's API carries (or names) its token, and the
+# file used to be 644 for any account on the machine to read.
+chmod 600 "$ENV_FILE.tmp"
+chown "$RUN_AS" "$ENV_FILE.tmp" 2>/dev/null || true
 mv "$ENV_FILE.tmp" "$ENV_FILE"
 
 # One word of a command line for systemd: quoted, \ and " escaped, % and $
