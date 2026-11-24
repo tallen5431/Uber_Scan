@@ -5358,6 +5358,142 @@ eq('label_geometry: a press\'s whole-screen geometry, as a card read\'s, reads t
     (SP.read_map_label(_rt, SP.label_geometry(_pg), store=_one_stores) or {}).get('line'),
     SP.label_geometry(None)), (None, '286 Wrenfield Dr NW', None))
 
+# ...AND THE MOUNT ROUND THE PHONE IS NOT THE MAP (the owner's snap of 21 Nov,
+# MAP_LABEL_LIT). RENDERED, every name invented: a two-store card for two
+# customers, the phone dimmed and set in a black mount, and corners that are
+# a coarse box round it (the frame's top, a margin either side) as that
+# snap's were. The band then holds the mount's black too, over
+# MAP_LABEL_DARK_SHARE, and the reader refused every frame at the gate: no
+# box, no OCR, no try, for the card's whole life.
+_DD_TWO = (('Lark Owl Grill', '4410 Fernhill Road Northwest, Brook...'),
+           ('Maple Run Creamery', '2516 Quillon Street, Brookvale, 301...'))
+_dd_two_card = SP.OP.parse('$13.20 incl. tips\n4 stops (6.1 mi) - 37 min\nLark Owl Grill\n'
+                           '4410 Fernhill Road Northwest, Brook...\nMaple Run Creamery\n'
+                           '2516 Quillon Street, Brookvale, 301...\nMultiple dropoffs (2 stops)')
+_two_stores = SP.label_stores(_dd_two_card)
+_PILL_A = ('1020 Quillfern Pkwy SE', (20, 520))      # at the map's left, as the snap's first
+_PILL_B = ('3708 Quillfern Rdg', (300, 640))         # mid-map, as its second
+
+
+def _mounted(view, pills=(), left=200, right=110, top=220, light=0.8):
+    im = TC.dd_stores_screen(pay='$13.20', journey='4 stops (6.1 mi) • 37 min', stores=_DD_TWO,
+                             tail=('Multiple dropoffs (2 stops)', None), label=None,
+                             map_view=view)
+    pil = _Img.fromarray(cv2.cvtColor(im, cv2.COLOR_BGR2RGB))
+    d = _Draw.Draw(pil)
+    for text, (x0, y0) in pills:
+        f = TC.font(40)
+        tw = int(f.getlength(text))
+        d.rounded_rectangle([x0, y0, x0 + tw + 80, y0 + 90], radius=44, fill=(12, 12, 12))
+        d.text((x0 + 40, y0 + 18), text, font=f, fill=(255, 255, 255))
+    scr = cv2.cvtColor(np.asarray(pil), cv2.COLOR_RGB2BGR)
+    h, w = scr.shape[:2]
+    out = np.full((h + top, w + left + right, 3), (14, 16, 14), np.uint8)
+    out[top:, left:left + w] = (scr * light).astype(np.uint8)
+    return out
+
+
+def _MountGeom(img, top=220):
+    # The coarse box: the whole mounted picture, the card box's top where
+    # the card starts, as the snap's map.json gave both.
+    return _MapGeom(img, roi=[0.02, (top + TC.DD_TOP) / float(img.shape[0]), 0.98, 0.9])
+
+
+_m_ov, _m_rt = _mounted('overview'), _mounted('route')
+_m_a, _m_b = _mounted('route', (_PILL_A,)), _mounted('route', (_PILL_B,))
+_m_band = SP.map_band(_m_a, _MountGeom(_m_a))
+ok_('the mounted band is over the dark-mode gate as the snap\'s was (%.2f near black)'
+    % float((_m_band.max(axis=2) < SP.MAP_LABEL_BLACK).mean()),
+    float((_m_band.max(axis=2) < SP.MAP_LABEL_BLACK).mean()) > SP.MAP_LABEL_DARK_SHARE)
+_ma_seen = {}
+eq('...and its pill is read off the screen inside the mount, number and street, "Rdg" as '
+   'well as "Pkwy SE"',
+   ((SP.read_map_label(_m_a, _MountGeom(_m_a), store=_two_stores, seen=_ma_seen) or {})
+    .get('line'), _ma_seen.get('boxes'),
+    (SP.read_map_label(_m_b, _MountGeom(_m_b), store=_two_stores) or {}).get('line')),
+   ('1020 Quillfern Pkwy SE', 1, '3708 Quillfern Rdg'))
+_ocrs[:] = []
+_mo_seen = {}
+eq('...the mounted overview still gives no box and runs no OCR',
+   (SP.read_map_label(_m_ov, _MountGeom(_m_ov), store=_two_stores, ocr=_counting_ocr,
+                      seen=_mo_seen), _mo_seen.get('boxes'), _ocrs), (None, 0, []))
+eq('map_lit: a tight screen box is cut by nothing; a black screen has nothing lit',
+   (SP.map_lit(SP.map_band(_ml, _MapGeom(_ml))).shape,
+    SP.map_band(_ml, _MapGeom(_ml)).shape, SP.map_lit(np.zeros((40, 60, 3), np.uint8))),
+   (SP.map_band(_ml, _MapGeom(_ml)).shape, SP.map_band(_ml, _MapGeom(_ml)).shape, None))
+
+# The card's life in the mount: the map on the car with no route for 9 s (the
+# overview, then the route with no pill), then the first customer's pill; the
+# card read every 1.5 s as the snap's was read 1-6 s apart. One customer
+# wanted: read on the first ask after the pill came up, the asks before it no
+# attempt.
+_ct[0] = 100.0
+_mlife = SP.MapLabels(threaded=False, clock=lambda: _ct[0])
+_mans = []
+for _i in range(12):
+    _t = _ct[0] - 100.0
+    _frame = _m_ov if _t < 4.0 else _m_rt if _t < 9.0 else _m_a
+    if _mlife.submit('mt1', _frame, _MountGeom(_frame), store=_two_stores):
+        _mans.append((round(_t, 1), _mlife.take()))
+    _ct[0] += 1.5
+eq('MapLabels in the mount: the pill read on the first ask after it came up (9 s in), the '
+   'empty map\'s asks no attempt',
+   ([(t, a[1]['line']) for t, a in _mans if a[1]], _mlife.asks('mt1'), _mlife.found('mt1')),
+   ([(9.0, '1020 Quillfern Pkwy SE')], (len(_mans), 0), True))
+
+# Two customers: label_want reads the card's count, and the offer is asked on
+# after its first street until the second is read. The pill that stays put is
+# passed over unread; the moved one is read.
+eq('label_want: "Multiple dropoffs (2 stops)" wants two labels, "Customer dropoff" one',
+   (SP.label_want(_dd_two_card), SP.label_want(_dd_one_card), SP.label_want(None),
+    SP.label_want({'dropoffs': 9})), (2, 1, 1, SP.MAP_LABEL_MOST))
+_ct[0] = 100.0
+_two_ocr = []
+
+
+def _two_read(frame, geom, store=None, seen=None, every=False, skip=None):
+    return SP.read_map_label(frame, geom, store=store, seen=seen, every=every, skip=skip,
+                             ocr=lambda im: (_two_ocr.append(_ct[0] - 100.0),
+                                             SP.PL.ocr(im, SP.MAP_LABEL_OCR))[1])
+
+
+_two = SP.MapLabels(threaded=False, read=_two_read, clock=lambda: _ct[0])
+_tans = []
+for _i in range(16):
+    _t = _ct[0] - 100.0
+    _frame = _m_rt if _t < 6.0 else _m_a if _t < 15.0 else _m_b
+    if _two.submit('mt2', _frame, _MountGeom(_frame), store=_two_stores,
+                   want=SP.label_want(_dd_two_card)):
+        _got2 = _two.take()
+        if _got2[1]:
+            _tans.append((round(_t, 1), _got2[1]['line'], _got2[1].get('all')))
+    _ct[0] += 1.5
+eq('a card for two customers: each pill read on the first ask after it came up, the second '
+   'telling both streets, the first first',
+   _tans, [(6.0, '1020 Quillfern Pkwy SE', ['1020 Quillfern Pkwy SE']),
+           (15.0, '3708 Quillfern Rdg', ['1020 Quillfern Pkwy SE', '3708 Quillfern Rdg'])])
+eq('...the first pill, still up between, passed over with no OCR and no attempt; asked no more '
+   'once both are read',
+   ([round(t, 1) for t in _two_ocr], _two.asks('mt2')[1], _two.found('mt2'),
+    _two.submit('mt2', _m_b, _MountGeom(_m_b), want=2)),
+   ([6.0, 15.0], 0, True, False))
+eq('...a pill read at the screen\'s edge (its street alone) and whole later is one customer',
+   (SP._same_street('Quillfern Pkwy SE', '1020 Quillfern Pkwy SE'),
+    SP._same_street('1020 Quillfern Pkwy SE', '3708 Quillfern Rdg')), (True, False))
+_one_want = SP.MapLabels(threaded=False, read=_two_read, clock=lambda: _ct[0])
+_one_want.submit('mt3', _m_a, _MountGeom(_m_a), store=_two_stores)
+eq('...and a card for one customer is never asked again after its street, as before',
+   (_one_want.found('mt3'), _one_want.submit('mt3', _m_b, _MountGeom(_m_b))), (True, False))
+_two_line = said(lambda: SP.emit_offer('x', _dd_two_card, {'ready': False},
+                                       map_label='1020 Quillfern Pkwy SE',
+                                       map_labels=['1020 Quillfern Pkwy SE', '3708 Quillfern Rdg']))
+eq('the offer line carries every street read (`mapLabels`), the first as `mapLabel`; one '
+   'street alone, none',
+   (_two_line['offer'].get('mapLabel'), _two_line['offer'].get('mapLabels'),
+    said(lambda: SP.emit_offer('x', _dd_two_card, {'ready': False}, map_label='9 Wren St',
+                               map_labels=['9 Wren St']))['offer'].get('mapLabels')),
+   ('1020 Quillfern Pkwy SE', ['1020 Quillfern Pkwy SE', '3708 Quillfern Rdg'], None))
+
 # The offer line carries it, and DoorDash's stop count, and nothing that
 # reads as a verdict.
 _with_label = said(lambda: SP.emit_offer('x', _dd_card, {'ready': True, 'perHour': 20.0,
@@ -5408,6 +5544,20 @@ try:
        (1400, 0.0, 0.62, 1.0, 4, [1400, 700]))
     eq('...and once per offer, not once per read', _mb.submit('o-dd1', _ddm, _MapGeom(_ddm), _meta),
        False)
+    # ...and replaced by the band of the frame a map label was read off
+    # (tell_label): the card's first band is the map before its route and
+    # pill are up (the snaps of 2 and 21 Nov).
+    eq('...replaced by the band a map label was read off, its sidecar naming the label',
+       (_mb.relabel('o-dd1', _m_a, _MountGeom(_m_a), dict(_meta),
+                    label=['1020 Quillfern Pkwy SE']),
+        json.load(open(os.path.join(_bands_dir, 'mapbands', 'o-dd1.json'))).get('label'),
+        cv2.imread(os.path.join(_bands_dir, 'mapbands', 'o-dd1.jpg')).shape[:2]),
+       (True, ['1020 Quillfern Pkwy SE'], SP.map_band(_m_a, _MountGeom(_m_a)).shape[:2]))
+    for _ in range(5):
+        _mb.relabel('o-dd1', _m_a, _MountGeom(_m_a), dict(_meta), label=['x'])
+    eq('...%d times at most an offer' % SP.MAP_BANDS_TRIES,
+       _mb.relabel('o-dd1', _m_a, _MountGeom(_m_a), dict(_meta), label=['x']), False)
+
     eq('...latest() names it for a snap', (_mb.latest() or {}).get('offerId'), 'o-dd1')
     eq('...but not once it is older than two minutes',
        _mb.latest(now=time.time() + SP.SNAP_BAND_AGE_S + 5), None)

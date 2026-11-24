@@ -2021,6 +2021,17 @@ async function nucbox() {
      JSON.stringify(['≈ 1 of 2 dropoffs from DoorDash\'s map; the other not known yet',
                      '≈ 1 of 3 dropoffs from DoorDash\'s map; the others not known yet',
                      null, null]));
+  eq('[stores] ...and with the other customer\'s street read too (the guess\'s `also`), that '
+     + 'street named and said not drawn, never "not known"',
+     JSON.stringify([MV.guessShare(2, ['3708 Quillfern Rdg']),
+                     MV.guessShare(3, ['3708 Quillfern Rdg']),
+                     MV.guessShare(2, []), MV.guessShare(1, ['3708 Quillfern Rdg'])]),
+     JSON.stringify(['≈ 1 of 2 dropoffs from DoorDash\'s map; "3708 Quillfern Rdg" labelled '
+                     + 'too, not drawn',
+                     '≈ 1 of 3 dropoffs from DoorDash\'s map; "3708 Quillfern Rdg" labelled '
+                     + 'too, not drawn; 1 more not known yet',
+                     '≈ 1 of 2 dropoffs from DoorDash\'s map; the other not known yet', null]));
+
   eq('[stores] the run through two stores to a guessed end: car -> store 1 -> store 2 -> the '
      + 'label, its rung "≈ from DoorDash\'s map"',
      JSON.stringify(MV.routeLadder({ lat: 34, lon: -44.5 },

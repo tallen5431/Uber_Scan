@@ -2427,12 +2427,26 @@
      ("Multiple dropoffs (2 stops)", the card's `dropoffs`): the map labels
      one of them, and which one is not known — "≈ 1 of 2 dropoffs from
      DoorDash's map; the other not known yet". Null for one customer or a
-     count the card did not give. */
-  function guessShare(dropoffs) {
+     count the card did not give.
+
+     `also`, the guess's other streets (server.js dropoffGuessOf: DoorDash's
+     map labels one customer at a time, and the rig reads each it shows):
+     named and said not drawn, so the words never call a street that was
+     read "not known". Only the first is drawn, as ever. */
+  function guessShare(dropoffs, also) {
     var n = guessOneOf(dropoffs);
     if (!n) return null;
-    return '\u2248 1 of ' + n + ' dropoffs from DoorDash\'s map; the other'
-      + (n > 2 ? 's' : '') + ' not known yet';
+    var named = (Array.isArray(also) ? also : []).filter(function (l) {
+      return typeof l === 'string' && l;
+    }).slice(0, n - 1);
+    var left = n - 1 - named.length;
+    if (!named.length) {
+      return '\u2248 1 of ' + n + ' dropoffs from DoorDash\'s map; the other'
+        + (n > 2 ? 's' : '') + ' not known yet';
+    }
+    return '\u2248 1 of ' + n + ' dropoffs from DoorDash\'s map; '
+      + named.map(function (l) { return '"' + l + '"'; }).join(', ') + ' labelled too, not drawn'
+      + (left ? '; ' + left + ' more not known yet' : '');
   }
 
   /* ...and where that label goes on the run. It is ONE of the card's

@@ -10986,6 +10986,15 @@ def _guesses():
                        rd.get('said') == rx.get('said'), bool(rd.get('said')),
                        '418 Fable' in json.dumps(rd))
         out['stack same'] = out['stack d'] == (st.get('last') or {}).get('stack')
+        # ...and a card for two customers whose map labelled both, one at a
+        # time (scan_pi MAP_LABEL_SAME): the other street rides beside the
+        # guess as `also`, the guess still the first, no mapLabels kept.
+        _say(_card('gl-2', 13.20, minutes=37.0, miles=6.1, app='doordash', screen='dd.offer',
+                   pickup='Lark Owl Grill', stops=4, endRefused=True,
+                   mapLabel='1020 Quillfern Pkwy SE',
+                   mapLabels=['1020 Quillfern Pkwy SE', '3708 Quillfern Rdg']))
+        o2 = get(sb, '/api/status').get('offer') or {}
+        out['two'] = (o2.get('dropoffGuess'), 'mapLabels' in o2)
         # ...an Uber card, or a DoorDash card that named its own dropoff: none.
         _say(_card('gl-u', 12.35, app='uber', mapLabel='418 Fable Ave NE'))
         out['uber'] = (get(sb, '/api/status').get('offer') or {}).get('dropoffGuess')
@@ -11013,6 +11022,9 @@ _gl = _guesses()
 eq('dd map label: the offer keeps it as dropoffGuess, its dropoff still none, no mapLabel kept',
    _gl.get('kept'), ({'line': '418 Fable Ave NE', 'from': 'dd map label'}, None, False))
 eq('...carried across a re-read of the same card', _gl.get('again'), '418 Fable Ave NE')
+eq('...on a card for two customers, the other street read kept beside it as `also`',
+   _gl.get('two'), ({'line': '1020 Quillfern Pkwy SE', 'from': 'dd map label',
+                     'also': ['3708 Quillfern Rdg']}, False))
 eq('...a card with no label has none', _gl.get('none'), None)
 eq('...and with an order in the car the pair row says the same with it as without',
    _gl.get('pair'), (True, True, True, True, False))

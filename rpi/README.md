@@ -2506,6 +2506,24 @@ the label is not drawn, the ring of R round the store is, and the caption says
 to, or two stores on the card: drawn as before. A town printed on DoorDash's
 map is not read for it (another OCR pass on the Pi for a drawing hint).
 
+**The label is looked for on the screen, not on the mount round it.** On the
+owner's 21 Nov snap the corners were a coarse box (the frame's whole height,
+a margin either side of the phone), so the band held the mount's black too:
+0.37-0.40 of it near black, over the 0.35 that marks a dark-mode map, and
+every ask stopped there with no box and no OCR — the card's whole life, with
+the pill plain on the phone. The band is now cut to its lit rows and columns
+first (`MAP_LABEL_LIT`, `map_lit`), which leaves a tight screen box as it was.
+**A card for two customers** ("Multiple dropoffs (2 stops)") is asked on
+after its first street: DoorDash's map labels one customer at a time, and the
+same snap's frames ten seconds apart show both pills in turn. Each street read
+rides the offer line (`mapLabels`) and the server keeps the others beside the
+guess (`also`); Map view still draws only the first and names the other as
+read, not drawn. A pill still where an earlier street was read costs no OCR
+(`MAP_LABEL_SAME`). And the band kept here is replaced by the band of the
+frame a label was read off, so the study gets the map that named the
+customer, not the card's first moment (`MapBands.relabel`, its sidecar's
+`label`).
+
 **A band starts at the top of the screen box.** It started 6% down, to keep
 the phone's status bar out, and the owner's 2 Nov label sat only 15 rows of
 1400 under that edge: a phone sitting a little higher in the mount (2% was
