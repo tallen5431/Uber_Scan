@@ -7800,8 +7800,13 @@
       ? MV.guessOf({ dropoffGuess: heldSaid.dropoffGuess }) : null;
     // ...and, on a card for more than one customer, which of them the label
     // is not known: "≈ 1 of 2 dropoffs …; the other not known yet".
-    var guessShare = guess && MV.guessShare ? MV.guessShare(o.dropoffs) : null;
-    var heldShare = heldGuess && MV.guessShare ? MV.guessShare(heldSaid.dropoffs) : null;
+    // ...and any other customer's street the map labelled, named as not
+    // drawn (the guess's `also`).
+    var guessShare = guess && MV.guessShare
+      ? MV.guessShare(o.dropoffs, o.dropoffGuess && o.dropoffGuess.also) : null;
+    var heldShare = heldGuess && MV.guessShare
+      ? MV.guessShare(heldSaid.dropoffs, heldSaid.dropoffGuess && heldSaid.dropoffGuess.also)
+      : null;
     // ...and how many it is one of, so the run is not routed to it as the
     // last stop (MV.guessOneOf): 0 for one customer, no count, or a
     // map-view.js from before it, which keeps the run as it was.

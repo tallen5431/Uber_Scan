@@ -458,10 +458,11 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     del LABELS[:]
     real_label_submit = SP.MapLabels.submit
 
-    def label_submit(self, offer_id, frame, geom, store=None, press=False):
+    def label_submit(self, offer_id, frame, geom, store=None, press=False, want=1):
         # ...when, on both clocks (FakeCam's scenes are on the wall clock),
         # whether a ⌖ press asked, and whether the ask was taken.
-        took = real_label_submit(self, offer_id, frame, geom, store=store, press=press)
+        took = real_label_submit(self, offer_id, frame, geom, store=store, press=press,
+                                 want=want)
         LABELS.append((offer_id, time.monotonic(), time.time(), press, took))
         return took
 
@@ -762,6 +763,12 @@ ok_('...and only once the route was up (the first label line at %.1f s, the rout
 ok_('...and the dropoff stays the card\'s none: the label is a guess, never the dropoff (%r)'
     % [a[1].get('dropoff') for a in r['announced']][:3],
     all(a[1].get('dropoff') is None for a in r['announced']) and r['dropoffs'] == [])
+# ...and the map band kept for the study is the frame the label was read off,
+# not the card's first (the overview): MapBands.relabel, from tell_label.
+_side_l = os.path.join(r['work'], 'mapbands', '%s.json' % _ids[0]) if _ids else ''
+eq('...and the offer\'s kept map band is the one its label was read off, its sidecar naming it',
+   json.load(open(_side_l)).get('label') if os.path.isfile(_side_l) else None,
+   ['286 Wrenfield Dr NW'])
 
 
 # ⌖ ON THE CARD READS THE MAP'S LABEL TOO. The same card, its automatic asks

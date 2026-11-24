@@ -613,6 +613,7 @@ function scannerLine(line) {
       read.offer.dropoffGuess = dropoffGuessOf(read.offer)
         || (sameCard && !read.offer.dropoff ? scanner.offer.dropoffGuess || null : null);
       delete read.offer.mapLabel;
+      delete read.offer.mapLabels;
       // ...and how many times the scanner has read this card on the slot,
       // carried across re-reads like the rest: an order's record says it
       // (offeredOf), a card read once and taken being weaker evidence of
@@ -1244,7 +1245,17 @@ function dropoffGuessOf(offer) {
   if (!offer || offer.app !== 'doordash' || offer.dropoff || typeof t !== 'string') return null;
   t = t.replace(/\s+/g, ' ').trim();
   if (!t || t.length > 60 || !/[A-Za-z]{2}/.test(t)) return null;
-  return { line: t, from: MV.GUESS_FROM || 'dd map label' };
+  var out = { line: t, from: MV.GUESS_FROM || 'dd map label' };
+  // ...and on a card for two customers, the other streets its map labelled
+  // (the offer line's `mapLabels`, scan_pi MAP_LABEL_SAME: DoorDash's map
+  // labels one customer at a time). Said beside the guess, never drawn as a
+  // second end; absent unless there is one, so every other guess is the
+  // shape it was.
+  var also = (Array.isArray(offer.mapLabels) ? offer.mapLabels : []).filter(function (l) {
+    return typeof l === 'string' && l.trim() && l.length <= 60 && l.trim() !== t;
+  }).slice(0, 3).map(function (l) { return l.replace(/\s+/g, ' ').trim(); });
+  if (also.length) out.also = also;
+  return out;
 }
 
 /* DoorDash's stores on a stops card, in the card's order, each with the door
